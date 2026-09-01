@@ -1,0 +1,13 @@
+[Unit]
+Description=D89 encrypted PostgreSQL and receipt backup to Backblaze B2
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/var/www/Apparquitectos/d89-sistema-gastos
+EnvironmentFile=/var/www/Apparquitectos/d89-sistema-gastos/.env
+ExecStart=/var/www/Apparquitectos/d89-sistema-gastos/infra/scripts/backup-d89.sh
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

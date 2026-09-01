@@ -1,0 +1,9 @@
+[Unit]
+Description=Monthly D89 backup restore verification
+
+[Timer]
+OnCalendar=Sun *-*-01..07 05:10:00 America/Mexico_City
+Persistent=true
+
+[Install]
+WantedBy=timers.target
