@@ -1,5 +1,7 @@
 import Link from 'next/link';
 import { BuildingIcon, GridIcon, LockIcon, ReceiptIcon, UploadIcon } from './icons';
+import { AuthBoundary } from './auth-boundary';
+import { SessionControls } from './session-controls';
 
 const nav = [
   { href: '/', label: 'Resumen', icon: GridIcon },
@@ -13,7 +15,7 @@ export function AppShell({
   active,
 }: Readonly<{ children: React.ReactNode; active: string }>) {
   return (
-    <div className="app-frame">
+    <AuthBoundary><div className="app-frame">
       <aside className="sidebar">
         <Link href="/" className="brand" aria-label="D89 inicio">
           <span className="brand-mark">D89</span>
@@ -30,7 +32,7 @@ export function AppShell({
           <span className="eyebrow">Obra activa</span>
           <div className="work-badge"><BuildingIcon /><span><strong>Infra Toluca</strong><small>3 áreas · 232 partidas</small></span></div>
         </div>
-        <div className="user-card"><span className="avatar">SG</span><span><strong>Sergio Gómez</strong><small>Administrador</small></span></div>
+        <div className="user-card"><span className="avatar">SG</span><span><strong>Sergio Gómez</strong><small>Administrador</small></span><SessionControls /></div>
       </aside>
       <main className="main-content">{children}</main>
       <nav className="mobile-nav" aria-label="Navegación móvil">
@@ -39,7 +41,8 @@ export function AppShell({
             <Icon size={19} /><span>{label}</span>
           </Link>
         ))}
+        <SessionControls mobile />
       </nav>
-    </div>
+    </div></AuthBoundary>
   );
 }

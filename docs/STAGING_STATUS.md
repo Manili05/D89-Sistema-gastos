@@ -28,6 +28,11 @@
   activa de 4,294,963,200 bytes con `vm.swappiness=10`.
 - La revisión manual autenticada con `playwright-cli` obtuvo HTTP 200 en Auth y
   dashboard, cero errores/advertencias de consola y navegación móvil a 390x844.
+- Cierre de sesión y recuperación de contraseña están implementados. Staging
+  entrega los enlaces en Mailpit, aislado en la red Docker y sin puerto público;
+  producción debe sustituirlo por el SMTP corporativo.
+  El flujo live validó correo, token de recuperación, contraseña nueva, nuevo
+  login y cierre global; el mensaje de prueba se eliminó al finalizar.
 
 ## Comandos de verificación
 

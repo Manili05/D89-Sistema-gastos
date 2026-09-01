@@ -24,6 +24,25 @@ test.beforeEach(async ({ page }) => {
       }),
     });
   });
+  await page.route('**/auth/v1/logout**', async (route) => {
+    await route.fulfill({ status: 204, body: '' });
+  });
+  await page.route('**/auth/v1/recover**', async (route) => {
+    await route.fulfill({ status: 200, json: {} });
+  });
+  await page.route('**/auth/v1/user', async (route) => {
+    await route.fulfill({
+      status: 200,
+      json: {
+        id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        aud: 'authenticated',
+        role: 'authenticated',
+        email: 'admin@d89.mx',
+        app_metadata: { role: 'admin' },
+        user_metadata: {},
+      },
+    });
+  });
   await page.route('**/api/v1/works', async (route) => {
     if (route.request().method() === 'GET') {
       await route.fulfill({ json: [{ id: workId, nombre: 'Infra Toluca', presupuesto: '1' }] });
@@ -71,6 +90,29 @@ test('login de administrador', async ({ page }) => {
   await page.getByLabel('Contraseña').fill('prueba-segura');
   await page.getByRole('button', { name: 'Ingresar al sistema' }).click();
   await expect(page.getByRole('heading', { name: 'Panorama de obra' })).toBeVisible();
+});
+
+test('recuperación de contraseña solicita un enlace por correo', async ({ page }) => {
+  await page.goto('/login');
+  await page.getByLabel('Correo electrónico').fill('admin@d89.mx');
+  await page.getByRole('button', { name: '¿Olvidaste tu contraseña?' }).click();
+  await expect(page.getByRole('status')).toContainText('recibirás un enlace');
+});
+
+test('cerrar sesión elimina la sesión y regresa al ingreso', async ({ page }) => {
+  await login(page);
+  await page.getByRole('button', { name: 'Cerrar sesión' }).click();
+  await expect(page).toHaveURL(/\/login$/);
+  await expect(page.getByRole('heading', { name: /Control claro/i })).toBeVisible();
+});
+
+test('enlace de recuperación permite guardar una contraseña nueva', async ({ page }) => {
+  await page.goto('/restablecer-contrasena#access_token=e2e-access-token&refresh_token=e2e-refresh-token&expires_in=3600&token_type=bearer&type=recovery');
+  await expect(page.getByRole('heading', { name: 'Nueva contraseña' })).toBeVisible();
+  await page.getByLabel('Contraseña nueva').fill('Nueva-clave-segura-2026');
+  await page.getByLabel('Confirmar contraseña').fill('Nueva-clave-segura-2026');
+  await page.getByRole('button', { name: 'Guardar contraseña' }).click();
+  await expect(page.getByRole('status')).toContainText('Contraseña actualizada');
 });
 
 test('portal admin prepara preview NEODATA sin confirmar', async ({ page }) => {

@@ -43,6 +43,9 @@ PLAYWRIGHT_BASE_URL=http://127.0.0.1:3089 npm run test:e2e
 
 Los scripts `verify-live-flow.py` y `verify-live-reports.py` ejercitan el
 staging real sin imprimir secretos. `provision-staging-admin.py` es idempotente.
+`verify-live-auth.py` comprueba el correo de recuperación, el cambio de
+contraseña, el nuevo login y el cierre de sesión contra Auth real; Mailpit se
+mantiene únicamente en la red interna para pruebas de staging.
 
 Antes de habilitar el perfil `whatsapp`, captura en `.env` un tipo de cambio
 contable aprobado y su fecha. Después ejecuta

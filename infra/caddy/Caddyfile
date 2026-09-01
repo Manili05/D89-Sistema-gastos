@@ -17,6 +17,12 @@
     reverse_proxy auth:9999
   }
 
+  # GoTrue genera enlaces de correo absolutos hacia /verify.
+  @auth_verify path /verify
+  handle @auth_verify {
+    reverse_proxy auth:9999
+  }
+
   @rest path /rest/v1/*
   handle @rest {
     uri strip_prefix /rest/v1

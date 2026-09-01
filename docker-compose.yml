@@ -9,6 +9,21 @@ x-service-defaults: &service-defaults
     options: { max-size: 10m, max-file: "3" }
 
 services:
+  mailpit:
+    <<: *service-defaults
+    image: axllent/mailpit:v1.31.0
+    environment:
+      MP_MAX_MESSAGES: "100"
+      MP_DATABASE: /data/mailpit.db
+    volumes: [mailpit-data:/data]
+    healthcheck:
+      test: [CMD, /mailpit, readyz]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    mem_limit: 128m
+    cpus: 0.25
+
   postgres:
     <<: *service-defaults
     image: postgres:17.6-alpine
@@ -30,16 +45,20 @@ services:
   auth:
     <<: *service-defaults
     image: supabase/gotrue:v2.183.0
-    depends_on: { postgres: { condition: service_healthy } }
+    depends_on:
+      postgres: { condition: service_healthy }
+      mailpit: { condition: service_healthy }
     environment:
       GOTRUE_API_HOST: 0.0.0.0
       GOTRUE_API_PORT: 9999
       API_EXTERNAL_URL: https://${PUBLIC_DOMAIN:-d89.escalaleads.com.mx}/auth/v1
+      GOTRUE_API_EXTERNAL_URL: https://${PUBLIC_DOMAIN:-d89.escalaleads.com.mx}/auth/v1
       GOTRUE_DB_DRIVER: postgres
       GOTRUE_DB_DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-d89}?options=-csearch_path%3Dauth
       GOTRUE_DB_NAMESPACE: auth
       GOTRUE_SITE_URL: https://${PUBLIC_DOMAIN:-d89.escalaleads.com.mx}
-      GOTRUE_URI_ALLOW_LIST: https://${PUBLIC_DOMAIN:-d89.escalaleads.com.mx}/*
+      GOTRUE_URI_ALLOW_LIST: https://${PUBLIC_DOMAIN:-d89.escalaleads.com.mx}/*,http://127.0.0.1:3089/*,http://localhost:3089/*
+      GOTRUE_MAILER_EXTERNAL_HOSTS: ${PUBLIC_DOMAIN:-d89.escalaleads.com.mx},127.0.0.1,localhost
       GOTRUE_DISABLE_SIGNUP: "true"
       GOTRUE_JWT_ADMIN_ROLES: service_role
       GOTRUE_JWT_AUD: authenticated
@@ -48,6 +67,12 @@ services:
       GOTRUE_JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
       GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
       GOTRUE_MAILER_AUTOCONFIRM: "false"
+      GOTRUE_SMTP_HOST: ${SMTP_HOST:-mailpit}
+      GOTRUE_SMTP_PORT: ${SMTP_PORT:-1025}
+      GOTRUE_SMTP_USER: ${SMTP_USER:-}
+      GOTRUE_SMTP_PASS: ${SMTP_PASS:-}
+      GOTRUE_SMTP_ADMIN_EMAIL: ${SMTP_ADMIN_EMAIL:-no-reply@d89.mx}
+      GOTRUE_SMTP_SENDER_NAME: ${SMTP_SENDER_NAME:-D89 Control de obra}
     healthcheck:
       test: [CMD-SHELL, "wget -qO- http://127.0.0.1:9999/health >/dev/null"]
       interval: 10s
@@ -259,6 +284,7 @@ networks:
     driver: bridge
 
 volumes:
+  mailpit-data:
   postgres-data:
   storage-data:
   hermes-data:
