@@ -1,0 +1,264 @@
+name: d89
+
+x-service-defaults: &service-defaults
+  restart: unless-stopped
+  networks: [d89-internal]
+  security_opt: [no-new-privileges:true]
+  logging:
+    driver: json-file
+    options: { max-size: 10m, max-file: "3" }
+
+services:
+  postgres:
+    <<: *service-defaults
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-d89}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./supabase/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-d89}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    mem_limit: 1200m
+    cpus: 1.0
+
+  auth:
+    <<: *service-defaults
+    image: supabase/gotrue:v2.183.0
+    depends_on: { postgres: { condition: service_healthy } }
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      API_EXTERNAL_URL: https://${PUBLIC_DOMAIN:-d89.escalaleads.com.mx}/auth/v1
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-d89}?options=-csearch_path%3Dauth
+      GOTRUE_DB_NAMESPACE: auth
+      GOTRUE_SITE_URL: https://${PUBLIC_DOMAIN:-d89.escalaleads.com.mx}
+      GOTRUE_URI_ALLOW_LIST: https://${PUBLIC_DOMAIN:-d89.escalaleads.com.mx}/*
+      GOTRUE_DISABLE_SIGNUP: "true"
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_JWT_EXP: 3600
+      GOTRUE_JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+      GOTRUE_MAILER_AUTOCONFIRM: "false"
+    healthcheck:
+      test: [CMD-SHELL, "wget -qO- http://127.0.0.1:9999/health >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+    mem_limit: 256m
+    cpus: 0.35
+
+  rest:
+    <<: *service-defaults
+    image: postgrest/postgrest:v13.0.7
+    depends_on: { postgres: { condition: service_healthy } }
+    environment:
+      PGRST_DB_URI: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-d89}
+      PGRST_DB_SCHEMAS: public
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
+      PGRST_DB_USE_LEGACY_GUCS: "false"
+    healthcheck:
+      # The official PostgREST image is distroless (no shell/wget).
+      test: [CMD, "/bin/postgrest", "--version"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+    mem_limit: 256m
+    cpus: 0.35
+
+  storage:
+    <<: *service-defaults
+    image: supabase/storage-api:v1.29.0
+    depends_on:
+      postgres: { condition: service_healthy }
+      rest: { condition: service_healthy }
+    environment:
+      ANON_KEY: ${ANON_KEY:?set ANON_KEY}
+      SERVICE_KEY: ${SERVICE_ROLE_KEY:?set SERVICE_ROLE_KEY}
+      POSTGREST_URL: http://rest:3000
+      PGRST_JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-d89}
+      FILE_SIZE_LIMIT: 10485760
+      STORAGE_BACKEND: file
+      FILE_STORAGE_BACKEND_PATH: /var/lib/storage
+      TENANT_ID: d89
+      REGION: local
+      GLOBAL_S3_BUCKET: d89
+      ENABLE_IMAGE_TRANSFORMATION: "false"
+    volumes: [storage-data:/var/lib/storage]
+    healthcheck:
+      test: [CMD-SHELL, "wget -qO- http://127.0.0.1:5000/status >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+    mem_limit: 384m
+    cpus: 0.5
+
+  migrate:
+    <<: *service-defaults
+    image: postgres:17.6-alpine
+    restart: "no"
+    depends_on:
+      auth: { condition: service_healthy }
+      storage: { condition: service_healthy }
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - ./supabase/migrations:/migrations:ro
+      - ./supabase/seed.sql:/seed.sql:ro
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        psql -v ON_ERROR_STOP=1 -h postgres -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-d89} \
+          -c "create table if not exists public.d89_schema_migrations (version text primary key, applied_at timestamptz not null default now())"
+        for migration in /migrations/*.sql; do
+          version="$$(basename "$$migration")"
+          applied="$$(psql -h postgres -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-d89} -Atc "select count(*) from public.d89_schema_migrations where version = '$$version'")"
+          if [ "$$applied" != "1" ]; then
+            psql -v ON_ERROR_STOP=1 -h postgres -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-d89} -f "$$migration"
+            psql -v ON_ERROR_STOP=1 -h postgres -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-d89} \
+              -c "insert into public.d89_schema_migrations(version) values ('$$version')"
+          fi
+        done
+        seeded="$$(psql -h postgres -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-d89} -Atc "select count(*) from public.d89_schema_migrations where version = '__seed__'")"
+        if [ "$$seeded" != "1" ]; then
+          psql -v ON_ERROR_STOP=1 -h postgres -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-d89} -f /seed.sql
+          psql -v ON_ERROR_STOP=1 -h postgres -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-d89} \
+            -c "insert into public.d89_schema_migrations(version) values ('__seed__')"
+        fi
+        psql -v ON_ERROR_STOP=1 -h postgres -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-d89} \
+          -c "notify pgrst, 'reload schema'"
+    mem_limit: 128m
+    cpus: 0.25
+
+  api:
+    <<: *service-defaults
+    build: ./apps/api
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    environment:
+      APP_ENV: ${APP_ENV:-staging}
+      APP_TIMEZONE: ${APP_TIMEZONE:-America/Mexico_City}
+      APP_CURRENCY: ${APP_CURRENCY:-MXN}
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-d89}
+      JWT_SECRET: ${JWT_SECRET}
+      HERMES_HMAC_KEY_ID: ${HERMES_HMAC_KEY_ID:-hermes-staging}
+      HERMES_HMAC_SECRET: ${HERMES_HMAC_SECRET}
+      HERMES_SANDBOX_MODE: ${HERMES_SANDBOX_MODE:-true}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    mem_limit: 512m
+    cpus: 0.75
+
+  web:
+    <<: *service-defaults
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: /api/v1
+        NEXT_PUBLIC_SUPABASE_URL: https://${PUBLIC_DOMAIN:-d89.escalaleads.com.mx}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${ANON_KEY}
+    depends_on: { api: { condition: service_healthy } }
+    environment:
+      NEXT_PUBLIC_API_URL: /api/v1
+      NEXT_PUBLIC_SUPABASE_URL: https://${PUBLIC_DOMAIN:-d89.escalaleads.com.mx}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${ANON_KEY}
+    mem_limit: 512m
+    cpus: 0.75
+
+  caddy:
+    <<: *service-defaults
+    image: caddy:2.10.2-alpine
+    depends_on:
+      api: { condition: service_healthy }
+      web: { condition: service_healthy }
+    ports: ["127.0.0.1:3089:80"]
+    volumes: ["./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro"]
+    healthcheck:
+      test: [CMD-SHELL, "wget -qO- http://127.0.0.1/api/health >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    mem_limit: 128m
+    cpus: 0.25
+    networks: [d89-internal, d89-edge]
+
+  litellm:
+    <<: *service-defaults
+    profiles: [whatsapp]
+    image: ghcr.io/berriai/litellm:v1.83.3-stable
+    depends_on: { postgres: { condition: service_healthy } }
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "1"]
+    environment:
+      MOONSHOT_API_KEY: ${MOONSHOT_API_KEY:?set MOONSHOT_API_KEY}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY}
+      LITELLM_SALT_KEY: ${LITELLM_SALT_KEY:?set LITELLM_SALT_KEY}
+      LITELLM_DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/litellm
+    volumes: ["./infra/litellm/config.yaml:/app/config.yaml:ro"]
+    healthcheck:
+      test: [CMD-SHELL, "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=3)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 15
+    mem_limit: 512m
+    cpus: 0.75
+    networks: [d89-internal, d89-egress]
+
+  hermes:
+    <<: *service-defaults
+    profiles: [whatsapp]
+    image: nousresearch/hermes-agent:v2026.6.5
+    depends_on:
+      api: { condition: service_healthy }
+      litellm: { condition: service_healthy }
+    command: [gateway, run]
+    environment:
+      HERMES_HOME: /opt/data
+      OPENAI_BASE_URL: http://litellm:4000/v1
+      # Hermes receives a budgeted virtual key, never the LiteLLM master key.
+      OPENAI_API_KEY: ${LITELLM_D89_API_KEY:-provision-with-infra-script}
+      HERMES_MODEL: kimi-k3
+      D89_API_URL: http://api:8000
+      HERMES_HMAC_KEY_ID: ${HERMES_HMAC_KEY_ID:-hermes-staging}
+      HERMES_HMAC_SECRET: ${HERMES_HMAC_SECRET:?set HERMES_HMAC_SECRET}
+      API_SERVER_ENABLED: "true"
+      API_SERVER_HOST: 0.0.0.0
+      API_SERVER_KEY: ${HERMES_API_SERVER_KEY:?set HERMES_API_SERVER_KEY}
+      API_SERVER_CORS_ORIGINS: https://${PUBLIC_DOMAIN:-d89.escalaleads.com.mx}
+      WHATSAPP_ACCESS_TOKEN: ${WHATSAPP_ACCESS_TOKEN:-sandbox}
+      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-sandbox}
+      WHATSAPP_VERIFY_TOKEN: ${WHATSAPP_VERIFY_TOKEN:-sandbox}
+    volumes:
+      - hermes-data:/opt/data
+      - ./infra/hermes/d89:/opt/data/plugins/d89:ro
+    mem_limit: 768m
+    cpus: 1.0
+    networks: [d89-internal, d89-egress]
+
+networks:
+  d89-internal:
+    driver: bridge
+    internal: true
+  d89-edge:
+    driver: bridge
+  d89-egress:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  storage-data:
+  hermes-data:

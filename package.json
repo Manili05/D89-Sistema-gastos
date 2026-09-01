@@ -1,0 +1,26 @@
+{
+  "name": "d89-sistema-gastos",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": ["apps/web"],
+  "scripts": {
+    "dev": "next dev apps/web --hostname 127.0.0.1",
+    "build": "next build apps/web",
+    "lint": "eslint apps/web --config apps/web/eslint.config.mjs --max-warnings=0",
+    "typecheck": "tsc -p apps/web/tsconfig.json --noEmit",
+    "api:openapi": ".venv/bin/python infra/scripts/export-openapi.py",
+    "generate:client": "npm run api:openapi && openapi-typescript docs/openapi.json -o apps/web/lib/api.generated.ts",
+    "check:client": "npm run api:openapi && openapi-typescript docs/openapi.json -o apps/web/lib/api.generated.ts --check",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.61.0",
+    "openapi-typescript": "7.13.0",
+    "typescript": "5.9.3"
+  },
+  "overrides": {
+    "postcss": "8.5.23",
+    "sharp": "0.35.0"
+  }
+}

@@ -1,0 +1,43 @@
+{
+  auto_https off
+  admin off
+}
+
+:80 {
+  encode zstd gzip
+
+  @api path /api/v1/* /health
+  handle @api {
+    reverse_proxy api:8000
+  }
+
+  @auth path /auth/v1/*
+  handle @auth {
+    uri strip_prefix /auth/v1
+    reverse_proxy auth:9999
+  }
+
+  @rest path /rest/v1/*
+  handle @rest {
+    uri strip_prefix /rest/v1
+    reverse_proxy rest:3000
+  }
+
+  @storage path /storage/v1/*
+  handle @storage {
+    uri strip_prefix /storage/v1
+    reverse_proxy storage:5000
+  }
+
+  handle {
+    reverse_proxy web:3000
+  }
+
+  header {
+    -Server
+    X-Content-Type-Options nosniff
+    X-Frame-Options DENY
+    Referrer-Policy strict-origin-when-cross-origin
+    Permissions-Policy "camera=(self), microphone=(), geolocation=()"
+  }
+}
