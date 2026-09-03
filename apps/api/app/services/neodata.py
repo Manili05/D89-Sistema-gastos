@@ -95,6 +95,7 @@ class ImportPreview:
     row_count: int = 0
     items: list[BudgetItem] = field(default_factory=list)
     section_totals: list[SectionTotal] = field(default_factory=list)
+    rollup_total_count: int = 0
     unclassified: list[UnclassifiedRow] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     declared_total_without_vat: Decimal | None = None
@@ -107,6 +108,11 @@ class ImportPreview:
     def areas(self) -> dict[str, int]:
         return dict(Counter(item.area for item in self.items))
 
+    @property
+    def consolidated_item_count(self) -> int:
+        unique_items = {(normalized_text(item.area), item.identity) for item in self.items}
+        return len(unique_items)
+
     def to_dict(self, include_items: bool = True) -> dict[str, object]:
         result: dict[str, object] = {
             "filename": self.filename,
@@ -115,11 +121,27 @@ class ImportPreview:
             "area_count": len(self.areas),
             "areas": self.areas,
             "item_count": len(self.items),
+            "consolidated_item_count": self.consolidated_item_count,
             "section_total_count": len(self.section_totals),
+            "rollup_total_count": self.rollup_total_count,
             "declared_total_without_vat": str(self.declared_total_without_vat or "0"),
             "calculated_total_without_vat": str(self.calculated_total_without_vat),
             "unclassified": [row.__dict__ for row in self.unclassified],
             "warnings": self.warnings,
+            "section_totals": [
+                {
+                    "sheet": total.sheet,
+                    "row": total.row,
+                    "area": total.area,
+                    "work_class": total.work_class,
+                    "category": total.category,
+                    "label": total.label,
+                    "declared": str(total.declared),
+                    "calculated": str(total.calculated),
+                    "difference": str(total.difference),
+                }
+                for total in self.section_totals
+            ],
             "section_mismatches": [
                 {
                     "sheet": total.sheet,
@@ -224,8 +246,10 @@ def parse_neodata_workbook(
                 last_item = None
                 continue
 
-            if b_norm.startswith("PRESUPUESTO "):
-                candidate = _first_area_from_title(b_text)
+            if b_norm == "PRESUPUESTO" or b_norm.startswith("PRESUPUESTO "):
+                candidate = (
+                    "General" if b_norm == "PRESUPUESTO" else _first_area_from_title(b_text)
+                )
                 if not budget_started:
                     budget_started = True
                     current_area = candidate
@@ -263,6 +287,10 @@ def parse_neodata_workbook(
                 continue
 
             if a_norm and b_norm.startswith("TOTAL "):
+                if not current_section_items:
+                    preview.rollup_total_count += 1
+                    last_item = None
+                    continue
                 declared = decimal_value(declared_amount)
                 calculated = sum((item.amount for item in current_section_items), Decimal("0"))
                 total = SectionTotal(
@@ -301,7 +329,11 @@ def parse_neodata_workbook(
                 and not isinstance(unit_price, bool)
             )
             if is_item:
-                amount = decimal_value(quantity) * decimal_value(unit_price)
+                amount = (
+                    decimal_value(declared_amount)
+                    if declared_amount not in (None, "")
+                    else decimal_value(quantity) * decimal_value(unit_price)
+                )
                 item = BudgetItem(
                     sheet=worksheet.title,
                     row=index,

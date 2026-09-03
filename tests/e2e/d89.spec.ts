@@ -3,6 +3,25 @@ import { expect, test } from '@playwright/test';
 const workId = '11111111-1111-4111-8111-111111111111';
 const areaId = '22222222-2222-4222-8222-222222222222';
 const budgetItemId = '33333333-3333-4333-8333-333333333333';
+const importId = '55555555-5555-4555-8555-555555555555';
+
+const previewData = {
+  area_count: 1,
+  item_count: 1,
+  consolidated_item_count: 1,
+  section_total_count: 1,
+  rollup_total_count: 1,
+  calculated_total_without_vat: '3.02',
+  warnings: [],
+  unclassified: [],
+  section_mismatches: [],
+  section_totals: [],
+  items: [{
+    sheet: 'Presupuesto', row: 20, area: 'General', work_class: 'PRELIMINARES',
+    category: null, code: 'PRE-01', description: 'Trazo', unit: 'M2', quantity: '3',
+    unit_price: '1.005', amount: '3.02',
+  }],
+};
 
 test.beforeEach(async ({ page }) => {
   await page.route('**/auth/v1/token**', async (route) => {
@@ -73,6 +92,22 @@ test.beforeEach(async ({ page }) => {
   await page.route('**/api/v1/weekly-closes', async (route) => {
     await route.fulfill({ status: 201, json: { expense_count: 12 } });
   });
+  await page.route('**/api/v1/neodata/preview', async (route) => {
+    await route.fulfill({
+      json: {
+        id: importId,
+        obra_id: '66666666-6666-4666-8666-666666666666',
+        estado: 'preview',
+        duplicate: false,
+        read_only: false,
+        work: { id: '66666666-6666-4666-8666-666666666666', nombre: 'Casa PSE' },
+        preview: previewData,
+      },
+    });
+  });
+  await page.route('**/api/v1/neodata/imports/*/preview', async (route) => {
+    await route.fulfill({ json: { id: importId, estado: 'preview', preview: previewData } });
+  });
 });
 
 async function login(page: import('@playwright/test').Page) {
@@ -121,6 +156,22 @@ test('portal admin prepara preview NEODATA sin confirmar', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Importar presupuesto' })).toBeVisible();
   await expect(page.getByText('Sin escritura todavía.')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Generar preview' })).toBeDisabled();
+
+  await page.getByRole('button', { name: 'Nueva obra' }).click();
+  await page.getByLabel('Nombre de la obra').fill('Casa PSE');
+  await page.locator('input[type="file"]').setInputFiles({
+    name: 'presupuesto-casa-pse.xlsx',
+    mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    buffer: Buffer.from('fixture-e2e'),
+  });
+  await page.getByRole('button', { name: 'Generar preview' }).click();
+
+  await expect(page.getByRole('status')).toContainText('Casa PSE');
+  await expect(page.getByRole('heading', { name: 'Preview editable' })).toBeVisible();
+  await expect(page.getByLabel('code fila 20')).toHaveValue('PRE-01');
+  await page.getByLabel('description fila 20').fill('Trazo corregido');
+  await page.getByRole('button', { name: /Guardar 1 corrección/ }).click();
+  await expect(page.getByRole('status')).toContainText('1 corrección');
 });
 
 test('captura gasto y comprobante queda pendiente', async ({ page }) => {

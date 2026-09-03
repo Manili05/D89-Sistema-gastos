@@ -37,6 +37,28 @@ def test_synthetic_preview_preserves_continuation_and_totals() -> None:
     assert preview.unclassified == []
 
 
+def test_generic_budget_uses_general_area_declared_amount_and_skips_rollups() -> None:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Código", "Concepto", "Unidad", "Cantidad", "P. Unitario", "Importe"])
+    sheet.append(["PRESUPUESTO", "PRESUPUESTO", None, None, None, None])
+    sheet.append(["PRELIMINARES", "PRELIMINARES", None, None, None, None])
+    sheet.append(["PRE-01", "Trazo", "M2", 3, 1.005, 3.02])
+    sheet.append(["PRELIMINARES", "TOTAL PRELIMINARES", None, None, None, 3.02])
+    sheet.append(["PRELIMINARES", "TOTAL PRELIMINARES", None, None, None, 3.02])
+    sheet.append(["TOTAL DEL PRESUPUESTO MOSTRADO SIN IVA:", None, None, None, None, 3.02])
+    output = BytesIO()
+    workbook.save(output)
+
+    preview = parse_neodata_workbook(output.getvalue(), "presupuesto.xlsx")
+
+    assert preview.areas == {"General": 1}
+    assert preview.calculated_total_without_vat == Decimal("3.02")
+    assert len(preview.section_totals) == 1
+    assert preview.rollup_total_count == 1
+    assert preview.warnings == []
+
+
 @pytest.mark.parametrize(
     ("content", "filename", "error"),
     [
@@ -83,3 +105,24 @@ def test_real_toluca_workbook_regression() -> None:
     assert abs(
         preview.calculated_total_without_vat - Decimal("2624832.8848544")
     ) <= Decimal("0.001")
+
+
+def test_real_casa_pse_workbook_regression() -> None:
+    fixture = Path(
+        "/var/www/Apparquitectos/20210621 Presupuesto Casa PSE COMPLETO (3).XLSX"
+    )
+    if not fixture.exists():
+        pytest.skip("El Excel real se mantiene intencionalmente fuera de Git")
+
+    preview = parse_neodata_workbook(fixture.read_bytes(), fixture.name)
+
+    assert preview.sheets == ["b)Estandar (E)"]
+    assert preview.row_count == 2918
+    assert preview.areas == {"General": 520}
+    assert len(preview.items) == 520
+    assert preview.consolidated_item_count == 473
+    assert len(preview.section_totals) == 191
+    assert preview.rollup_total_count == 68
+    assert preview.unclassified == []
+    assert all(abs(total.difference) <= Decimal("0.02") for total in preview.section_totals)
+    assert preview.calculated_total_without_vat == Decimal("3882647.02")

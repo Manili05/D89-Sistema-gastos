@@ -55,6 +55,21 @@ class ImportConfirm(BaseModel):
     confirmation: bool
 
 
+class PreviewItemCorrection(BaseModel):
+    sheet: str = Field(min_length=1, max_length=180)
+    row: int = Field(gt=0)
+    area: str = Field(min_length=1, max_length=180)
+    work_class: str = Field(min_length=1, max_length=180)
+    category: str | None = Field(default=None, max_length=180)
+    code: str = Field(min_length=1, max_length=180)
+    description: str = Field(min_length=1, max_length=2000)
+    unit: str = Field(min_length=1, max_length=80)
+
+
+class ImportPreviewUpdate(BaseModel):
+    items: list[PreviewItemCorrection] = Field(min_length=1, max_length=2000)
+
+
 class ReceiptUpdate(BaseModel):
     path: str = Field(min_length=10, max_length=500)
 

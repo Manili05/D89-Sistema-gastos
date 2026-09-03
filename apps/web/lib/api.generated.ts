@@ -159,6 +159,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/neodata/imports/{import_id}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Patch Neodata Preview */
+        patch: operations["patch_neodata_preview_api_v1_neodata_imports__import_id__preview_patch"];
+        trace?: never;
+    };
     "/api/v1/neodata/preview": {
         parameters: {
             query?: never;
@@ -328,11 +345,16 @@ export interface components {
             file: string;
             /** Import Type */
             import_type: string;
-            /**
-             * Work Id
-             * Format: uuid
-             */
-            work_id: string;
+            /** Work End Date */
+            work_end_date?: string | null;
+            /** Work Id */
+            work_id?: string | null;
+            /** Work Location */
+            work_location?: string | null;
+            /** Work Name */
+            work_name?: string | null;
+            /** Work Start Date */
+            work_start_date?: string | null;
         };
         /** ExpenseCreate */
         ExpenseCreate: {
@@ -396,6 +418,11 @@ export interface components {
             /** Confirmation */
             confirmation: boolean;
         };
+        /** ImportPreviewUpdate */
+        ImportPreviewUpdate: {
+            /** Items */
+            items: components["schemas"]["PreviewItemCorrection"][];
+        };
         /** IncomeCreate */
         IncomeCreate: {
             /** Actual Date */
@@ -416,6 +443,25 @@ export interface components {
              * Format: uuid
              */
             work_id: string;
+        };
+        /** PreviewItemCorrection */
+        PreviewItemCorrection: {
+            /** Area */
+            area: string;
+            /** Category */
+            category?: string | null;
+            /** Code */
+            code: string;
+            /** Description */
+            description: string;
+            /** Row */
+            row: number;
+            /** Sheet */
+            sheet: string;
+            /** Unit */
+            unit: string;
+            /** Work Class */
+            work_class: string;
         };
         /** ReceiptUpdate */
         ReceiptUpdate: {
@@ -882,6 +928,45 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["ImportConfirm"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_neodata_preview_api_v1_neodata_imports__import_id__preview_patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                import_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportPreviewUpdate"];
             };
         };
         responses: {

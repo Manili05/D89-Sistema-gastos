@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -21,6 +21,7 @@ from app.models import (
     ExpenseCreate,
     HealthResponse,
     ImportConfirm,
+    ImportPreviewUpdate,
     IncomeCreate,
     ReceiptUpdate,
     SubcontractCreate,
@@ -49,6 +50,7 @@ from app.services.repository import (
     reopen_week,
     report_expenses,
     store_import_preview,
+    update_import_preview,
     work_catalog,
 )
 from app.services.tools import WHATSAPP_TOOLS
@@ -273,11 +275,20 @@ async def invoke_hermes_tool(
 @router.post("/neodata/preview", tags=["neodata"])
 async def preview_neodata(
     admin: AdminUser,
-    work_id: Annotated[UUID, Form()],
     import_type: Annotated[str, Form()],
     file: Annotated[UploadFile, File(description="Libro .xlsx exportado por NEODATA")],
     settings: Annotated[Settings, Depends(get_settings)],
+    work_id: Annotated[UUID | None, Form()] = None,
+    work_name: Annotated[str | None, Form()] = None,
+    work_location: Annotated[str | None, Form()] = None,
+    work_start_date: Annotated[date | None, Form()] = None,
+    work_end_date: Annotated[date | None, Form()] = None,
 ) -> dict[str, object]:
+    if (work_id is None) == (work_name is None or not work_name.strip()):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Selecciona una obra existente o captura el nombre de una obra nueva",
+        )
     content = await file.read(settings.neodata_max_bytes + 1)
     try:
         preview = parse_neodata_workbook(
@@ -288,15 +299,39 @@ async def preview_neodata(
     except NeodataError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
     result = preview.to_dict(include_items=True)
+    if not result["item_count"]:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "El archivo no contiene partidas reconocibles en formato NEODATA",
+        )
+    new_work = None
+    if work_id is None:
+        new_work = WorkCreate(
+            name=(work_name or "").strip(),
+            location=work_location or None,
+            start_date=work_start_date,
+            end_date=work_end_date,
+        )
     return store_import_preview(
         settings,
         admin,
         work_id,
+        new_work,
         import_type,
         file.filename or "presupuesto.xlsx",
         content,
         result,
     )
+
+
+@router.patch("/neodata/imports/{import_id}/preview", tags=["neodata"])
+def patch_neodata_preview(
+    import_id: UUID,
+    payload: ImportPreviewUpdate,
+    admin: AdminUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    return update_import_preview(settings, admin, import_id, payload)
 
 
 @router.post("/neodata/imports/{import_id}/confirm", tags=["neodata"])

@@ -13,14 +13,66 @@
             "title": "Import Type",
             "type": "string"
           },
+          "work_end_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Work End Date"
+          },
           "work_id": {
-            "format": "uuid",
-            "title": "Work Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Work Id"
+          },
+          "work_location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Work Location"
+          },
+          "work_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Work Name"
+          },
+          "work_start_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Work Start Date"
           }
         },
         "required": [
-          "work_id",
           "import_type",
           "file"
         ],
@@ -171,6 +223,24 @@
         "title": "ImportConfirm",
         "type": "object"
       },
+      "ImportPreviewUpdate": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PreviewItemCorrection"
+            },
+            "maxItems": 2000,
+            "minItems": 1,
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "ImportPreviewUpdate",
+        "type": "object"
+      },
       "IncomeCreate": {
         "properties": {
           "actual_date": {
@@ -228,6 +298,74 @@
           "state"
         ],
         "title": "IncomeCreate",
+        "type": "object"
+      },
+      "PreviewItemCorrection": {
+        "properties": {
+          "area": {
+            "maxLength": 180,
+            "minLength": 1,
+            "title": "Area",
+            "type": "string"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "maxLength": 180,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "code": {
+            "maxLength": 180,
+            "minLength": 1,
+            "title": "Code",
+            "type": "string"
+          },
+          "description": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "row": {
+            "exclusiveMinimum": 0.0,
+            "title": "Row",
+            "type": "integer"
+          },
+          "sheet": {
+            "maxLength": 180,
+            "minLength": 1,
+            "title": "Sheet",
+            "type": "string"
+          },
+          "unit": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Unit",
+            "type": "string"
+          },
+          "work_class": {
+            "maxLength": 180,
+            "minLength": 1,
+            "title": "Work Class",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sheet",
+          "row",
+          "area",
+          "work_class",
+          "code",
+          "description",
+          "unit"
+        ],
+        "title": "PreviewItemCorrection",
         "type": "object"
       },
       "ReceiptUpdate": {
@@ -1312,6 +1450,77 @@
           }
         },
         "summary": "Confirm Neodata Import",
+        "tags": [
+          "neodata"
+        ]
+      }
+    },
+    "/api/v1/neodata/imports/{import_id}/preview": {
+      "patch": {
+        "operationId": "patch_neodata_preview_api_v1_neodata_imports__import_id__preview_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "import_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Import Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportPreviewUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Patch Neodata Preview Api V1 Neodata Imports  Import Id  Preview Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Patch Neodata Preview",
         "tags": [
           "neodata"
         ]

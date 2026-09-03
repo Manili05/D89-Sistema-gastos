@@ -1,7 +1,9 @@
 import hashlib
+from collections import Counter
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import date
+from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
@@ -13,6 +15,7 @@ from psycopg.types.json import Jsonb
 from app.core.config import Settings
 from app.models import (
     ExpenseCreate,
+    ImportPreviewUpdate,
     IncomeCreate,
     Role,
     SubcontractCreate,
@@ -21,6 +24,7 @@ from app.models import (
     WeeklyCloseCreate,
     WorkCreate,
 )
+from app.services.neodata import normalized_text
 
 
 @contextmanager
@@ -105,29 +109,35 @@ def create_work(settings: Settings, user: UserContext, payload: WorkCreate) -> d
         require_active_profile(connection, user)
         if user.role is not Role.ADMIN:
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Solo administración crea obras")
-        row = connection.execute(
-            """
-            insert into public.obra
-              (nombre, ubicacion, fecha_inicio, fecha_fin, responsable_id)
-            values (%s, %s, %s, %s, %s)
-            returning id, nombre, ubicacion, fecha_inicio, fecha_fin, estado::text as estado
-            """,
-            (payload.name, payload.location, payload.start_date, payload.end_date, user.id),
-        ).fetchone()
-        assert row is not None
-        connection.execute(
-            "insert into public.usuario_obra (usuario_id, obra_id) values (%s, %s)",
-            (user.id, row["id"]),
-        )
-        connection.execute(
-            """
-            insert into public.audit_log_negocio
-              (entidad, entidad_id, accion, usuario_id, canal, detalle_json)
-            values ('obra', %s, 'crear', %s, 'web', %s)
-            """,
-            (row["id"], user.id, Jsonb({"nombre": payload.name})),
-        )
-        return row
+        return _insert_work(connection, user, payload)
+
+
+def _insert_work(
+    connection: psycopg.Connection[dict[str, Any]], user: UserContext, payload: WorkCreate
+) -> dict[str, Any]:
+    row = connection.execute(
+        """
+        insert into public.obra
+          (nombre, ubicacion, fecha_inicio, fecha_fin, responsable_id)
+        values (%s, %s, %s, %s, %s)
+        returning id, nombre, ubicacion, fecha_inicio, fecha_fin, estado::text as estado
+        """,
+        (payload.name, payload.location, payload.start_date, payload.end_date, user.id),
+    ).fetchone()
+    assert row is not None
+    connection.execute(
+        "insert into public.usuario_obra (usuario_id, obra_id) values (%s, %s)",
+        (user.id, row["id"]),
+    )
+    connection.execute(
+        """
+        insert into public.audit_log_negocio
+          (entidad, entidad_id, accion, usuario_id, canal, detalle_json)
+        values ('obra', %s, 'crear', %s, 'web', %s)
+        """,
+        (row["id"], user.id, Jsonb({"nombre": payload.name})),
+    )
+    return row
 
 
 def work_catalog(settings: Settings, user: UserContext, work_id: UUID) -> dict[str, Any]:
@@ -566,7 +576,8 @@ def reopen_week(
 def store_import_preview(
     settings: Settings,
     user: UserContext,
-    work_id: UUID,
+    work_id: UUID | None,
+    new_work: WorkCreate | None,
     import_type: str,
     filename: str,
     content: bytes,
@@ -576,22 +587,42 @@ def store_import_preview(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Tipo de importación inválido")
     digest = hashlib.sha256(content).hexdigest()
     with transaction(settings) as connection:
-        require_work_access(connection, user, work_id)
+        require_active_profile(connection, user)
         if user.role is not Role.ADMIN:
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Solo administración importa")
+        created_work: dict[str, Any] | None = None
+        if new_work is not None:
+            if import_type != "inicial":
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    "Una obra nueva debe iniciar con un presupuesto inicial",
+                )
+            created_work = _insert_work(connection, user, new_work)
+            work_id = created_work["id"]
+        if work_id is None:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Falta la obra destino")
+        require_work_access(connection, user, work_id)
         duplicate = connection.execute(
             """
-            select id, estado::text as estado from public.importacion_neodata
+            select id, obra_id, archivo_nombre, tipo::text as tipo,
+                   estado::text as estado, creado_en, preview_json
+            from public.importacion_neodata
             where obra_id = %s and archivo_sha256 = %s and estado <> 'descartado'
             order by creado_en desc limit 1
             """,
             (work_id, digest),
         ).fetchone()
         if duplicate is not None:
-            raise HTTPException(
-                status.HTTP_409_CONFLICT,
-                f"El archivo ya existe como {duplicate['estado']} ({duplicate['id']})",
+            duplicate["preview"] = duplicate.pop("preview_json")
+            duplicate["preview"].setdefault(
+                "consolidated_item_count",
+                preview.get("consolidated_item_count", len(duplicate["preview"].get("items", []))),
             )
+            duplicate["preview"].setdefault("rollup_total_count", 0)
+            duplicate["preview"].setdefault("section_totals", [])
+            duplicate["duplicate"] = True
+            duplicate["read_only"] = duplicate["estado"] != "preview"
+            return duplicate
         row = connection.execute(
             """
             insert into public.importacion_neodata (
@@ -612,7 +643,70 @@ def store_import_preview(
         ).fetchone()
         assert row is not None
         row["preview"] = preview
+        row["duplicate"] = False
+        row["read_only"] = False
+        if created_work is not None:
+            row["work"] = created_work
         return row
+
+
+def update_import_preview(
+    settings: Settings,
+    user: UserContext,
+    import_id: UUID,
+    payload: ImportPreviewUpdate,
+) -> dict[str, Any]:
+    with transaction(settings) as connection:
+        imported = connection.execute(
+            """
+            select id, obra_id, estado::text as estado, preview_json
+            from public.importacion_neodata where id = %s for update
+            """,
+            (import_id,),
+        ).fetchone()
+        if imported is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Preview inexistente")
+        require_work_access(connection, user, imported["obra_id"])
+        if user.role is not Role.ADMIN:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Solo administración corrige previews")
+        if imported["estado"] != "preview":
+            raise HTTPException(status.HTTP_409_CONFLICT, "La importación ya no es editable")
+
+        preview = imported["preview_json"]
+        items = preview.get("items", [])
+        indexed = {(item["sheet"], item["row"]): item for item in items}
+        seen: set[tuple[str, int]] = set()
+        for correction in payload.items:
+            key = (correction.sheet, correction.row)
+            if key in seen:
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Corrección duplicada")
+            seen.add(key)
+            item = indexed.get(key)
+            if item is None:
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    f"La fila {correction.sheet}!{correction.row} no pertenece al preview",
+                )
+            for field, value in correction.model_dump().items():
+                if field not in {"sheet", "row"}:
+                    item[field] = value
+
+        preview["areas"] = dict(Counter(item["area"] for item in items))
+        preview["area_count"] = len(preview["areas"])
+        preview["consolidated_item_count"] = len(_consolidate_preview_items(items))
+        connection.execute(
+            "update public.importacion_neodata set preview_json = %s where id = %s",
+            (Jsonb(preview), import_id),
+        )
+        connection.execute(
+            """
+            insert into public.audit_log_negocio
+              (entidad, entidad_id, accion, usuario_id, canal, detalle_json)
+            values ('importacion_neodata', %s, 'corregir_preview', %s, 'web', %s)
+            """,
+            (import_id, user.id, Jsonb({"filas": len(payload.items)})),
+        )
+        return {"id": import_id, "estado": imported["estado"], "preview": preview}
 
 
 def _catalog_item(
@@ -679,6 +773,37 @@ def _catalog_item(
     return existing["id"], work_class["id"], category_id
 
 
+def _consolidate_preview_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    consolidated: dict[tuple[str, ...], dict[str, Any]] = {}
+    for source in items:
+        key = (
+            normalized_text(source["area"]),
+            normalized_text(source["code"]),
+            normalized_text(source["description"]),
+            normalized_text(source["unit"]),
+            normalized_text(source["work_class"]),
+            normalized_text(source.get("category")),
+        )
+        if key not in consolidated:
+            consolidated[key] = dict(source)
+            continue
+        target = consolidated[key]
+        target["quantity"] = str(
+            Decimal(str(target["quantity"])) + Decimal(str(source["quantity"]))
+        )
+        target["amount"] = str(
+            Decimal(str(target["amount"])) + Decimal(str(source["amount"]))
+        )
+
+    for item in consolidated.values():
+        quantity = Decimal(str(item["quantity"]))
+        if quantity:
+            item["unit_price"] = str(
+                (Decimal(str(item["amount"])) / quantity).quantize(Decimal("0.000001"))
+            )
+    return list(consolidated.values())
+
+
 def confirm_import(
     settings: Settings, user: UserContext, import_id: UUID, confirmation: bool
 ) -> dict[str, Any]:
@@ -716,7 +841,8 @@ def confirm_import(
                 (imported["obra_id"],),
             )
         area_ids: dict[str, UUID] = {}
-        for order, item in enumerate(preview["items"]):
+        consolidated_items = _consolidate_preview_items(preview["items"])
+        for order, item in enumerate(consolidated_items):
             area_name = item["area"]
             if area_name not in area_ids:
                 area = connection.execute(
@@ -766,7 +892,18 @@ def confirm_import(
               (entidad, entidad_id, accion, usuario_id, canal, detalle_json)
             values ('importacion_neodata', %s, 'confirmar', %s, 'web', %s)
             """,
-            (import_id, user.id, Jsonb({"version": version, "partidas": len(preview["items"])})),
+            (
+                import_id,
+                user.id,
+                Jsonb(
+                    {
+                        "version": version,
+                        "partidas_fuente": len(preview["items"]),
+                        "partidas_consolidadas": len(consolidated_items),
+                    }
+                ),
+            ),
         )
-        row["item_count"] = len(preview["items"])
+        row["source_item_count"] = len(preview["items"])
+        row["item_count"] = len(consolidated_items)
         return row
