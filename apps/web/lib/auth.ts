@@ -4,8 +4,9 @@ let client: SupabaseClient | undefined;
 
 export function getSupabaseBrowserClient(): SupabaseClient {
   if (client) return client;
-  const loopback = window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost';
-  const url = loopback ? window.location.origin : (process.env.NEXT_PUBLIC_SUPABASE_URL || window.location.origin);
+  // Auth, Storage and PostgREST share the public reverse-proxy origin. Keeping
+  // this relative also makes temporary preview URLs work without rebuilding.
+  const url = window.location.origin;
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'd89-ci-placeholder';
   client = createClient(url, key, {
     auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },

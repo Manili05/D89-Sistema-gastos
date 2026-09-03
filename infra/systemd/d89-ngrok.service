@@ -1,0 +1,17 @@
+[Unit]
+Description=D89 temporary HTTPS tunnel
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Environment=HOME=/root
+ExecStart=/usr/local/bin/ngrok http http://127.0.0.1:3089 --config=/root/.config/ngrok/ngrok.yml --log=stdout
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
