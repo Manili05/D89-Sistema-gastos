@@ -4,6 +4,11 @@ const workId = '11111111-1111-4111-8111-111111111111';
 const areaId = '22222222-2222-4222-8222-222222222222';
 const budgetItemId = '33333333-3333-4333-8333-333333333333';
 const importId = '55555555-5555-4555-8555-555555555555';
+const expensePartidaId = '77777777-7777-4777-8777-777777777777';
+const expenseSubpartidaId = '88888888-8888-4888-8888-888888888888';
+const expenseCategoryId = '99999999-9999-4999-8999-999999999999';
+const secondExpensePartidaId = '12121212-1212-4212-8212-121212121212';
+const secondExpenseSubpartidaId = '13131313-1313-4313-8313-131313131313';
 
 const previewData = {
   area_count: 1,
@@ -94,11 +99,23 @@ test.beforeEach(async ({ page }) => {
       json: {
         areas: [{ id: areaId, nombre: 'Oficina' }],
         items: [{ budget_item_id: budgetItemId, area_id: areaId, codigo: 'ALB-05', descripcion: 'Firme de concreto', clase: 'ALBAÑILERÍAS' }],
+        expense_partidas: [{ id: expensePartidaId, nombre: 'PRELIMINARES' }, { id: secondExpensePartidaId, nombre: 'ALBANILERIA' }],
+        expense_subitems: [{ id: expenseSubpartidaId, partida_id: expensePartidaId, nombre: 'LIMPIEZA' }, { id: secondExpenseSubpartidaId, partida_id: secondExpensePartidaId, nombre: 'FIRMES Y HORMIGONES' }],
+        expense_categories: [{ id: expenseCategoryId, nombre: 'MATERIAL' }],
         suppliers: [],
       },
     });
   });
   await page.route('**/api/v1/expenses', async (route) => {
+    const payload = route.request().postDataJSON();
+    expect(payload).toMatchObject({
+      work_id: workId,
+      area_id: areaId,
+      expense_item_id: secondExpensePartidaId,
+      expense_subitem_id: secondExpenseSubpartidaId,
+      expense_category_id: expenseCategoryId,
+      supplier_name: 'Concretos Toluca',
+    });
     await route.fulfill({ status: 201, json: { id: '44444444-4444-4444-8444-444444444444' } });
   });
   await page.route('**/api/v1/weekly-closes', async (route) => {
@@ -189,8 +206,15 @@ test('portal admin prepara preview NEODATA sin confirmar', async ({ page }) => {
 test('captura gasto y comprobante queda pendiente', async ({ page }) => {
   await login(page);
   await page.goto('/gastos');
-  await expect(page.getByLabel('Partida')).toBeEnabled();
-  await page.getByLabel('Partida').selectOption(budgetItemId);
+  const partida = page.getByLabel('Partida', { exact: true });
+  const subpartida = page.getByLabel('Subpartida', { exact: true });
+  await expect(partida).toBeEnabled();
+  await expect(partida).toHaveValue(expensePartidaId);
+  await expect(subpartida).toHaveValue(expenseSubpartidaId);
+  await partida.selectOption(secondExpensePartidaId);
+  await expect(subpartida).toHaveValue(secondExpenseSubpartidaId);
+  await expect(page.getByLabel('Categoría', { exact: true })).toHaveValue(expenseCategoryId);
+  await page.getByLabel('Proveedor', { exact: true }).fill('Concretos Toluca');
   await page.getByLabel('Importe').fill('18450');
   await page.getByLabel('Concepto').fill('Cemento y adhesivo para firme de oficina');
   await page.getByRole('button', { name: /Guardar pendiente/ }).click();

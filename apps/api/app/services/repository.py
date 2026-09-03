@@ -267,7 +267,35 @@ def work_catalog(settings: Settings, user: UserContext, work_id: UUID) -> dict[s
         suppliers = connection.execute(
             "select id, nombre from public.catalogo_proveedor where activo order by nombre"
         ).fetchall()
-        return {"areas": list(areas), "items": list(items), "suppliers": list(suppliers)}
+        expense_partidas = connection.execute(
+            """
+            select id, nombre from public.catalogo_partida_gasto
+            where activo order by orden, nombre
+            """
+        ).fetchall()
+        expense_subitems = connection.execute(
+            """
+            select cs.id, cs.partida_gasto_id as partida_id, cs.nombre
+            from public.catalogo_subpartida_gasto cs
+            join public.catalogo_partida_gasto cp
+              on cp.id = cs.partida_gasto_id and cp.activo
+            where cs.activo order by cp.orden, cs.orden, cs.nombre
+            """
+        ).fetchall()
+        expense_categories = connection.execute(
+            """
+            select id, nombre from public.catalogo_categoria_gasto
+            where activo order by orden, nombre
+            """
+        ).fetchall()
+        return {
+            "areas": list(areas),
+            "items": list(items),
+            "expense_partidas": list(expense_partidas),
+            "expense_subitems": list(expense_subitems),
+            "expense_categories": list(expense_categories),
+            "suppliers": list(suppliers),
+        }
 
 
 def create_expense(
@@ -275,33 +303,99 @@ def create_expense(
 ) -> dict[str, Any]:
     with transaction(settings) as connection:
         require_work_access(connection, user, payload.work_id)
-        budget = connection.execute(
-            """
-            select pp.partida_id, cp.clase_id, cp.categoria_id
-            from public.presupuesto_partida pp
-            join public.catalogo_partida cp on cp.id = pp.partida_id
-            where pp.id = %s and pp.obra_id = %s and pp.area_id = %s and pp.vigente
-            """,
-            (payload.budget_item_id, payload.work_id, payload.area_id),
+        area = connection.execute(
+            "select id from public.area where id = %s and obra_id = %s",
+            (payload.area_id, payload.work_id),
         ).fetchone()
-        if budget is None:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Partida no vigente")
+        if area is None:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Área ajena a la obra")
+
+        hierarchy = connection.execute(
+            """
+            select cs.id
+            from public.catalogo_subpartida_gasto cs
+            join public.catalogo_partida_gasto cp
+              on cp.id = cs.partida_gasto_id and cp.activo
+            cross join public.catalogo_categoria_gasto cat
+            where cs.id = %s and cs.partida_gasto_id = %s and cs.activo
+              and cat.id = %s and cat.activo
+            """,
+            (
+                payload.expense_subitem_id,
+                payload.expense_item_id,
+                payload.expense_category_id,
+            ),
+        ).fetchone()
+        if hierarchy is None:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "Partida, subpartida y categoría no forman una clasificación válida",
+            )
+
+        budget_partida_id: UUID | None = None
+        budget_class_id: UUID | None = None
+        budget_category_id: UUID | None = None
+        if payload.budget_item_id is not None:
+            budget = connection.execute(
+                """
+                select pp.partida_id, cp.clase_id, cp.categoria_id
+                from public.presupuesto_partida pp
+                join public.catalogo_partida cp on cp.id = pp.partida_id
+                where pp.id = %s and pp.obra_id = %s and pp.area_id = %s and pp.vigente
+                """,
+                (payload.budget_item_id, payload.work_id, payload.area_id),
+            ).fetchone()
+            if budget is None:
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_ENTITY, "Partida NEODATA no vigente"
+                )
+            budget_partida_id = budget["partida_id"]
+            budget_class_id = budget["clase_id"]
+            budget_category_id = budget["categoria_id"]
+
+        if payload.supplier_id is not None:
+            supplier = connection.execute(
+                "select id from public.catalogo_proveedor where id = %s and activo",
+                (payload.supplier_id,),
+            ).fetchone()
+            if supplier is None:
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Proveedor inactivo")
+            supplier_id = supplier["id"]
+        else:
+            supplier = connection.execute(
+                """
+                insert into public.catalogo_proveedor (nombre, creado_por)
+                values (%s, %s)
+                on conflict (nombre_normalizado)
+                do update set nombre = excluded.nombre, activo = true
+                returning id
+                """,
+                (payload.supplier_name, user.id),
+            ).fetchone()
+            assert supplier is not None
+            supplier_id = supplier["id"]
+
         row = connection.execute(
             """
             insert into public.gasto (
-              obra_id, area_id, clase_id, categoria_id, partida_id, proveedor_id,
+              obra_id, area_id, clase_id, categoria_id, partida_id,
+              partida_gasto_id, subpartida_gasto_id, categoria_gasto_id, proveedor_id,
               fecha, concepto, folio, importe, estado, origen, creado_por
-            ) values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'web', %s)
-            returning id, obra_id, area_id, partida_id, fecha, concepto, folio,
+            ) values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'web', %s)
+            returning id, obra_id, area_id, partida_gasto_id, subpartida_gasto_id,
+                      categoria_gasto_id, partida_id, proveedor_id, fecha, concepto, folio,
                       importe, estado::text as estado, creado_en
             """,
             (
                 payload.work_id,
                 payload.area_id,
-                budget["clase_id"],
-                budget["categoria_id"],
-                budget["partida_id"],
-                payload.supplier_id,
+                budget_class_id,
+                budget_category_id,
+                budget_partida_id,
+                payload.expense_item_id,
+                payload.expense_subitem_id,
+                payload.expense_category_id,
+                supplier_id,
                 payload.spent_on,
                 payload.concept,
                 payload.folio,
@@ -317,7 +411,19 @@ def create_expense(
               (entidad, entidad_id, accion, usuario_id, canal, detalle_json)
             values ('gasto', %s, 'crear', %s, 'web', %s)
             """,
-            (row["id"], user.id, Jsonb({"importe": str(payload.amount)})),
+            (
+                row["id"],
+                user.id,
+                Jsonb(
+                    {
+                        "importe": str(payload.amount),
+                        "partida_gasto_id": str(payload.expense_item_id),
+                        "subpartida_gasto_id": str(payload.expense_subitem_id),
+                        "categoria_gasto_id": str(payload.expense_category_id),
+                        "proveedor_id": str(supplier_id),
+                    }
+                ),
+            ),
         )
         return row
 
@@ -332,10 +438,21 @@ def list_expenses(
                 """
                 select g.id, g.fecha, g.concepto, g.folio, g.importe,
                        g.estado::text as estado, a.nombre as area,
-                       cp.codigo as partida_codigo, cp.descripcion as partida
+                       coalesce(cpg.nombre, cc.nombre, '') as partida,
+                       coalesce(csg.nombre, '') as subpartida,
+                       coalesce(cag.nombre, cat.nombre, '') as categoria,
+                       coalesce(prov.nombre, '') as proveedor,
+                       cp.codigo as partida_presupuesto_codigo,
+                       cp.descripcion as partida_presupuesto
                 from public.gasto g
                 join public.area a on a.id = g.area_id
-                join public.catalogo_partida cp on cp.id = g.partida_id
+                left join public.catalogo_partida_gasto cpg on cpg.id = g.partida_gasto_id
+                left join public.catalogo_subpartida_gasto csg on csg.id = g.subpartida_gasto_id
+                left join public.catalogo_categoria_gasto cag on cag.id = g.categoria_gasto_id
+                left join public.catalogo_clase cc on cc.id = g.clase_id
+                left join public.catalogo_categoria cat on cat.id = g.categoria_id
+                left join public.catalogo_proveedor prov on prov.id = g.proveedor_id
+                left join public.catalogo_partida cp on cp.id = g.partida_id
                 where g.obra_id = %s and g.eliminado_en is null
                 order by g.fecha desc, g.creado_en desc
                 """,
@@ -571,13 +688,21 @@ def report_expenses(
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Obra inexistente")
         rows = connection.execute(
             """
-            select g.fecha::text as "Fecha", a.nombre as "Área", cp.codigo as "Código",
-                   cp.descripcion as "Partida", g.concepto as "Concepto",
+            select g.fecha::text as "Fecha", a.nombre as "Área",
+                   coalesce(cpg.nombre, cc.nombre, '') as "Partida",
+                   coalesce(csg.nombre, '') as "Subpartida",
+                   coalesce(cag.nombre, cat.nombre, '') as "Categoría",
+                   coalesce(prov.nombre, '') as "Proveedor", g.concepto as "Concepto",
                    coalesce(g.folio, '') as "Folio", g.importe as "Importe",
                    g.estado::text as "Estado"
             from public.gasto g
             join public.area a on a.id = g.area_id
-            join public.catalogo_partida cp on cp.id = g.partida_id
+            left join public.catalogo_partida_gasto cpg on cpg.id = g.partida_gasto_id
+            left join public.catalogo_subpartida_gasto csg on csg.id = g.subpartida_gasto_id
+            left join public.catalogo_categoria_gasto cag on cag.id = g.categoria_gasto_id
+            left join public.catalogo_clase cc on cc.id = g.clase_id
+            left join public.catalogo_categoria cat on cat.id = g.categoria_id
+            left join public.catalogo_proveedor prov on prov.id = g.proveedor_id
             where g.obra_id = %s and g.eliminado_en is null
             order by g.fecha, g.creado_en
             """,

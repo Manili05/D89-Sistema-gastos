@@ -382,13 +382,25 @@ export interface components {
              * Format: uuid
              */
             area_id: string;
-            /**
-             * Budget Item Id
-             * Format: uuid
-             */
-            budget_item_id: string;
+            /** Budget Item Id */
+            budget_item_id?: string | null;
             /** Concept */
             concept: string;
+            /**
+             * Expense Category Id
+             * Format: uuid
+             */
+            expense_category_id: string;
+            /**
+             * Expense Item Id
+             * Format: uuid
+             */
+            expense_item_id: string;
+            /**
+             * Expense Subitem Id
+             * Format: uuid
+             */
+            expense_subitem_id: string;
             /** Folio */
             folio?: string | null;
             /**
@@ -400,6 +412,8 @@ export interface components {
             state: components["schemas"]["ExpenseState"];
             /** Supplier Id */
             supplier_id?: string | null;
+            /** Supplier Name */
+            supplier_name?: string | null;
             /**
              * Work Id
              * Format: uuid

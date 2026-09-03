@@ -100,14 +100,36 @@
             "type": "string"
           },
           "budget_item_id": {
-            "format": "uuid",
-            "title": "Budget Item Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Item Id"
           },
           "concept": {
             "maxLength": 500,
             "minLength": 3,
             "title": "Concept",
+            "type": "string"
+          },
+          "expense_category_id": {
+            "format": "uuid",
+            "title": "Expense Category Id",
+            "type": "string"
+          },
+          "expense_item_id": {
+            "format": "uuid",
+            "title": "Expense Item Id",
+            "type": "string"
+          },
+          "expense_subitem_id": {
+            "format": "uuid",
+            "title": "Expense Subitem Id",
             "type": "string"
           },
           "folio": {
@@ -143,6 +165,19 @@
             ],
             "title": "Supplier Id"
           },
+          "supplier_name": {
+            "anyOf": [
+              {
+                "maxLength": 250,
+                "minLength": 2,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supplier Name"
+          },
           "work_id": {
             "format": "uuid",
             "title": "Work Id",
@@ -152,7 +187,9 @@
         "required": [
           "work_id",
           "area_id",
-          "budget_item_id",
+          "expense_item_id",
+          "expense_subitem_id",
+          "expense_category_id",
           "spent_on",
           "concept",
           "amount"

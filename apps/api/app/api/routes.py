@@ -190,7 +190,18 @@ def post_subcontract_payment(
     return create_subcontract_payment(settings, user, subcontract_id, payload)
 
 
-REPORT_COLUMNS = ("Fecha", "Área", "Código", "Partida", "Concepto", "Folio", "Importe", "Estado")
+REPORT_COLUMNS = (
+    "Fecha",
+    "Área",
+    "Partida",
+    "Subpartida",
+    "Categoría",
+    "Proveedor",
+    "Concepto",
+    "Folio",
+    "Importe",
+    "Estado",
+)
 
 
 @router.get("/reports/works/{work_id}.xlsx", tags=["reports"])

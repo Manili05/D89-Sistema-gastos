@@ -79,15 +79,25 @@ def main() -> None:
         assert isinstance(confirmed, dict) and confirmed["item_count"] == 232
         catalog = require(client.get(f"/api/v1/works/{work_id}/catalog", headers=auth))
         assert isinstance(catalog, dict) and len(catalog["items"]) == 232
-        item = catalog["items"][0]
+        area = catalog["areas"][0]
+        expense_partida = catalog["expense_partidas"][0]
+        expense_subitem = next(
+            item
+            for item in catalog["expense_subitems"]
+            if item["partida_id"] == expense_partida["id"]
+        )
+        expense_category = catalog["expense_categories"][0]
         expense = require(
             client.post(
                 "/api/v1/expenses",
                 headers=auth,
                 json={
                     "work_id": work_id,
-                    "area_id": item["area_id"],
-                    "budget_item_id": item["budget_item_id"],
+                    "area_id": area["id"],
+                    "expense_item_id": expense_partida["id"],
+                    "expense_subitem_id": expense_subitem["id"],
+                    "expense_category_id": expense_category["id"],
+                    "supplier_name": "Proveedor validación D89",
                     "spent_on": date(2026, 8, 30).isoformat(),
                     "concept": "Validación integral staging D89",
                     "amount": "18450.00",
