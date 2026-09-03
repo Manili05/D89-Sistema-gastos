@@ -30,6 +30,7 @@ from app.models import (
     WeeklyCloseCreate,
     WeeklyReopen,
     WorkCreate,
+    WorkDelete,
 )
 from app.services.neodata import NeodataError, parse_neodata_workbook
 from app.services.reports import build_excel_report, build_pdf_report
@@ -43,6 +44,7 @@ from app.services.repository import (
     create_subcontract_payment,
     create_work,
     dashboard,
+    delete_work,
     list_expenses,
     list_incomes,
     list_subcontracts,
@@ -82,6 +84,16 @@ def post_work(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> dict[str, Any]:
     return create_work(settings, user, payload)
+
+
+@router.delete("/works/{work_id}", tags=["works"])
+def remove_work(
+    work_id: UUID,
+    payload: WorkDelete,
+    user: AdminUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    return delete_work(settings, user, work_id, payload)
 
 
 @router.get("/works/{work_id}/catalog", tags=["works"])

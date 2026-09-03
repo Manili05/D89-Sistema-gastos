@@ -78,3 +78,24 @@ def test_openapi_is_namespaced() -> None:
     schema = client.get("/api/v1/openapi.json")
     assert schema.status_code == 200
     assert schema.json()["info"]["title"] == "D89 Sistema de Gastos API"
+    assert "delete" in schema.json()["paths"]["/api/v1/works/{work_id}"]
+
+
+def test_operational_user_cannot_delete_a_work() -> None:
+    settings = get_settings()
+    token = jwt.encode(
+        {
+            "sub": str(uuid4()),
+            "aud": "authenticated",
+            "app_metadata": {"role": "operativo"},
+        },
+        settings.jwt_secret,
+        algorithm="HS256",
+    )
+    response = client.request(
+        "DELETE",
+        f"/api/v1/works/{uuid4()}",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"confirmation_name": "Obra de prueba"},
+    )
+    assert response.status_code == 403

@@ -29,6 +29,10 @@ class WorkCreate(BaseModel):
     end_date: date | None = None
 
 
+class WorkDelete(BaseModel):
+    confirmation_name: str = Field(min_length=2, max_length=180)
+
+
 class WeeklyCloseCreate(BaseModel):
     work_id: UUID
     iso_year: int = Field(ge=2000, le=2200)

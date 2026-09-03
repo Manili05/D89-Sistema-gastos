@@ -23,6 +23,7 @@ from app.models import (
     UserContext,
     WeeklyCloseCreate,
     WorkCreate,
+    WorkDelete,
 )
 from app.services.neodata import normalized_text
 
@@ -138,6 +139,108 @@ def _insert_work(
         (row["id"], user.id, Jsonb({"nombre": payload.name})),
     )
     return row
+
+
+def delete_work(
+    settings: Settings, user: UserContext, work_id: UUID, payload: WorkDelete
+) -> dict[str, Any]:
+    """Permanently delete one work and all of its operational data."""
+    with transaction(settings) as connection:
+        require_active_profile(connection, user)
+        if user.role is not Role.ADMIN:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Solo administración elimina obras")
+
+        work = connection.execute(
+            "select id, nombre from public.obra where id = %s for update", (work_id,)
+        ).fetchone()
+        if work is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Obra inexistente")
+        if payload.confirmation_name.strip() != work["nombre"].strip():
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "El nombre de confirmación no coincide con la obra",
+            )
+
+        counts = connection.execute(
+            """
+            select
+              (select count(*) from public.importacion_neodata where obra_id = %(work_id)s)
+                as importaciones,
+              (select count(*) from public.presupuesto_partida where obra_id = %(work_id)s)
+                as partidas_presupuesto,
+              (select count(*) from public.gasto where obra_id = %(work_id)s) as gastos,
+              (select count(*) from public.cierre_semanal where obra_id = %(work_id)s) as cierres,
+              (select count(*) from public.ingreso where obra_id = %(work_id)s) as ingresos,
+              (select count(*) from public.subcontrato where obra_id = %(work_id)s)
+                as subcontratos
+            """,
+            {"work_id": work_id},
+        ).fetchone()
+        assert counts is not None
+        receipt_rows = connection.execute(
+            """
+            select comprobante_path from public.gasto
+            where obra_id = %s and comprobante_path is not null
+            """,
+            (work_id,),
+        ).fetchall()
+
+        # These relationships intentionally do not cascade in the original schema,
+        # so delete their leaves first and keep the whole operation atomic.
+        connection.execute(
+            """
+            delete from public.cierre_semanal_gasto csg
+            where exists (
+              select 1 from public.cierre_semanal cs
+              where cs.id = csg.cierre_id and cs.obra_id = %(work_id)s
+            ) or exists (
+              select 1 from public.gasto g
+              where g.id = csg.gasto_id and g.obra_id = %(work_id)s
+            )
+            """,
+            {"work_id": work_id},
+        )
+        connection.execute(
+            """
+            delete from public.subcontrato_pago sp
+            where exists (
+              select 1 from public.subcontrato s
+              where s.id = sp.subcontrato_id and s.obra_id = %(work_id)s
+            ) or exists (
+              select 1 from public.gasto g
+              where g.id = sp.gasto_id_vinculado and g.obra_id = %(work_id)s
+            )
+            """,
+            {"work_id": work_id},
+        )
+        connection.execute("delete from public.subcontrato where obra_id = %s", (work_id,))
+        connection.execute("delete from public.cierre_semanal where obra_id = %s", (work_id,))
+        connection.execute("delete from public.ingreso where obra_id = %s", (work_id,))
+        connection.execute("delete from public.gasto where obra_id = %s", (work_id,))
+        deleted = connection.execute(
+            "delete from public.obra where id = %s returning id", (work_id,)
+        ).fetchone()
+        assert deleted is not None
+
+        connection.execute(
+            """
+            insert into public.audit_log_negocio
+              (entidad, entidad_id, accion, usuario_id, canal, detalle_json)
+            values ('obra', %s, 'eliminar', %s, 'web', %s)
+            """,
+            (
+                work_id,
+                user.id,
+                Jsonb({"nombre": work["nombre"], "conteos_eliminados": dict(counts)}),
+            ),
+        )
+        return {
+            "id": work_id,
+            "nombre": work["nombre"],
+            "deleted": True,
+            "counts": counts,
+            "receipt_paths": [row["comprobante_path"] for row in receipt_rows],
+        }
 
 
 def work_catalog(settings: Settings, user: UserContext, work_id: UUID) -> dict[str, Any]:
@@ -441,6 +544,7 @@ def dashboard(settings: Settings, user: UserContext) -> dict[str, Any]:
         subcontract_paid = sum((row["pagado_subcontratos"] for row in works), 0)
         return {
             "works": list(works),
+            "permissions": {"can_delete_works": user.role is Role.ADMIN},
             "totals": {
                 "budget": budget,
                 "spent": spent,

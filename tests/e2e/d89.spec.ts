@@ -24,6 +24,7 @@ const previewData = {
 };
 
 test.beforeEach(async ({ page }) => {
+  let workDeleted = false;
   await page.route('**/auth/v1/token**', async (route) => {
     await route.fulfill({
       contentType: 'application/json',
@@ -72,9 +73,20 @@ test.beforeEach(async ({ page }) => {
   await page.route('**/api/v1/dashboard', async (route) => {
     await route.fulfill({
       json: {
-        works: [{ id: workId, nombre: 'Infra Toluca', ubicacion: 'Toluca', presupuesto: '2624832.88', gasto: '18450', pendiente: '18450', cobrado: '75000', por_cobrar: '0', subcontratado: '45000', pagado_subcontratos: '18450' }],
-        totals: { budget: '2624832.88', spent: '18450', available: '2606382.88', pending: '18450', collected: '75000', receivable: '0', subcontracted: '45000', subcontract_paid: '18450', cash_balance: '56550' },
+        works: workDeleted ? [] : [{ id: workId, nombre: 'Infra Toluca', ubicacion: 'Toluca', presupuesto: '2624832.88', gasto: '18450', pendiente: '18450', cobrado: '75000', por_cobrar: '0', subcontratado: '45000', pagado_subcontratos: '18450' }],
+        permissions: { can_delete_works: true },
+        totals: workDeleted
+          ? { budget: '0', spent: '0', available: '0', pending: '0', collected: '0', receivable: '0', subcontracted: '0', subcontract_paid: '0', cash_balance: '0' }
+          : { budget: '2624832.88', spent: '18450', available: '2606382.88', pending: '18450', collected: '75000', receivable: '0', subcontracted: '45000', subcontract_paid: '18450', cash_balance: '56550' },
       },
+    });
+  });
+  await page.route(new RegExp(`/api/v1/works/${workId}$`), async (route) => {
+    expect(route.request().method()).toBe('DELETE');
+    expect(route.request().postDataJSON()).toEqual({ confirmation_name: 'Infra Toluca' });
+    workDeleted = true;
+    await route.fulfill({
+      json: { id: workId, nombre: 'Infra Toluca', deleted: true, counts: {}, receipt_paths: [] },
     });
   });
   await page.route('**/api/v1/works/*/catalog', async (route) => {
@@ -199,4 +211,18 @@ test('dashboard es usable en viewport móvil', async ({ page }, testInfo) => {
   await page.goto('/');
   await expect(page.getByRole('navigation', { name: 'Navegación móvil' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Panorama de obra' })).toBeVisible();
+});
+
+test('administrador elimina una obra con confirmación por nombre', async ({ page }) => {
+  await login(page);
+  await page.getByRole('button', { name: 'Eliminar Infra Toluca' }).click();
+  const confirmButton = page.getByRole('button', { name: 'Eliminar definitivamente' });
+  await expect(page.getByRole('dialog')).toContainText('Acción irreversible');
+  await expect(confirmButton).toBeDisabled();
+  await page.getByLabel('Escribe el nombre exacto para confirmar').fill('Infra');
+  await expect(confirmButton).toBeDisabled();
+  await page.getByLabel('Escribe el nombre exacto para confirmar').fill('Infra Toluca');
+  await confirmButton.click();
+  await expect(page.getByRole('status')).toContainText('Ya puedes cargarla de cero');
+  await expect(page.getByText('No hay obras asignadas a esta cuenta.')).toBeVisible();
 });

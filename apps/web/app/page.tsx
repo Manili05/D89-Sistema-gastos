@@ -6,7 +6,7 @@ import { AppShell } from '@/components/app-shell';
 import { PlusIcon } from '@/components/icons';
 import { PageHeader } from '@/components/page-header';
 import { StatusPill } from '@/components/status-pill';
-import { apiFetch, apiJson } from '@/lib/auth';
+import { apiFetch, apiJson, getSupabaseBrowserClient } from '@/lib/auth';
 
 type Amount = string | number;
 type Work = {
@@ -23,6 +23,7 @@ type Work = {
 };
 type Dashboard = {
   works: Work[];
+  permissions: { can_delete_works: boolean };
   totals: {
     budget: Amount;
     spent: Amount;
@@ -50,11 +51,55 @@ function workStatus(work: Work): { tone: 'green' | 'amber' | 'red'; label: strin
 export default function DashboardPage() {
   const [dashboard, setDashboard] = useState<Dashboard>();
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const [downloading, setDownloading] = useState('');
+  const [workToDelete, setWorkToDelete] = useState<Work>();
+  const [confirmationName, setConfirmationName] = useState('');
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     apiJson<Dashboard>('/dashboard').then(setDashboard).catch((reason: Error) => setError(reason.message));
   }, []);
+
+  function openDelete(work: Work) {
+    setError('');
+    setSuccess('');
+    setConfirmationName('');
+    setWorkToDelete(work);
+  }
+
+  function closeDelete() {
+    if (deleting) return;
+    setWorkToDelete(undefined);
+    setConfirmationName('');
+  }
+
+  async function deleteSelectedWork() {
+    if (!workToDelete || confirmationName !== workToDelete.nombre) return;
+    setDeleting(true);
+    setError('');
+    setSuccess('');
+    try {
+      const result = await apiJson<{ nombre: string; receipt_paths: string[] }>(
+        `/works/${workToDelete.id}`,
+        { method: 'DELETE', body: JSON.stringify({ confirmation_name: confirmationName }) },
+      );
+      let receiptWarning = '';
+      if (result.receipt_paths.length > 0) {
+        const { error: storageError } = await getSupabaseBrowserClient()
+          .storage.from('comprobantes').remove(result.receipt_paths);
+        if (storageError) receiptWarning = ' Los archivos de comprobantes requieren limpieza manual.';
+      }
+      setWorkToDelete(undefined);
+      setConfirmationName('');
+      setDashboard(await apiJson<Dashboard>('/dashboard'));
+      setSuccess(`La obra “${result.nombre}” fue eliminada. Ya puedes cargarla de cero.${receiptWarning}`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'No fue posible eliminar la obra');
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   async function download(work: Work, extension: 'xlsx' | 'pdf') {
     setDownloading(`${work.id}-${extension}`);
@@ -83,7 +128,8 @@ export default function DashboardPage() {
   return (
     <AppShell active="/">
       <PageHeader eyebrow="Información en vivo" title="Panorama de obra" description="Presupuesto vigente, gasto real, flujo de caja y compromisos por obra." actions={<><Link className="btn secondary" href="/admin/importar">Importar NEODATA</Link><Link className="btn" href="/gastos"><PlusIcon />Nuevo gasto</Link></>} />
-      {error && <p className="notice" role="alert">{error}</p>}
+      {error && <p className="notice error" role="alert">{error}</p>}
+      {success && <p className="notice success" role="status">{success}</p>}
       <section className="metrics" aria-label="Indicadores principales" aria-busy={!dashboard}>
         <article className="metric-card" style={{ '--accent': '#17233c' } as CSSProperties}><span className="metric-label">Presupuesto activo <StatusPill tone="navy">{dashboard?.works.length ?? '…'} obras</StatusPill></span><strong className="metric-value">{currency(totals?.budget)}</strong><span className="metric-foot">Versión vigente confirmada</span></article>
         <article className="metric-card" style={{ '--accent': '#c66a3d' } as CSSProperties}><span className="metric-label">Gasto acumulado</span><strong className="metric-value">{currency(totals?.spent)}</strong><span className="metric-foot"><strong>{spentPercent}%</strong> del presupuesto</span></article>
@@ -96,7 +142,7 @@ export default function DashboardPage() {
           <div className="work-list">
             {dashboard?.works.map((work) => {
               const state = workStatus(work);
-              return <article className="work-row" key={work.id}><div><h3>{work.nombre}</h3><p>{work.ubicacion || 'Ubicación no registrada'}</p></div><div><span className="amount-label">Presupuesto</span><span className="amount">{currency(work.presupuesto)}</span></div><div><span className="amount-label">Gasto real</span><span className="amount">{currency(work.gasto)}</span></div><div className="work-actions"><StatusPill tone={state.tone}>{state.label}</StatusPill><button className="text-action" type="button" disabled={Boolean(downloading)} onClick={() => download(work, 'xlsx')}>Excel</button><button className="text-action" type="button" disabled={Boolean(downloading)} onClick={() => download(work, 'pdf')}>PDF</button></div></article>;
+              return <article className="work-row" key={work.id}><div><h3>{work.nombre}</h3><p>{work.ubicacion || 'Ubicación no registrada'}</p></div><div><span className="amount-label">Presupuesto</span><span className="amount">{currency(work.presupuesto)}</span></div><div><span className="amount-label">Gasto real</span><span className="amount">{currency(work.gasto)}</span></div><div className="work-actions"><StatusPill tone={state.tone}>{state.label}</StatusPill><button className="text-action" type="button" disabled={Boolean(downloading)} onClick={() => download(work, 'xlsx')}>Excel</button><button className="text-action" type="button" disabled={Boolean(downloading)} onClick={() => download(work, 'pdf')}>PDF</button>{dashboard.permissions.can_delete_works && <button className="text-action danger" type="button" disabled={Boolean(downloading)} onClick={() => openDelete(work)} aria-label={`Eliminar ${work.nombre}`}>Eliminar</button>}</div></article>;
             })}
             {dashboard && dashboard.works.length === 0 && <p className="empty-state">No hay obras asignadas a esta cuenta.</p>}
           </div>
@@ -118,6 +164,20 @@ export default function DashboardPage() {
           </div>
         </section>
       </div>
+      {workToDelete && <div className="dialog-backdrop" role="presentation">
+        <section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-work-title">
+          <span className="eyebrow">Acción irreversible</span>
+          <h2 id="delete-work-title">Eliminar obra</h2>
+          <p>Se borrarán la obra <strong>{workToDelete.nombre}</strong> y todos sus presupuestos, importaciones, gastos, cierres, ingresos, subcontratos y asignaciones. La auditoría del borrado se conservará.</p>
+          <label className="field">Escribe el nombre exacto para confirmar
+            <input autoFocus value={confirmationName} onChange={(event) => setConfirmationName(event.target.value)} placeholder={workToDelete.nombre} />
+          </label>
+          <div className="dialog-actions">
+            <button className="btn secondary" type="button" onClick={closeDelete} disabled={deleting}>Cancelar</button>
+            <button className="btn danger" type="button" onClick={deleteSelectedWork} disabled={deleting || confirmationName !== workToDelete.nombre}>{deleting ? 'Eliminando…' : 'Eliminar definitivamente'}</button>
+          </div>
+        </section>
+      </div>}
     </AppShell>
   );
 }

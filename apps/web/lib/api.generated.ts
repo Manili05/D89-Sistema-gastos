@@ -314,6 +314,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/works/{work_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove Work */
+        delete: operations["remove_work_api_v1_works__work_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/works/{work_id}/catalog": {
         parameters: {
             query?: never;
@@ -553,6 +570,11 @@ export interface components {
             name: string;
             /** Start Date */
             start_date?: string | null;
+        };
+        /** WorkDelete */
+        WorkDelete: {
+            /** Confirmation Name */
+            confirmation_name: string;
         };
     };
     responses: never;
@@ -1332,6 +1354,45 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_work_api_v1_works__work_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                work_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkDelete"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };

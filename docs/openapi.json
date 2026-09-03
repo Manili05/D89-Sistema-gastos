@@ -647,6 +647,21 @@
         ],
         "title": "WorkCreate",
         "type": "object"
+      },
+      "WorkDelete": {
+        "properties": {
+          "confirmation_name": {
+            "maxLength": 180,
+            "minLength": 2,
+            "title": "Confirmation Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "confirmation_name"
+        ],
+        "title": "WorkDelete",
+        "type": "object"
       }
     }
   },
@@ -2135,6 +2150,77 @@
           }
         },
         "summary": "Post Work",
+        "tags": [
+          "works"
+        ]
+      }
+    },
+    "/api/v1/works/{work_id}": {
+      "delete": {
+        "operationId": "remove_work_api_v1_works__work_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkDelete"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Remove Work Api V1 Works  Work Id  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Remove Work",
         "tags": [
           "works"
         ]
