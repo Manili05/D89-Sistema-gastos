@@ -3,7 +3,7 @@ from decimal import Decimal
 from enum import StrEnum
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class Role(StrEnum):
@@ -48,6 +48,113 @@ class WorkUpdate(BaseModel):
         return self
 
 
+class SupplierProfile(BaseModel):
+    name: str = Field(min_length=2, max_length=250)
+    legal_name: str | None = Field(default=None, max_length=250)
+    tax_id: str | None = Field(default=None, max_length=20)
+    contact_name: str | None = Field(default=None, max_length=180)
+    phone: str | None = Field(default=None, max_length=40)
+    whatsapp: str | None = Field(default=None, max_length=40)
+    email: str | None = Field(default=None, max_length=254)
+    address: str | None = Field(default=None, max_length=500)
+    coverage: str | None = Field(default=None, max_length=300)
+    notes: str | None = Field(default=None, max_length=3000)
+    specialty_ids: list[UUID] = Field(default_factory=list, max_length=30)
+
+    @field_validator(
+        "name",
+        "legal_name",
+        "tax_id",
+        "contact_name",
+        "phone",
+        "whatsapp",
+        "email",
+        "address",
+        "coverage",
+        "notes",
+        mode="before",
+    )
+    @classmethod
+    def strip_supplier_text(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        stripped = value.strip()
+        return stripped or None
+
+    @model_validator(mode="after")
+    def validate_supplier_identity(self) -> "SupplierProfile":
+        self.name = self.name.strip()
+        if self.tax_id:
+            cleaned = "".join(character for character in self.tax_id.upper() if character.isalnum())
+            if len(cleaned) not in {12, 13}:
+                raise ValueError("El RFC debe contener 12 o 13 caracteres")
+            self.tax_id = cleaned
+        if self.email and (
+            "@" not in self.email or self.email.startswith("@") or self.email.endswith("@")
+        ):
+            raise ValueError("Correo electrónico inválido")
+        self.specialty_ids = list(dict.fromkeys(self.specialty_ids))
+        return self
+
+
+class SupplierCreate(SupplierProfile):
+    pass
+
+
+class SupplierUpdate(SupplierProfile):
+    pass
+
+
+class SupplierArchive(BaseModel):
+    reason: str = Field(min_length=5, max_length=500)
+
+
+class SupplierSpecialtyCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=120)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def strip_name(cls, value: str) -> str:
+        return value.strip()
+
+
+class SupplierSpecialtyUpdate(SupplierSpecialtyCreate):
+    active: bool = True
+
+
+class WorkSupplierAssignment(BaseModel):
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class SupplierEvaluationCreate(BaseModel):
+    work_id: UUID
+    expense_id: UUID | None = None
+    work_description: str = Field(min_length=3, max_length=1000)
+    service_date: date
+    quality: int = Field(ge=1, le=5)
+    timeliness: int = Field(ge=1, le=5)
+    value: int = Field(ge=1, le=5)
+    communication: int = Field(ge=1, le=5)
+    safety: int = Field(ge=1, le=5)
+    comment: str | None = Field(default=None, max_length=3000)
+
+    @field_validator("work_description", "comment", mode="before")
+    @classmethod
+    def strip_evaluation_text(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        stripped = value.strip()
+        return stripped or None
+
+
+class SupplierEvaluationUpdate(SupplierEvaluationCreate):
+    pass
+
+
+class SupplierEvaluationVoid(BaseModel):
+    reason: str = Field(min_length=5, max_length=500)
+
+
 class WeeklyCloseCreate(BaseModel):
     work_id: UUID
     iso_year: int = Field(ge=2000, le=2200)
@@ -65,23 +172,12 @@ class ExpenseCreate(BaseModel):
     expense_subitem_id: UUID
     expense_category_id: UUID
     budget_item_id: UUID | None = None
-    supplier_id: UUID | None = None
-    supplier_name: str | None = Field(default=None, min_length=2, max_length=250)
+    supplier_id: UUID
     spent_on: date
     concept: str = Field(min_length=3, max_length=500)
     folio: str | None = Field(default=None, max_length=120)
     amount: Decimal = Field(gt=0, decimal_places=4)
     state: ExpenseState = ExpenseState.PENDIENTE
-
-    @model_validator(mode="after")
-    def require_one_supplier(self) -> "ExpenseCreate":
-        if (self.supplier_id is None) == (self.supplier_name is None):
-            raise ValueError("Indica un proveedor existente o el nombre de uno nuevo")
-        if self.supplier_name is not None:
-            self.supplier_name = self.supplier_name.strip()
-            if len(self.supplier_name) < 2:
-                raise ValueError("El nombre del proveedor es demasiado corto")
-        return self
 
 
 class ExpenseUpdate(BaseModel):
@@ -90,20 +186,11 @@ class ExpenseUpdate(BaseModel):
     expense_subitem_id: UUID
     expense_category_id: UUID
     budget_item_id: UUID | None = None
-    supplier_id: UUID | None = None
-    supplier_name: str | None = Field(default=None, min_length=2, max_length=250)
+    supplier_id: UUID
     spent_on: date
     concept: str = Field(min_length=3, max_length=500)
     folio: str | None = Field(default=None, max_length=120)
     amount: Decimal = Field(gt=0, decimal_places=4)
-
-    @model_validator(mode="after")
-    def require_one_supplier(self) -> "ExpenseUpdate":
-        if (self.supplier_id is None) == (self.supplier_name is None):
-            raise ValueError("Indica un proveedor existente o el nombre de uno nuevo")
-        if self.supplier_name is not None:
-            self.supplier_name = self.supplier_name.strip()
-        return self
 
 
 class ExpenseReview(BaseModel):

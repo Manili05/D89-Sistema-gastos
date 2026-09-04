@@ -9,6 +9,8 @@ const expenseSubpartidaId = '88888888-8888-4888-8888-888888888888';
 const expenseCategoryId = '99999999-9999-4999-8999-999999999999';
 const secondExpensePartidaId = '12121212-1212-4212-8212-121212121212';
 const secondExpenseSubpartidaId = '13131313-1313-4313-8313-131313131313';
+const supplierId = 'abababab-abab-4bab-8bab-abababababab';
+const specialtyId = 'cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd';
 
 const previewData = {
   area_count: 1,
@@ -121,7 +123,7 @@ test.beforeEach(async ({ page }) => {
         expense_partidas: [{ id: expensePartidaId, nombre: 'PRELIMINARES' }, { id: secondExpensePartidaId, nombre: 'ALBANILERIA' }],
         expense_subitems: [{ id: expenseSubpartidaId, partida_id: expensePartidaId, nombre: 'LIMPIEZA' }, { id: secondExpenseSubpartidaId, partida_id: secondExpensePartidaId, nombre: 'FIRMES Y HORMIGONES' }],
         expense_categories: [{ id: expenseCategoryId, nombre: 'MATERIAL' }],
-        suppliers: [],
+        suppliers: [{ id: supplierId, nombre: 'Concretos Toluca' }],
       },
     });
   });
@@ -133,12 +135,36 @@ test.beforeEach(async ({ page }) => {
       expense_item_id: secondExpensePartidaId,
       expense_subitem_id: secondExpenseSubpartidaId,
       expense_category_id: expenseCategoryId,
-      supplier_name: 'Concretos Toluca',
+      supplier_id: supplierId,
     });
     await route.fulfill({ status: 201, json: { id: '44444444-4444-4444-8444-444444444444' } });
   });
   await page.route('**/api/v1/weekly-closes', async (route) => {
     await route.fulfill({ status: 201, json: { expense_count: 12 } });
+  });
+  await page.route('**/api/v1/supplier-specialties**', async (route) => {
+    await route.fulfill({ json: [{ id: specialtyId, nombre: 'Albañilería', activo: true, supplier_count: 1 }] });
+  });
+  await page.route('**/api/v1/suppliers/analytics', async (route) => {
+    await route.fulfill({ json: { summary: { active_suppliers: 1, archived_suppliers: 0, evaluations: 1, average_rating: '4.60' }, specialties: [], permissions: { can_view_financials: true } } });
+  });
+  await page.route(new RegExp(`/api/v1/suppliers/${supplierId}$`), async (route) => {
+    await route.fulfill({ json: {
+      id: supplierId, nombre: 'Concretos Toluca', razon_social: 'Concretos del Valle SA de CV',
+      rfc: 'CVA010203AB1', contacto: 'Ana Torres', telefono: '7221234567',
+      whatsapp: '527221234567', email: 'ana@concretos.example', direccion: 'Toluca',
+      cobertura: 'Valle de Toluca', notas: 'Entrega con revolvedora', activo: true,
+      specialties: [{ id: specialtyId, nombre: 'Albañilería' }], evaluation_count: 1,
+      rating: '4.60', quality: '5', timeliness: '4', value: '4', communication: '5',
+      safety: '5', work_count: 1, expense_count: 1, validated_spend: '18450',
+      assignments: [{ id: 'edededed-eded-4ded-8ded-edededededed', obra_id: workId, obra: 'Infra Toluca', notas: null, activo: true }],
+      evaluations: [{ id: 'efefefef-efef-4fef-8fef-efefefefefef', obra_id: workId, obra_nombre: 'Infra Toluca', gasto_id: null, gasto_concepto: null, trabajo: 'Suministro de concreto', fecha_servicio: '2026-08-28', calidad: 5, cumplimiento: 4, costo_valor: 4, comunicacion: 5, seguridad_orden: 5, calificacion: '4.60', comentario: 'Entrega puntual', vigente: true, autor: 'Administrador', motivo_anulacion: null }],
+      expenses: [{ id: '44444444-4444-4444-8444-444444444444', obra_id: workId, obra: 'Infra Toluca', fecha: '2026-08-28', concepto: 'Cemento y adhesivo', folio: 'A-1', importe: '18450', estado: 'validado' }],
+      permissions: { can_manage: true },
+    } });
+  });
+  await page.route('**/api/v1/suppliers?**', async (route) => {
+    await route.fulfill({ json: { items: [{ id: supplierId, nombre: 'Concretos Toluca', razon_social: 'Concretos del Valle SA de CV', contacto: 'Ana Torres', telefono: '7221234567', whatsapp: '527221234567', email: 'ana@concretos.example', cobertura: 'Valle de Toluca', activo: true, specialties: [{ id: specialtyId, nombre: 'Albañilería' }], rating: '4.60', evaluation_count: 1, work_count: 1 }], total: 1, page: 1, page_size: 25, permissions: { can_manage: true } } });
   });
   await page.route('**/api/v1/neodata/preview', async (route) => {
     await route.fulfill({
@@ -233,7 +259,7 @@ test('captura gasto y comprobante queda pendiente', async ({ page }) => {
   await partida.selectOption(secondExpensePartidaId);
   await expect(subpartida).toHaveValue(secondExpenseSubpartidaId);
   await expect(page.getByLabel('Categoría', { exact: true })).toHaveValue(expenseCategoryId);
-  await page.getByLabel('Proveedor', { exact: true }).fill('Concretos Toluca');
+  await page.getByLabel('Proveedor', { exact: true }).selectOption(supplierId);
   await page.getByLabel('Importe').fill('18450');
   await page.getByLabel('Concepto').fill('Cemento y adhesivo para firme de oficina');
   await page.getByRole('button', { name: /Guardar pendiente/ }).click();
@@ -246,6 +272,20 @@ test('cierre semanal crea evidencia de lote', async ({ page }) => {
   await page.getByRole('button', { name: 'Cerrar semana 35' }).click();
   await expect(page.getByRole('status')).toContainText('Cierre confirmado');
   await expect(page.getByText('Semana cerrada')).toBeVisible();
+});
+
+test('directorio muestra ficha, especialidad y evaluación del proveedor', async ({ page }) => {
+  await login(page);
+  await page.goto('/proveedores');
+  await expect(page.getByRole('heading', { name: 'Directorio de proveedores' })).toBeVisible();
+  await expect(page.getByText('Concretos Toluca')).toBeVisible();
+  await page.getByRole('link', { name: /Concretos Toluca/ }).click();
+  await expect(page.getByRole('heading', { name: 'Concretos Toluca' })).toBeVisible();
+  await expect(page.getByText('Ana Torres')).toBeVisible();
+  await expect(page.getByText('Suministro de concreto')).toBeVisible();
+  await page.getByRole('button', { name: /Evaluar trabajo/ }).click();
+  await expect(page.getByRole('heading', { name: 'Evaluar trabajo' })).toBeVisible();
+  await expect(page.getByLabel('Obra')).toHaveValue(workId);
 });
 
 test('dashboard es usable en viewport móvil', async ({ page }, testInfo) => {

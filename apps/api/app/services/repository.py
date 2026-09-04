@@ -325,7 +325,14 @@ def work_catalog(settings: Settings, user: UserContext, work_id: UUID) -> dict[s
             (work_id,),
         ).fetchall()
         suppliers = connection.execute(
-            "select id, nombre from public.catalogo_proveedor where activo order by nombre"
+            """
+            select p.id, p.nombre
+            from public.catalogo_proveedor p
+            join public.obra_proveedor op on op.proveedor_id = p.id
+            where op.obra_id = %s and op.activo and p.activo
+            order by p.nombre
+            """,
+            (work_id,),
         ).fetchall()
         expense_partidas = connection.execute(
             """
@@ -414,27 +421,21 @@ def create_expense(
             budget_class_id = budget["clase_id"]
             budget_category_id = budget["categoria_id"]
 
-        if payload.supplier_id is not None:
-            supplier = connection.execute(
-                "select id from public.catalogo_proveedor where id = %s and activo",
-                (payload.supplier_id,),
-            ).fetchone()
-            if supplier is None:
-                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Proveedor inactivo")
-            supplier_id = supplier["id"]
-        else:
-            supplier = connection.execute(
-                """
-                insert into public.catalogo_proveedor (nombre, creado_por)
-                values (%s, %s)
-                on conflict (nombre_normalizado)
-                do update set nombre = excluded.nombre, activo = true
-                returning id
-                """,
-                (payload.supplier_name, user.id),
-            ).fetchone()
-            assert supplier is not None
-            supplier_id = supplier["id"]
+        supplier = connection.execute(
+            """
+            select p.id
+            from public.catalogo_proveedor p
+            join public.obra_proveedor op on op.proveedor_id = p.id
+            where p.id = %s and p.activo and op.obra_id = %s and op.activo
+            """,
+            (payload.supplier_id, payload.work_id),
+        ).fetchone()
+        if supplier is None:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "El proveedor no está activo o asignado a la obra",
+            )
+        supplier_id = supplier["id"]
 
         row = connection.execute(
             """
@@ -755,21 +756,22 @@ def update_expense(
             budget_class_id = budget["clase_id"]
             budget_category_id = budget["categoria_id"]
 
-        if payload.supplier_id:
-            supplier = connection.execute(
-                "select id from public.catalogo_proveedor where id = %s and activo",
-                (payload.supplier_id,),
-            ).fetchone()
-        else:
-            supplier = connection.execute(
-                """insert into public.catalogo_proveedor(nombre, creado_por) values (%s, %s)
-                   on conflict (nombre_normalizado) do update
-                   set nombre = excluded.nombre, activo = true
-                   returning id""",
-                (payload.supplier_name, user.id),
-            ).fetchone()
+        supplier = connection.execute(
+            """
+            select p.id
+            from public.catalogo_proveedor p
+            left join public.obra_proveedor op
+              on op.proveedor_id = p.id and op.obra_id = %s and op.activo
+            where p.id = %s and p.activo
+              and (op.id is not null or p.id = %s)
+            """,
+            (expense["obra_id"], payload.supplier_id, expense["proveedor_id"]),
+        ).fetchone()
         if supplier is None:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Proveedor inválido")
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "El proveedor no está activo o asignado a la obra",
+            )
 
         row = connection.execute(
             """
@@ -781,10 +783,20 @@ def update_expense(
             returning id, obra_id, fecha, concepto, folio, importe, estado::text as estado
             """,
             (
-                payload.area_id, budget_class_id, budget_category_id, budget_partida_id,
-                payload.expense_item_id, payload.expense_subitem_id,
-                payload.expense_category_id, supplier["id"], payload.spent_on,
-                payload.concept, payload.folio, payload.amount, user.id, expense_id,
+                payload.area_id,
+                budget_class_id,
+                budget_category_id,
+                budget_partida_id,
+                payload.expense_item_id,
+                payload.expense_subitem_id,
+                payload.expense_category_id,
+                supplier["id"],
+                payload.spent_on,
+                payload.concept,
+                payload.folio,
+                payload.amount,
+                user.id,
+                expense_id,
             ),
         ).fetchone()
         assert row is not None

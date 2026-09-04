@@ -79,6 +79,8 @@ def test_openapi_is_namespaced() -> None:
     assert schema.status_code == 200
     assert schema.json()["info"]["title"] == "D89 Sistema de Gastos API"
     assert "delete" in schema.json()["paths"]["/api/v1/works/{work_id}"]
+    assert "post" in schema.json()["paths"]["/api/v1/suppliers"]
+    assert "post" in schema.json()["paths"]["/api/v1/suppliers/{supplier_id}/evaluations"]
 
 
 def test_operational_user_cannot_delete_a_work() -> None:
@@ -97,5 +99,24 @@ def test_operational_user_cannot_delete_a_work() -> None:
         f"/api/v1/works/{uuid4()}",
         headers={"Authorization": f"Bearer {token}"},
         json={"confirmation_name": "Obra de prueba"},
+    )
+    assert response.status_code == 403
+
+
+def test_operational_user_cannot_create_a_supplier() -> None:
+    settings = get_settings()
+    token = jwt.encode(
+        {
+            "sub": str(uuid4()),
+            "aud": "authenticated",
+            "app_metadata": {"role": "operativo"},
+        },
+        settings.jwt_secret,
+        algorithm="HS256",
+    )
+    response = client.post(
+        "/api/v1/suppliers",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"name": "Proveedor no autorizado", "specialty_ids": []},
     )
     assert response.status_code == 403

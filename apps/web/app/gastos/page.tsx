@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { AppShell } from '@/components/app-shell';
 import { PlusIcon } from '@/components/icons';
@@ -39,6 +40,7 @@ export default function ExpensesPage() {
   const [partidaId, setPartidaId] = useState('');
   const [subpartidaId, setSubpartidaId] = useState('');
   const [categoryId, setCategoryId] = useState('');
+  const [supplierId, setSupplierId] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [today] = useState(localDate);
@@ -72,6 +74,7 @@ export default function ExpensesPage() {
         setCategoryId(
           result.expense_categories[0]?.id || '',
         );
+        setSupplierId(result.suppliers[0]?.id || '');
       })
       .catch((error: Error) => setMessage(error.message));
   }, [workId]);
@@ -101,7 +104,7 @@ export default function ExpensesPage() {
           expense_item_id: partidaId,
           expense_subitem_id: subpartidaId,
           expense_category_id: categoryId,
-          supplier_name: form.get('supplier_name'),
+          supplier_id: supplierId,
           spent_on: form.get('spent_on'),
           concept: form.get('concept'),
           folio: form.get('folio') || null,
@@ -179,12 +182,13 @@ export default function ExpensesPage() {
               </select>
             </label>
             <label className="field">Proveedor
-              <input aria-label="Proveedor" name="supplier_name" list="supplier-options" placeholder="Nombre o razón social" autoComplete="off" required />
-              <datalist id="supplier-options">
-                {catalog.suppliers.map((supplier) => <option key={supplier.id} value={supplier.nombre} />)}
-              </datalist>
+              <select aria-label="Proveedor" value={supplierId} onChange={(event) => setSupplierId(event.target.value)} required>
+                <option value="">Seleccionar proveedor</option>
+                {catalog.suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.nombre}</option>)}
+              </select>
             </label>
           </div>
+          {workId && catalog.suppliers.length === 0 ? <p className="notice">Esta obra no tiene proveedores asignados. <Link className="text-action" href="/proveedores">Consulta el directorio</Link> o solicita a administración que asigne uno.</p> : null}
         </div>
         <div className="form-section">
           <h2>Datos del movimiento</h2>
@@ -203,7 +207,7 @@ export default function ExpensesPage() {
         <div className="form-section">
           <div className="header-actions">
             <button type="reset" className="btn secondary">Cancelar</button>
-            <button type="submit" className="btn" disabled={busy || !hierarchyReady}><PlusIcon />{busy ? 'Guardando…' : 'Guardar pendiente'}</button>
+            <button type="submit" className="btn" disabled={busy || !hierarchyReady || !supplierId}><PlusIcon />{busy ? 'Guardando…' : 'Guardar pendiente'}</button>
           </div>
         </div>
       </form>

@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { type FormEvent, useMemo, useState } from 'react';
 import { PlusIcon } from '@/components/icons';
 import { apiJson, getSupabaseBrowserClient } from '@/lib/auth';
@@ -70,7 +71,9 @@ export function WorkExpenseForm({
     expense?.expense_category_id || catalog.expense_categories[0]?.id || '',
   );
   const [budgetItemId, setBudgetItemId] = useState(expense?.budget_item_id || '');
-  const [supplierName, setSupplierName] = useState(expense?.proveedor || '');
+  const [supplierId, setSupplierId] = useState(
+    expense?.supplier_id || catalog.suppliers[0]?.id || '',
+  );
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const budgetItems = catalog.items.filter((item) => item.area_id === areaId);
@@ -83,6 +86,12 @@ export function WorkExpenseForm({
     if (!selected || matchingAreas.some((area) => area.id === areaId)) return matchingAreas;
     return [selected, ...matchingAreas];
   }, [areaId, catalog.areas, matchingAreas]);
+  const selectableSuppliers = useMemo(() => {
+    if (!expense || catalog.suppliers.some((item) => item.id === expense.supplier_id)) {
+      return catalog.suppliers;
+    }
+    return [{ id: expense.supplier_id, nombre: `${expense.proveedor} · histórico` }, ...catalog.suppliers];
+  }, [catalog.suppliers, expense]);
 
   function changeAreaSearch(value: string) {
     setAreaSearch(value);
@@ -104,9 +113,6 @@ export function WorkExpenseForm({
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    const knownSupplier = catalog.suppliers.find(
-      (supplier) => supplier.nombre.localeCompare(supplierName, 'es', { sensitivity: 'base' }) === 0,
-    );
     setBusy(true);
     setMessage('');
     try {
@@ -117,9 +123,7 @@ export function WorkExpenseForm({
         expense_subitem_id: subpartidaId,
         expense_category_id: categoryId,
         budget_item_id: budgetItemId || null,
-        ...(knownSupplier
-          ? { supplier_id: knownSupplier.id, supplier_name: null }
-          : { supplier_id: null, supplier_name: supplierName }),
+        supplier_id: supplierId,
         spent_on: form.get('spent_on'),
         concept: form.get('concept'),
         folio: form.get('folio') || null,
@@ -156,14 +160,14 @@ export function WorkExpenseForm({
       <label className="field">Partida<select aria-label="Partida" value={partidaId} onChange={(event) => changePartida(event.target.value)} required>{catalog.expense_partidas.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}</select></label>
       <label className="field">Subpartida<select aria-label="Subpartida" value={subpartidaId} onChange={(event) => setSubpartidaId(event.target.value)} required>{availableSubitems.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}</select></label>
       <label className="field">Categoría<select aria-label="Categoría" value={categoryId} onChange={(event) => setCategoryId(event.target.value)} required>{catalog.expense_categories.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}</select></label>
-      <label className="field">Proveedor<input aria-label="Proveedor" list="work-suppliers" value={supplierName} onChange={(event) => setSupplierName(event.target.value)} required /><datalist id="work-suppliers">{catalog.suppliers.map((item) => <option key={item.id} value={item.nombre} />)}</datalist></label>
+      <label className="field">Proveedor<select aria-label="Proveedor" value={supplierId} onChange={(event) => setSupplierId(event.target.value)} required><option value="">Seleccionar proveedor</option>{selectableSuppliers.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}</select></label>
       <label className="field">Partida NEODATA (opcional)<select aria-label="Partida NEODATA" value={budgetItemId} onChange={(event) => setBudgetItemId(event.target.value)}><option value="">Sin vínculo específico</option>{budgetItems.map((item) => <option key={item.budget_item_id} value={item.budget_item_id}>{item.codigo} · {item.descripcion} · {money.format(Number(item.presupuesto))}</option>)}</select></label>
       <label className="field">Fecha<input name="spent_on" type="date" defaultValue={expense?.fecha || localDate()} required /></label>
       <label className="field">Importe<input name="amount" type="number" min="0.01" step="0.01" defaultValue={expense ? String(expense.importe) : ''} required /></label>
       <label className="field">Folio<input name="folio" defaultValue={expense?.folio || ''} /></label>
       <label className="field full">Concepto<textarea name="concept" defaultValue={expense?.concepto || ''} required /></label>
       <label className="field full">Comprobante {expense?.comprobante_path ? '(ya existe; selecciona otro sólo para reemplazarlo)' : ''}<input name="receipt" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" /></label>
-    </div></div>
-    <div className="form-section"><div className="header-actions">{onCancel && <button className="btn secondary" type="button" onClick={onCancel}>Cancelar</button>}<button className="btn" disabled={busy || !areaId || !subpartidaId || !categoryId}><PlusIcon />{busy ? 'Guardando…' : expense ? 'Guardar corrección' : 'Guardar pendiente'}</button></div></div>
+    </div>{!expense && catalog.suppliers.length === 0 ? <p className="notice">No hay proveedores asignados a esta obra. <Link className="text-action" href="/proveedores">Asigna uno desde el directorio</Link> antes de registrar gastos.</p> : null}</div>
+    <div className="form-section"><div className="header-actions">{onCancel && <button className="btn secondary" type="button" onClick={onCancel}>Cancelar</button>}<button className="btn" disabled={busy || !areaId || !subpartidaId || !categoryId || !supplierId}><PlusIcon />{busy ? 'Guardando…' : expense ? 'Guardar corrección' : 'Guardar pendiente'}</button></div></div>
   </form>;
 }

@@ -5,7 +5,12 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from app.models import ExpenseCreate
+from app.models import (
+    ExpenseCreate,
+    SupplierCreate,
+    SupplierEvaluationCreate,
+    SupplierSpecialtyCreate,
+)
 from app.services.repository import _consolidate_preview_items
 
 
@@ -55,15 +60,50 @@ def expense_payload() -> dict[str, object]:
     }
 
 
-def test_expense_requires_exactly_one_supplier_source() -> None:
+def test_expense_requires_a_directory_supplier() -> None:
     payload = expense_payload()
-    with pytest.raises(ValidationError, match="proveedor"):
+    with pytest.raises(ValidationError, match="supplier_id"):
         ExpenseCreate.model_validate(payload)
 
-    expense = ExpenseCreate.model_validate({**payload, "supplier_name": "  Concretos Toluca  "})
-    assert expense.supplier_name == "Concretos Toluca"
+    supplier_id = uuid4()
+    expense = ExpenseCreate.model_validate({**payload, "supplier_id": supplier_id})
+    assert expense.supplier_id == supplier_id
 
-    with pytest.raises(ValidationError, match="proveedor"):
-        ExpenseCreate.model_validate(
-            {**payload, "supplier_id": uuid4(), "supplier_name": "Concretos Toluca"}
-        )
+
+def test_supplier_normalizes_rfc_and_specialties() -> None:
+    specialty_id = uuid4()
+    supplier = SupplierCreate.model_validate(
+        {
+            "name": "  Carpintería Norte  ",
+            "tax_id": "abc-010203-xy9",
+            "email": "contacto@example.com",
+            "specialty_ids": [specialty_id, specialty_id],
+        }
+    )
+
+    assert supplier.name == "Carpintería Norte"
+    assert supplier.tax_id == "ABC010203XY9"
+    assert supplier.specialty_ids == [specialty_id]
+
+
+def test_supplier_evaluation_enforces_five_point_scale() -> None:
+    payload = {
+        "work_id": uuid4(),
+        "work_description": "Instalación de muebles",
+        "service_date": date(2026, 9, 4),
+        "quality": 5,
+        "timeliness": 4,
+        "value": 4,
+        "communication": 5,
+        "safety": 4,
+    }
+    evaluation = SupplierEvaluationCreate.model_validate(payload)
+    assert evaluation.quality == 5
+
+    with pytest.raises(ValidationError, match="less than or equal to 5"):
+        SupplierEvaluationCreate.model_validate({**payload, "quality": 6})
+
+
+def test_supplier_specialty_rejects_blank_names() -> None:
+    with pytest.raises(ValidationError, match="at least 2 characters"):
+        SupplierSpecialtyCreate.model_validate({"name": "   "})

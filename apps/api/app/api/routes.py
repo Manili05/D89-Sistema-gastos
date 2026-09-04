@@ -1,4 +1,5 @@
 from datetime import UTC, date, datetime
+from decimal import Decimal
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -31,11 +32,20 @@ from app.models import (
     ReceiptUpdate,
     SubcontractCreate,
     SubcontractPaymentCreate,
+    SupplierArchive,
+    SupplierCreate,
+    SupplierEvaluationCreate,
+    SupplierEvaluationUpdate,
+    SupplierEvaluationVoid,
+    SupplierSpecialtyCreate,
+    SupplierSpecialtyUpdate,
+    SupplierUpdate,
     ToolDefinition,
     WeeklyCloseCreate,
     WeeklyReopen,
     WorkCreate,
     WorkDelete,
+    WorkSupplierAssignment,
     WorkUpdate,
 )
 from app.services.neodata import NeodataError, parse_neodata_workbook
@@ -69,6 +79,23 @@ from app.services.repository import (
     validate_expenses_batch,
     work_catalog,
     work_overview,
+)
+from app.services.suppliers import (
+    archive_supplier,
+    assign_supplier_to_work,
+    create_supplier,
+    create_supplier_evaluation,
+    create_supplier_specialty,
+    get_supplier,
+    list_supplier_specialties,
+    list_suppliers,
+    restore_supplier,
+    supplier_analytics,
+    unassign_supplier_from_work,
+    update_supplier,
+    update_supplier_evaluation,
+    update_supplier_specialty,
+    void_supplier_evaluation,
 )
 from app.services.tools import WHATSAPP_TOOLS
 
@@ -146,6 +173,174 @@ def get_dashboard(
     return dashboard(settings, user)
 
 
+@router.get("/supplier-specialties", tags=["suppliers"])
+def get_supplier_specialties(
+    user: CurrentUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+    include_inactive: bool = False,
+) -> list[dict[str, Any]]:
+    return list_supplier_specialties(settings, user, include_inactive)
+
+
+@router.post("/supplier-specialties", status_code=status.HTTP_201_CREATED, tags=["suppliers"])
+def post_supplier_specialty(
+    payload: SupplierSpecialtyCreate,
+    user: AdminUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    return create_supplier_specialty(settings, user, payload)
+
+
+@router.patch("/supplier-specialties/{specialty_id}", tags=["suppliers"])
+def patch_supplier_specialty(
+    specialty_id: UUID,
+    payload: SupplierSpecialtyUpdate,
+    user: AdminUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    return update_supplier_specialty(settings, user, specialty_id, payload)
+
+
+@router.get("/suppliers/analytics", tags=["suppliers"])
+def get_supplier_analytics(
+    user: CurrentUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    return supplier_analytics(settings, user)
+
+
+@router.get("/suppliers", tags=["suppliers"])
+def get_suppliers(
+    user: CurrentUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+    q: str | None = None,
+    specialty_id: UUID | None = None,
+    min_rating: Annotated[Decimal | None, Query(ge=1, le=5)] = None,
+    active: bool | None = True,
+    include_archived: bool = False,
+    work_id: UUID | None = None,
+    sort: Annotated[str, Query(pattern="^(name|rating|jobs|spend)$")] = "name",
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 25,
+) -> dict[str, Any]:
+    return list_suppliers(
+        settings,
+        user,
+        query=q,
+        specialty_id=specialty_id,
+        min_rating=min_rating,
+        active=None if include_archived else active,
+        work_id=work_id,
+        sort=sort,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.post("/suppliers", status_code=status.HTTP_201_CREATED, tags=["suppliers"])
+def post_supplier(
+    payload: SupplierCreate,
+    user: AdminUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    return create_supplier(settings, user, payload)
+
+
+@router.get("/suppliers/{supplier_id}", tags=["suppliers"])
+def get_supplier_detail(
+    supplier_id: UUID,
+    user: CurrentUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    return get_supplier(settings, user, supplier_id)
+
+
+@router.patch("/suppliers/{supplier_id}", tags=["suppliers"])
+def patch_supplier(
+    supplier_id: UUID,
+    payload: SupplierUpdate,
+    user: AdminUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    return update_supplier(settings, user, supplier_id, payload)
+
+
+@router.delete("/suppliers/{supplier_id}", tags=["suppliers"])
+def delete_supplier(
+    supplier_id: UUID,
+    payload: SupplierArchive,
+    user: AdminUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    return archive_supplier(settings, user, supplier_id, payload)
+
+
+@router.post("/suppliers/{supplier_id}/restore", tags=["suppliers"])
+def post_supplier_restore(
+    supplier_id: UUID,
+    user: AdminUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    return restore_supplier(settings, user, supplier_id)
+
+
+@router.put("/suppliers/{supplier_id}/works/{work_id}", tags=["suppliers"])
+def put_supplier_work(
+    supplier_id: UUID,
+    work_id: UUID,
+    payload: WorkSupplierAssignment,
+    user: AdminUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    return assign_supplier_to_work(settings, user, supplier_id, work_id, payload)
+
+
+@router.delete("/suppliers/{supplier_id}/works/{work_id}", tags=["suppliers"])
+def delete_supplier_work(
+    supplier_id: UUID,
+    work_id: UUID,
+    user: AdminUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    return unassign_supplier_from_work(settings, user, supplier_id, work_id)
+
+
+@router.post(
+    "/suppliers/{supplier_id}/evaluations",
+    status_code=status.HTTP_201_CREATED,
+    tags=["suppliers"],
+)
+def post_supplier_evaluation(
+    supplier_id: UUID,
+    payload: SupplierEvaluationCreate,
+    user: AdminUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    return create_supplier_evaluation(settings, user, supplier_id, payload)
+
+
+@router.patch("/suppliers/{supplier_id}/evaluations/{evaluation_id}", tags=["suppliers"])
+def patch_supplier_evaluation(
+    supplier_id: UUID,
+    evaluation_id: UUID,
+    payload: SupplierEvaluationUpdate,
+    user: AdminUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    return update_supplier_evaluation(settings, user, supplier_id, evaluation_id, payload)
+
+
+@router.delete("/suppliers/{supplier_id}/evaluations/{evaluation_id}", tags=["suppliers"])
+def delete_supplier_evaluation(
+    supplier_id: UUID,
+    evaluation_id: UUID,
+    payload: SupplierEvaluationVoid,
+    user: AdminUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    return void_supplier_evaluation(settings, user, supplier_id, evaluation_id, payload.reason)
+
+
 @router.get("/works/{work_id}/overview", tags=["dashboard"])
 def get_work_overview(
     work_id: UUID,
@@ -173,9 +368,16 @@ def get_work_expenses(
     page_size: Annotated[int, Query(ge=1, le=100)] = 25,
 ) -> dict[str, Any]:
     return list_work_expenses(
-        settings, user, work_id, date_from=date_from, date_to=date_to,
-        expense_state=expense_state, area_id=area_id, query=q,
-        page=page, page_size=page_size,
+        settings,
+        user,
+        work_id,
+        date_from=date_from,
+        date_to=date_to,
+        expense_state=expense_state,
+        area_id=area_id,
+        query=q,
+        page=page,
+        page_size=page_size,
     )
 
 
@@ -404,8 +606,7 @@ async def invoke_hermes_tool(
         "tool": tool_name,
         "persisted": False,
         "message": (
-            "Validación de schema, HMAC y confirmación completada; "
-            "sin escritura en sandbox."
+            "Validación de schema, HMAC y confirmación completada; sin escritura en sandbox."
         ),
     }
 
