@@ -9,7 +9,8 @@ import { apiFetch, apiJson } from '@/lib/auth';
 type Work = { id: string; nombre: string; presupuesto: string };
 type PreviewItem = {
   sheet: string; row: number; area: string; work_class: string; category: string | null;
-  code: string; description: string; unit: string; quantity: string; unit_price: string; amount: string;
+  area_path?: string[]; code: string; description: string; unit: string; quantity: string;
+  unit_price: string; amount: string;
 };
 type PreviewData = {
   area_count: number; item_count: number; consolidated_item_count: number;
@@ -63,7 +64,7 @@ export default function ImportPage() {
     const query = filter.trim().toLocaleLowerCase('es');
     if (!query) return items;
     return items.filter((item) =>
-      [item.code, item.description, item.area, item.work_class, item.category, item.unit]
+      [item.code, item.description, (item.area_path?.length ? item.area_path : [item.area]).join(' › '), item.work_class, item.category, item.unit]
         .filter(Boolean).some((value) => String(value).toLocaleLowerCase('es').includes(query)),
     );
   }, [filter, items]);
@@ -237,8 +238,8 @@ export default function ImportPage() {
             <article className="metric-card"><span className="metric-label">Total sin IVA</span><strong className="metric-value">{money(preview.preview.calculated_total_without_vat)}</strong></article>
           </div>
           <p>Alertas: {preview.preview.warnings.length}. Filas sin clasificar: {preview.preview.unclassified.length}. Descuadres: {preview.preview.section_mismatches.length}.</p>
-          <div className="preview-toolbar"><label className="field">Buscar partidas<input type="search" value={filter} onChange={(event) => { setFilter(event.target.value); setPage(1); }} placeholder="Código, descripción, área o clase" /></label><span>{filteredItems.length} de {items.length} partidas</span></div>
-          <div className="preview-table-wrap"><table className="preview-table"><thead><tr><th>Fila</th><th>Área</th><th>Clase</th><th>Categoría</th><th>Código</th><th>Descripción</th><th>Unidad</th><th>Cantidad</th><th>P. unitario</th><th>Importe</th></tr></thead><tbody>{visibleItems.map((item, index) => <tr key={`${item.sheet}:${item.row}`}><td>{item.row}</td>{editableFields.map((field) => <td key={field}><input aria-label={`${field} fila ${item.row}`} value={item[field] || ''} readOnly={preview.read_only} onChange={(event) => editItem(index, field, event.target.value)} /></td>)}<td className="number">{item.quantity}</td><td className="number">{money(item.unit_price)}</td><td className="number">{money(item.amount)}</td></tr>)}</tbody></table></div>
+          <div className="preview-toolbar"><label className="field">Buscar partidas<input type="search" value={filter} onChange={(event) => { setFilter(event.target.value); setPage(1); }} placeholder="Código, descripción, ruta o clase" /></label><span>{filteredItems.length} de {items.length} partidas</span></div>
+          <div className="preview-table-wrap"><table className="preview-table"><thead><tr><th>Fila</th><th>Área</th><th>Clase</th><th>Categoría</th><th>Código</th><th>Descripción</th><th>Unidad</th><th>Cantidad</th><th>P. unitario</th><th>Importe</th></tr></thead><tbody>{visibleItems.map((item, index) => <tr key={`${item.sheet}:${item.row}`}><td>{item.row}</td>{editableFields.map((field) => <td key={field}><input aria-label={`${field} fila ${item.row}`} value={item[field] || ''} readOnly={preview.read_only} onChange={(event) => editItem(index, field, event.target.value)} />{field === 'area' && <small className="path-hint">{(item.area_path?.length ? item.area_path : [item.area]).join(' › ')}</small>}</td>)}<td className="number">{item.quantity}</td><td className="number">{money(item.unit_price)}</td><td className="number">{money(item.amount)}</td></tr>)}</tbody></table></div>
           <div className="pagination"><button className="btn secondary" type="button" disabled={page <= 1} onClick={() => setPage((current) => current - 1)}>Anterior</button><span>Página {page} de {pageCount}</span><button className="btn secondary" type="button" disabled={page >= pageCount} onClick={() => setPage((current) => current + 1)}>Siguiente</button></div>
         </div> : null}
         <div className="form-section"><div className="header-actions"><button className="btn secondary" type="button" onClick={() => { setFile(undefined); clearPreview(); }}>Limpiar</button>{preview ? <><button className="btn secondary" type="button" disabled={busy || preview.read_only || dirtyRows.size === 0} onClick={saveCorrections}>{dirtyRows.size ? `Guardar ${dirtyRows.size} corrección(es)` : 'Correcciones guardadas'}</button><button className="btn" type="button" disabled={busy || preview.read_only || preview.preview.unclassified.length > 0 || preview.preview.section_mismatches.length > 0} onClick={confirmPreview}>Confirmar presupuesto</button></> : <button className="btn" type="button" disabled={!canGenerate || busy} onClick={generatePreview}>{busy ? 'Procesando…' : 'Generar preview'}</button>}</div></div>

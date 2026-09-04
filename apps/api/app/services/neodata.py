@@ -12,6 +12,7 @@ from openpyxl.utils.exceptions import InvalidFileException
 
 CATEGORY_NAMES = {"HIDRAULICAS", "SANITARIAS", "ELECTRICAS", "ESPECIALES"}
 MONEY_TOLERANCE = Decimal("0.02")
+NEODATA_PARSER_VERSION = 2
 
 
 class NeodataError(ValueError):
@@ -111,9 +112,13 @@ class ImportPreview:
         return dict(Counter(item.area for item in self.items))
 
     @property
+    def selectable_area_paths(self) -> set[tuple[str, ...]]:
+        return {item.area_path or (item.area,) for item in self.items}
+
+    @property
     def area_tree(self) -> list[dict[str, object]]:
         paths: set[tuple[str, ...]] = set()
-        selectable = {item.area_path or (item.area,) for item in self.items}
+        selectable = self.selectable_area_paths
         for item_path in selectable:
             for depth in range(1, len(item_path) + 1):
                 paths.add(item_path[:depth])
@@ -142,9 +147,11 @@ class ImportPreview:
     def to_dict(self, include_items: bool = True) -> dict[str, object]:
         result: dict[str, object] = {
             "filename": self.filename,
+            "parser_version": NEODATA_PARSER_VERSION,
             "sheets": self.sheets,
             "row_count": self.row_count,
-            "area_count": len(self.areas),
+            "area_count": len(self.selectable_area_paths),
+            "area_label_count": len(self.areas),
             "areas": self.areas,
             "area_tree": self.area_tree,
             "item_count": len(self.items),
@@ -330,16 +337,15 @@ def parse_neodata_workbook(
                 if not current_section_items:
                     preview.rollup_total_count += 1
                     last_item = None
-                    if generic_budget:
-                        target = normalized_text(re.sub(r"^TOTAL\s+", "", b_text, flags=re.I))
-                        match = next(
-                            (position for position in range(len(area_path) - 1, -1, -1)
-                             if normalized_text(area_path[position]) == target),
-                            None,
-                        )
-                        if match is not None:
-                            area_path = area_path[:match]
-                            current_area = area_path[-1] if area_path else "General"
+                    target = normalized_text(re.sub(r"^TOTAL\s+", "", b_text, flags=re.I))
+                    match = next(
+                        (position for position in range(len(area_path) - 1, -1, -1)
+                         if normalized_text(area_path[position]) == target),
+                        None,
+                    )
+                    if match is not None:
+                        area_path = area_path[:match]
+                        current_area = area_path[-1] if area_path else "General"
                     continue
                 declared = decimal_value(declared_amount)
                 calculated = sum((item.amount for item in current_section_items), Decimal("0"))
@@ -361,36 +367,46 @@ def parse_neodata_workbook(
                     )
                 current_section_items.clear()
                 last_item = None
-                if generic_budget:
-                    target = normalized_text(re.sub(r"^TOTAL\s+", "", b_text, flags=re.I))
-                    match = next(
-                        (position for position in range(len(area_path) - 1, -1, -1)
-                         if normalized_text(area_path[position]) == target),
-                        None,
-                    )
-                    if match is not None:
-                        area_path = area_path[:match]
-                        current_area = area_path[-1] if area_path else "General"
+                target = normalized_text(re.sub(r"^TOTAL\s+", "", b_text, flags=re.I))
+                match = next(
+                    (position for position in range(len(area_path) - 1, -1, -1)
+                     if normalized_text(area_path[position]) == target),
+                    None,
+                )
+                if match is not None:
+                    area_path = area_path[:match]
+                    current_area = area_path[-1] if area_path else "General"
                 continue
 
             if a_norm and b_norm and a_norm == b_norm and not unit_text:
-                if generic_budget:
-                    area_path.append(a_text.strip())
-                    collapsed_path: list[str] = []
-                    for part in area_path:
-                        if (
-                            not collapsed_path
-                            or normalized_text(collapsed_path[-1]) != normalized_text(part)
-                        ):
-                            collapsed_path.append(part)
-                    current_area = collapsed_path[-1]
-                    current_class = normalized_text(collapsed_path[0])
-                    current_category = None
-                elif current_class == "INSTALACIONES" and a_norm in CATEGORY_NAMES:
-                    current_category = a_text.title()
-                else:
-                    current_class = a_norm
-                    current_category = None
+                # Algunos reportes no imprimen "TOTAL INSTALACIONES" después de
+                # cerrar sus subcapítulos. El siguiente capítulo no debe quedar
+                # anidado accidentalmente bajo INSTALACIONES.
+                if (
+                    not generic_budget
+                    and area_path
+                    and normalized_text(area_path[-1]) == "INSTALACIONES"
+                    and a_norm not in CATEGORY_NAMES
+                ):
+                    area_path.pop()
+
+                area_path.append(a_text.strip())
+                collapsed_path: list[str] = []
+                for part in area_path:
+                    if (
+                        not collapsed_path
+                        or normalized_text(collapsed_path[-1]) != normalized_text(part)
+                    ):
+                        collapsed_path.append(part)
+                area_path = collapsed_path
+                current_area = area_path[-1]
+                class_position = 0 if generic_budget else min(1, len(area_path) - 1)
+                current_class = normalized_text(area_path[class_position])
+                current_category = (
+                    a_text.title()
+                    if current_class == "INSTALACIONES" and a_norm in CATEGORY_NAMES
+                    else None
+                )
                 last_item = None
                 continue
 

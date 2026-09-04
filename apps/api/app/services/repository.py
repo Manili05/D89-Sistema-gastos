@@ -1413,6 +1413,7 @@ def store_import_preview(
     if import_type not in {"inicial", "nueva_version", "extra"}:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Tipo de importación inválido")
     digest = hashlib.sha256(content).hexdigest()
+    parser_version = int(preview.get("parser_version", 1))
     with transaction(settings) as connection:
         require_active_profile(connection, user)
         if user.role is not Role.ADMIN:
@@ -1432,12 +1433,13 @@ def store_import_preview(
         duplicate = connection.execute(
             """
             select id, obra_id, archivo_nombre, tipo::text as tipo,
-                   estado::text as estado, creado_en, preview_json
+                   estado::text as estado, creado_en, preview_json, parser_version
             from public.importacion_neodata
-            where obra_id = %s and archivo_sha256 = %s and estado <> 'descartado'
+            where obra_id = %s and archivo_sha256 = %s and parser_version = %s
+              and estado <> 'descartado'
             order by creado_en desc limit 1
             """,
-            (work_id, digest),
+            (work_id, digest, parser_version),
         ).fetchone()
         if duplicate is not None:
             duplicate["preview"] = duplicate.pop("preview_json")
@@ -1454,8 +1456,8 @@ def store_import_preview(
             """
             insert into public.importacion_neodata (
               obra_id, archivo_nombre, archivo_sha256, hojas, tipo,
-              estado, preview_json, catalogo_nuevo_json
-            ) values (%s, %s, %s, %s, %s, 'preview', %s, '{}'::jsonb)
+              estado, preview_json, catalogo_nuevo_json, parser_version
+            ) values (%s, %s, %s, %s, %s, 'preview', %s, '{}'::jsonb, %s)
             returning id, obra_id, archivo_nombre, tipo::text as tipo,
                       estado::text as estado, creado_en
             """,
@@ -1466,6 +1468,7 @@ def store_import_preview(
                 Jsonb(preview["sheets"]),
                 import_type,
                 Jsonb(preview),
+                parser_version,
             ),
         ).fetchone()
         assert row is not None
@@ -1514,13 +1517,25 @@ def update_import_preview(
                     status.HTTP_422_UNPROCESSABLE_ENTITY,
                     f"La fila {correction.sheet}!{correction.row} no pertenece al preview",
                 )
+            previous_path = list(item.get("area_path") or [item["area"]])
+            previous_area = item["area"]
             for field, value in correction.model_dump().items():
                 if field not in {"sheet", "row"}:
                     item[field] = value
-            item["area_path"] = [item["area"]]
+            item["area_path"] = (
+                [*previous_path[:-1], item["area"]]
+                if item["area"] != previous_area
+                else previous_path
+            )
 
         preview["areas"] = dict(Counter(item["area"] for item in items))
-        preview["area_count"] = len(preview["areas"])
+        preview["area_label_count"] = len(preview["areas"])
+        preview["area_count"] = len(
+            {
+                tuple(normalized_text(part) for part in (item.get("area_path") or [item["area"]]))
+                for item in items
+            }
+        )
         preview["consolidated_item_count"] = len(_consolidate_preview_items(items))
         connection.execute(
             "update public.importacion_neodata set preview_json = %s where id = %s",

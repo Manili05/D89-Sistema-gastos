@@ -200,6 +200,7 @@ button { cursor: pointer; }
 .area-picker input { margin-bottom: 8px; }
 .field-hint { color: var(--muted); font-size: 11px; font-weight: 500; margin-left: 5px; }
 .field-error { color: var(--red); font-size: 12px; }
+.path-hint { display: block; min-width: 180px; margin-top: 5px; color: var(--muted); font-size: 10px; line-height: 1.35; }
 .expense-filters { display: flex; gap: 8px; }
 .expense-table-wrap { overflow-x: auto; }
 .expense-table { width: 100%; min-width: 980px; border-collapse: collapse; font-size: 11px; }
