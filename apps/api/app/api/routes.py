@@ -10,6 +10,7 @@ from fastapi import (
     Form,
     Header,
     HTTPException,
+    Query,
     UploadFile,
     status,
 )
@@ -18,7 +19,11 @@ from fastapi.responses import Response
 from app.core.config import Settings, get_settings
 from app.core.security import AdminUser, CurrentUser, HermesSignature
 from app.models import (
+    ExpenseBatchReview,
+    ExpenseCancel,
     ExpenseCreate,
+    ExpenseReview,
+    ExpenseUpdate,
     HealthResponse,
     ImportConfirm,
     ImportPreviewUpdate,
@@ -31,11 +36,13 @@ from app.models import (
     WeeklyReopen,
     WorkCreate,
     WorkDelete,
+    WorkUpdate,
 )
 from app.services.neodata import NeodataError, parse_neodata_workbook
 from app.services.reports import build_excel_report, build_pdf_report
 from app.services.repository import (
     attach_receipt,
+    cancel_expense,
     close_week,
     confirm_import,
     create_expense,
@@ -45,15 +52,23 @@ from app.services.repository import (
     create_work,
     dashboard,
     delete_work,
+    get_work,
     list_expenses,
     list_incomes,
     list_subcontracts,
+    list_weekly_closes,
+    list_work_expenses,
     list_works,
     reopen_week,
     report_expenses,
+    review_expense,
     store_import_preview,
+    update_expense,
     update_import_preview,
+    update_work,
+    validate_expenses_batch,
     work_catalog,
+    work_overview,
 )
 from app.services.tools import WHATSAPP_TOOLS
 
@@ -96,6 +111,25 @@ def remove_work(
     return delete_work(settings, user, work_id, payload)
 
 
+@router.get("/works/{work_id}", tags=["works"])
+def get_work_detail(
+    work_id: UUID,
+    user: CurrentUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    return get_work(settings, user, work_id)
+
+
+@router.patch("/works/{work_id}", tags=["works"])
+def patch_work(
+    work_id: UUID,
+    payload: WorkUpdate,
+    user: AdminUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    return update_work(settings, user, work_id, payload)
+
+
 @router.get("/works/{work_id}/catalog", tags=["works"])
 def get_work_catalog(
     work_id: UUID,
@@ -110,6 +144,39 @@ def get_dashboard(
     user: CurrentUser, settings: Annotated[Settings, Depends(get_settings)]
 ) -> dict[str, Any]:
     return dashboard(settings, user)
+
+
+@router.get("/works/{work_id}/overview", tags=["dashboard"])
+def get_work_overview(
+    work_id: UUID,
+    user: CurrentUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+    date_from: Annotated[date | None, Query(alias="from")] = None,
+    date_to: Annotated[date | None, Query(alias="to")] = None,
+) -> dict[str, Any]:
+    if date_from and date_to and date_to < date_from:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Rango de fechas inválido")
+    return work_overview(settings, user, work_id, date_from, date_to)
+
+
+@router.get("/works/{work_id}/expenses", tags=["expenses"])
+def get_work_expenses(
+    work_id: UUID,
+    user: CurrentUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+    date_from: Annotated[date | None, Query(alias="from")] = None,
+    date_to: Annotated[date | None, Query(alias="to")] = None,
+    expense_state: Annotated[str | None, Query(alias="state")] = None,
+    area_id: UUID | None = None,
+    q: str | None = None,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 25,
+) -> dict[str, Any]:
+    return list_work_expenses(
+        settings, user, work_id, date_from=date_from, date_to=date_to,
+        expense_state=expense_state, area_id=area_id, query=q,
+        page=page, page_size=page_size,
+    )
 
 
 @router.get("/expenses", tags=["expenses"])
@@ -138,6 +205,45 @@ def patch_expense_receipt(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> dict[str, Any]:
     return attach_receipt(settings, user, expense_id, payload.path)
+
+
+@router.patch("/expenses/{expense_id}", tags=["expenses"])
+def patch_expense(
+    expense_id: UUID,
+    payload: ExpenseUpdate,
+    user: CurrentUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    return update_expense(settings, user, expense_id, payload)
+
+
+@router.post("/expenses/{expense_id}/review", tags=["expenses"])
+def post_expense_review(
+    expense_id: UUID,
+    payload: ExpenseReview,
+    user: CurrentUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    return review_expense(settings, user, expense_id, payload.action, payload.reason)
+
+
+@router.post("/expenses/review-batch", tags=["expenses"])
+def post_expense_batch_review(
+    payload: ExpenseBatchReview,
+    user: AdminUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    return validate_expenses_batch(settings, user, payload.work_id, payload.expense_ids)
+
+
+@router.post("/expenses/{expense_id}/cancel", tags=["expenses"])
+def post_expense_cancel(
+    expense_id: UUID,
+    payload: ExpenseCancel,
+    user: CurrentUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    return cancel_expense(settings, user, expense_id, payload.reason)
 
 
 @router.get("/incomes", tags=["cashflow"])
@@ -241,6 +347,15 @@ def post_weekly_close(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> dict[str, Any]:
     return close_week(settings, user, payload)
+
+
+@router.get("/works/{work_id}/weekly-closes", tags=["closes"])
+def get_weekly_closes(
+    work_id: UUID,
+    user: CurrentUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> list[dict[str, Any]]:
+    return list_weekly_closes(settings, user, work_id)
 
 
 @router.post("/weekly-closes/{close_id}/reopen", tags=["closes"])

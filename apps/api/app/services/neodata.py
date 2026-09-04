@@ -52,6 +52,7 @@ class BudgetItem:
     quantity: Decimal
     unit_price: Decimal
     amount: Decimal
+    area_path: tuple[str, ...] = ()
 
     @property
     def identity(self) -> tuple[str, str, str, str, str]:
@@ -74,6 +75,7 @@ class SectionTotal:
     label: str
     declared: Decimal
     calculated: Decimal
+    area_path: tuple[str, ...] = ()
 
     @property
     def difference(self) -> Decimal:
@@ -109,8 +111,32 @@ class ImportPreview:
         return dict(Counter(item.area for item in self.items))
 
     @property
+    def area_tree(self) -> list[dict[str, object]]:
+        paths: set[tuple[str, ...]] = set()
+        selectable = {item.area_path or (item.area,) for item in self.items}
+        for item_path in selectable:
+            for depth in range(1, len(item_path) + 1):
+                paths.add(item_path[:depth])
+        return [
+            {
+                "name": path[-1],
+                "path": list(path),
+                "parent_path": list(path[:-1]) or None,
+                "level": len(path) - 1,
+                "selectable": path in selectable,
+            }
+            for path in sorted(paths, key=lambda value: (len(value), value))
+        ]
+
+    @property
     def consolidated_item_count(self) -> int:
-        unique_items = {(normalized_text(item.area), item.identity) for item in self.items}
+        unique_items = {
+            (
+                tuple(normalized_text(part) for part in (item.area_path or (item.area,))),
+                item.identity,
+            )
+            for item in self.items
+        }
         return len(unique_items)
 
     def to_dict(self, include_items: bool = True) -> dict[str, object]:
@@ -120,6 +146,7 @@ class ImportPreview:
             "row_count": self.row_count,
             "area_count": len(self.areas),
             "areas": self.areas,
+            "area_tree": self.area_tree,
             "item_count": len(self.items),
             "consolidated_item_count": self.consolidated_item_count,
             "section_total_count": len(self.section_totals),
@@ -133,6 +160,7 @@ class ImportPreview:
                     "sheet": total.sheet,
                     "row": total.row,
                     "area": total.area,
+                    "area_path": list(total.area_path or (total.area,)),
                     "work_class": total.work_class,
                     "category": total.category,
                     "label": total.label,
@@ -157,6 +185,7 @@ class ImportPreview:
             result["items"] = [
                 {
                     **item.__dict__,
+                    "area_path": list(item.area_path or (item.area,)),
                     "quantity": str(item.quantity),
                     "unit_price": str(item.unit_price),
                     "amount": str(item.amount),
@@ -230,6 +259,8 @@ def parse_neodata_workbook(
         current_section_items: list[BudgetItem] = []
         last_item: BudgetItem | None = None
         budget_started = False
+        generic_budget = False
+        area_path: list[str] = []
 
         for index, raw_row in enumerate(rows, 1):
             values = list(raw_row) + [None] * 7
@@ -252,11 +283,15 @@ def parse_neodata_workbook(
                 )
                 if not budget_started:
                     budget_started = True
+                    generic_budget = b_norm == "PRESUPUESTO"
                     current_area = candidate
+                    area_path = [] if generic_budget else [candidate]
                 else:
+                    generic_budget = False
                     current_area = re.sub(
                         r"^PRESUPUESTO\s+", "", b_text, flags=re.IGNORECASE
                     ).strip().title()
+                    area_path = [current_area]
                     current_class = current_category = None
                 current_section_items.clear()
                 last_item = None
@@ -278,6 +313,8 @@ def parse_neodata_workbook(
             )
             if is_area_header:
                 current_area = a_text.title()
+                generic_budget = False
+                area_path = [current_area]
                 current_class = current_category = None
                 current_section_items.clear()
                 last_item = None
@@ -287,9 +324,22 @@ def parse_neodata_workbook(
                 continue
 
             if a_norm and b_norm.startswith("TOTAL "):
+                total_path = (
+                    tuple(area_path) if area_path else ((current_area,) if current_area else ())
+                )
                 if not current_section_items:
                     preview.rollup_total_count += 1
                     last_item = None
+                    if generic_budget:
+                        target = normalized_text(re.sub(r"^TOTAL\s+", "", b_text, flags=re.I))
+                        match = next(
+                            (position for position in range(len(area_path) - 1, -1, -1)
+                             if normalized_text(area_path[position]) == target),
+                            None,
+                        )
+                        if match is not None:
+                            area_path = area_path[:match]
+                            current_area = area_path[-1] if area_path else "General"
                     continue
                 declared = decimal_value(declared_amount)
                 calculated = sum((item.amount for item in current_section_items), Decimal("0"))
@@ -302,6 +352,7 @@ def parse_neodata_workbook(
                     label=b_text,
                     declared=declared,
                     calculated=calculated,
+                    area_path=total_path,
                 )
                 preview.section_totals.append(total)
                 if abs(total.difference) > MONEY_TOLERANCE:
@@ -310,10 +361,32 @@ def parse_neodata_workbook(
                     )
                 current_section_items.clear()
                 last_item = None
+                if generic_budget:
+                    target = normalized_text(re.sub(r"^TOTAL\s+", "", b_text, flags=re.I))
+                    match = next(
+                        (position for position in range(len(area_path) - 1, -1, -1)
+                         if normalized_text(area_path[position]) == target),
+                        None,
+                    )
+                    if match is not None:
+                        area_path = area_path[:match]
+                        current_area = area_path[-1] if area_path else "General"
                 continue
 
             if a_norm and b_norm and a_norm == b_norm and not unit_text:
-                if current_class == "INSTALACIONES" and a_norm in CATEGORY_NAMES:
+                if generic_budget:
+                    area_path.append(a_text.strip())
+                    collapsed_path: list[str] = []
+                    for part in area_path:
+                        if (
+                            not collapsed_path
+                            or normalized_text(collapsed_path[-1]) != normalized_text(part)
+                        ):
+                            collapsed_path.append(part)
+                    current_area = collapsed_path[-1]
+                    current_class = normalized_text(collapsed_path[0])
+                    current_category = None
+                elif current_class == "INSTALACIONES" and a_norm in CATEGORY_NAMES:
                     current_category = a_text.title()
                 else:
                     current_class = a_norm
@@ -346,6 +419,13 @@ def parse_neodata_workbook(
                     quantity=decimal_value(quantity),
                     unit_price=decimal_value(unit_price),
                     amount=amount,
+                    area_path=tuple(
+                        part
+                        for position, part in enumerate(area_path or [current_area])
+                        if position == 0
+                        or normalized_text((area_path or [current_area])[position - 1])
+                        != normalized_text(part)
+                    ),
                 )
                 preview.items.append(item)
                 current_section_items.append(item)

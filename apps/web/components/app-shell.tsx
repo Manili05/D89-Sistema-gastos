@@ -13,7 +13,12 @@ const nav = [
 export function AppShell({
   children,
   active,
-}: Readonly<{ children: React.ReactNode; active: string }>) {
+  activeWork,
+}: Readonly<{
+  children: React.ReactNode;
+  active: string;
+  activeWork?: { name: string; detail: string };
+}>) {
   return (
     <AuthBoundary><div className="app-frame">
       <aside className="sidebar">
@@ -30,7 +35,7 @@ export function AppShell({
         </nav>
         <div className="sidebar-work">
           <span className="eyebrow">Obra activa</span>
-          <div className="work-badge"><BuildingIcon /><span><strong>Infra Toluca</strong><small>3 áreas · 232 partidas</small></span></div>
+          <div className="work-badge"><BuildingIcon /><span><strong>{activeWork?.name || 'Todas las obras'}</strong><small>{activeWork?.detail || 'Vista general del portafolio'}</small></span></div>
         </div>
         <div className="user-card"><span className="avatar">SG</span><span><strong>Sergio Gómez</strong><small>Administrador</small></span><SessionControls /></div>
       </aside>

@@ -37,7 +37,7 @@ def test_synthetic_preview_preserves_continuation_and_totals() -> None:
     assert preview.unclassified == []
 
 
-def test_generic_budget_uses_general_area_declared_amount_and_skips_rollups() -> None:
+def test_generic_budget_promotes_repeated_headers_to_areas_and_skips_rollups() -> None:
     workbook = Workbook()
     sheet = workbook.active
     sheet.append(["Código", "Concepto", "Unidad", "Cantidad", "P. Unitario", "Importe"])
@@ -52,7 +52,8 @@ def test_generic_budget_uses_general_area_declared_amount_and_skips_rollups() ->
 
     preview = parse_neodata_workbook(output.getvalue(), "presupuesto.xlsx")
 
-    assert preview.areas == {"General": 1}
+    assert preview.areas == {"PRELIMINARES": 1}
+    assert preview.items[0].area_path == ("PRELIMINARES",)
     assert preview.calculated_total_without_vat == Decimal("3.02")
     assert len(preview.section_totals) == 1
     assert preview.rollup_total_count == 1
@@ -118,9 +119,18 @@ def test_real_casa_pse_workbook_regression() -> None:
 
     assert preview.sheets == ["b)Estandar (E)"]
     assert preview.row_count == 2918
-    assert preview.areas == {"General": 520}
+    assert len(preview.areas) == 70
+    assert sum(preview.areas.values()) == 520
+    assert len(preview.area_tree) == 254
+    assert any(
+        item.area_path == ("CIMENTACION", "SOTANO") for item in preview.items
+    )
+    assert any(
+        item.area_path == ("EXTRUCTURA", "ACERO", "PB", "COLUMNAS", "C-1")
+        for item in preview.items
+    )
     assert len(preview.items) == 520
-    assert preview.consolidated_item_count == 473
+    assert preview.consolidated_item_count == 520
     assert len(preview.section_totals) == 191
     assert preview.rollup_total_count == 68
     assert preview.unclassified == []

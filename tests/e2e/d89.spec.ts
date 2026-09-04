@@ -87,17 +87,36 @@ test.beforeEach(async ({ page }) => {
     });
   });
   await page.route(new RegExp(`/api/v1/works/${workId}$`), async (route) => {
-    expect(route.request().method()).toBe('DELETE');
-    expect(route.request().postDataJSON()).toEqual({ confirmation_name: 'Infra Toluca' });
-    workDeleted = true;
-    await route.fulfill({
-      json: { id: workId, nombre: 'Infra Toluca', deleted: true, counts: {}, receipt_paths: [] },
-    });
+    if (route.request().method() === 'GET') {
+      await route.fulfill({ json: { id: workId, nombre: 'Infra Toluca', ubicacion: 'Toluca', fecha_inicio: '2026-01-01', fecha_fin: null, estado: 'activa', areas: 1, partidas: 1, permissions: { can_manage: true, can_validate: true } } });
+    } else {
+      expect(route.request().method()).toBe('DELETE');
+      expect(route.request().postDataJSON()).toEqual({ confirmation_name: 'Infra Toluca' });
+      workDeleted = true;
+      await route.fulfill({
+        json: { id: workId, nombre: 'Infra Toluca', deleted: true, counts: {}, receipt_paths: [] },
+      });
+    }
+  });
+  await page.route(`**/api/v1/works/${workId}/overview**`, async (route) => {
+    await route.fulfill({ json: {
+      totals: { budget: '2624832.88', validated: '18450', committed: '22600', available: '2606382.88', projected_available: '2602232.88', execution_percent: '0.70', pending: '4150', pending_count: 1, rejected_count: 0, missing_receipts: 0 },
+      period: { validated: '18450', pending: '4150' },
+      areas: [{ id: areaId, parent_id: null, nombre: 'Oficina', ruta: ['OFICINA'], nivel: 0, seleccionable: true, budget: '2624832.88', validated: '18450', committed: '22600', available: '2606382.88', execution_percent: '0.70' }],
+      weekly: [{ week: '2026-08-24', validated: '18450', pending: '4150' }],
+      suppliers: [{ name: 'Concretos Toluca', amount: '18450' }], categories: [{ name: 'MATERIAL', amount: '18450' }],
+    } });
+  });
+  await page.route(`**/api/v1/works/${workId}/expenses**`, async (route) => {
+    await route.fulfill({ json: { items: [{ id: '44444444-4444-4444-8444-444444444444', area_id: areaId, expense_item_id: expensePartidaId, expense_subitem_id: expenseSubpartidaId, expense_category_id: expenseCategoryId, supplier_id: 'abababab-abab-4bab-8bab-abababababab', proveedor: 'Concretos Toluca', budget_item_id: budgetItemId, fecha: '2026-08-28', concepto: 'Cemento y adhesivo', folio: 'A-1', importe: '4150', comprobante_path: 'receipt.pdf', estado: 'pendiente', area: 'Oficina', area_ruta: ['OFICINA'], partida: 'PRELIMINARES', subpartida: 'LIMPIEZA', categoria: 'MATERIAL', autor: 'Sergio Gómez', motivo_revision: null, creado_por: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', expense_locked: false, can_edit: true, can_cancel: true, can_resubmit: false }], total: 1, page: 1, page_size: 50 } });
+  });
+  await page.route(`**/api/v1/works/${workId}/weekly-closes`, async (route) => {
+    await route.fulfill({ json: [] });
   });
   await page.route('**/api/v1/works/*/catalog', async (route) => {
     await route.fulfill({
       json: {
-        areas: [{ id: areaId, nombre: 'Oficina' }],
+        areas: [{ id: areaId, nombre: 'Oficina', ruta: ['OFICINA'], nivel: 0, seleccionable: true }],
         items: [{ budget_item_id: budgetItemId, area_id: areaId, codigo: 'ALB-05', descripcion: 'Firme de concreto', clase: 'ALBAÑILERÍAS' }],
         expense_partidas: [{ id: expensePartidaId, nombre: 'PRELIMINARES' }, { id: secondExpensePartidaId, nombre: 'ALBANILERIA' }],
         expense_subitems: [{ id: expenseSubpartidaId, partida_id: expensePartidaId, nombre: 'LIMPIEZA' }, { id: secondExpenseSubpartidaId, partida_id: secondExpensePartidaId, nombre: 'FIRMES Y HORMIGONES' }],
@@ -249,4 +268,23 @@ test('administrador elimina una obra con confirmación por nombre', async ({ pag
   await confirmButton.click();
   await expect(page.getByRole('status')).toContainText('Ya puedes cargarla de cero');
   await expect(page.getByText('No hay obras asignadas a esta cuenta.')).toBeVisible();
+});
+
+test('administrador entra al espacio específico de una obra y recorre sus módulos', async ({ page }) => {
+  await login(page);
+  await page.getByRole('link', { name: 'Abrir' }).click();
+  await expect(page).toHaveURL(new RegExp(`/obras/${workId}$`));
+  await expect(page.getByRole('heading', { name: 'Infra Toluca' })).toBeVisible();
+  await expect(page.getByText('Presupuesto vigente')).toBeVisible();
+  const workNavigation = page.getByRole('navigation', { name: 'Secciones de la obra' });
+  await workNavigation.getByRole('link', { name: 'Gastos', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Movimientos de la obra' })).toBeVisible();
+  await expect(page.getByText('Cemento y adhesivo')).toBeVisible();
+  await page.getByRole('button', { name: 'Nuevo gasto' }).click();
+  await page.getByLabel('Buscar área NEODATA').fill('oficina');
+  await expect(page.getByLabel('Área NEODATA').getByRole('option', { name: 'OFICINA' })).toHaveCount(1);
+  await page.locator('form').getByRole('button', { name: 'Cancelar' }).click();
+  await workNavigation.getByRole('link', { name: 'Presupuesto', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Árbol presupuestal NEODATA' })).toBeVisible();
+  await expect(page.getByText('Oficina', { exact: true })).toBeVisible();
 });

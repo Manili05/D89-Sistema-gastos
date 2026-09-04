@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import type { Route } from 'next';
 import { useEffect, useState, type CSSProperties } from 'react';
 import { AppShell } from '@/components/app-shell';
 import { PlusIcon } from '@/components/icons';
@@ -142,7 +143,7 @@ export default function DashboardPage() {
           <div className="work-list">
             {dashboard?.works.map((work) => {
               const state = workStatus(work);
-              return <article className="work-row" key={work.id}><div><h3>{work.nombre}</h3><p>{work.ubicacion || 'Ubicación no registrada'}</p></div><div><span className="amount-label">Presupuesto</span><span className="amount">{currency(work.presupuesto)}</span></div><div><span className="amount-label">Gasto real</span><span className="amount">{currency(work.gasto)}</span></div><div className="work-actions"><StatusPill tone={state.tone}>{state.label}</StatusPill><button className="text-action" type="button" disabled={Boolean(downloading)} onClick={() => download(work, 'xlsx')}>Excel</button><button className="text-action" type="button" disabled={Boolean(downloading)} onClick={() => download(work, 'pdf')}>PDF</button>{dashboard.permissions.can_delete_works && <button className="text-action danger" type="button" disabled={Boolean(downloading)} onClick={() => openDelete(work)} aria-label={`Eliminar ${work.nombre}`}>Eliminar</button>}</div></article>;
+              return <article className="work-row" key={work.id}><div><h3><Link href={`/obras/${work.id}` as Route}>{work.nombre}</Link></h3><p>{work.ubicacion || 'Ubicación no registrada'}</p></div><div><span className="amount-label">Presupuesto</span><span className="amount">{currency(work.presupuesto)}</span></div><div><span className="amount-label">Gasto real</span><span className="amount">{currency(work.gasto)}</span></div><div className="work-actions"><StatusPill tone={state.tone}>{state.label}</StatusPill><Link className="text-action" href={`/obras/${work.id}` as Route}>Abrir</Link><button className="text-action" type="button" disabled={Boolean(downloading)} onClick={() => download(work, 'xlsx')}>Excel</button><button className="text-action" type="button" disabled={Boolean(downloading)} onClick={() => download(work, 'pdf')}>PDF</button>{dashboard.permissions.can_delete_works && <button className="text-action danger" type="button" disabled={Boolean(downloading)} onClick={() => openDelete(work)} aria-label={`Eliminar ${work.nombre}`}>Eliminar</button>}</div></article>;
             })}
             {dashboard && dashboard.works.length === 0 && <p className="empty-state">No hay obras asignadas a esta cuenta.</p>}
           </div>

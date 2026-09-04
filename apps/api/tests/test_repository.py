@@ -14,6 +14,7 @@ def item(*, description: str, quantity: str, unit_price: str, amount: str) -> di
         "sheet": "Presupuesto",
         "row": 20,
         "area": "General",
+        "area_path": ["General"],
         "work_class": "PRELIMINARES",
         "category": None,
         "code": "PRE-01",

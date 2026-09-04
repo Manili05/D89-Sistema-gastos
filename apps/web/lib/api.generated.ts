@@ -39,6 +39,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/expenses/review-batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Post Expense Batch Review */
+        post: operations["post_expense_batch_review_api_v1_expenses_review_batch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/expenses/{expense_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Patch Expense */
+        patch: operations["patch_expense_api_v1_expenses__expense_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/expenses/{expense_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Post Expense Cancel */
+        post: operations["post_expense_cancel_api_v1_expenses__expense_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/expenses/{expense_id}/receipt": {
         parameters: {
             query?: never;
@@ -54,6 +105,23 @@ export interface paths {
         head?: never;
         /** Patch Expense Receipt */
         patch: operations["patch_expense_receipt_api_v1_expenses__expense_id__receipt_patch"];
+        trace?: never;
+    };
+    "/api/v1/expenses/{expense_id}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Post Expense Review */
+        post: operations["post_expense_review_api_v1_expenses__expense_id__review_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/health": {
@@ -321,14 +389,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Get Work Detail */
+        get: operations["get_work_detail_api_v1_works__work_id__get"];
         put?: never;
         post?: never;
         /** Remove Work */
         delete: operations["remove_work_api_v1_works__work_id__delete"];
         options?: never;
         head?: never;
-        patch?: never;
+        /** Patch Work */
+        patch: operations["patch_work_api_v1_works__work_id__patch"];
         trace?: never;
     };
     "/api/v1/works/{work_id}/catalog": {
@@ -340,6 +410,57 @@ export interface paths {
         };
         /** Get Work Catalog */
         get: operations["get_work_catalog_api_v1_works__work_id__catalog_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/works/{work_id}/expenses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Work Expenses */
+        get: operations["get_work_expenses_api_v1_works__work_id__expenses_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/works/{work_id}/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Work Overview */
+        get: operations["get_work_overview_api_v1_works__work_id__overview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/works/{work_id}/weekly-closes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Weekly Closes */
+        get: operations["get_weekly_closes_api_v1_works__work_id__weekly_closes_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -372,6 +493,21 @@ export interface components {
             work_name?: string | null;
             /** Work Start Date */
             work_start_date?: string | null;
+        };
+        /** ExpenseBatchReview */
+        ExpenseBatchReview: {
+            /** Expense Ids */
+            expense_ids: string[];
+            /**
+             * Work Id
+             * Format: uuid
+             */
+            work_id: string;
+        };
+        /** ExpenseCancel */
+        ExpenseCancel: {
+            /** Reason */
+            reason: string;
         };
         /** ExpenseCreate */
         ExpenseCreate: {
@@ -420,11 +556,58 @@ export interface components {
              */
             work_id: string;
         };
+        /** ExpenseReview */
+        ExpenseReview: {
+            /** Action */
+            action: string;
+            /** Reason */
+            reason?: string | null;
+        };
         /**
          * ExpenseState
          * @enum {string}
          */
-        ExpenseState: "pendiente" | "validado";
+        ExpenseState: "pendiente" | "validado" | "rechazado";
+        /** ExpenseUpdate */
+        ExpenseUpdate: {
+            /** Amount */
+            amount: number | string;
+            /**
+             * Area Id
+             * Format: uuid
+             */
+            area_id: string;
+            /** Budget Item Id */
+            budget_item_id?: string | null;
+            /** Concept */
+            concept: string;
+            /**
+             * Expense Category Id
+             * Format: uuid
+             */
+            expense_category_id: string;
+            /**
+             * Expense Item Id
+             * Format: uuid
+             */
+            expense_item_id: string;
+            /**
+             * Expense Subitem Id
+             * Format: uuid
+             */
+            expense_subitem_id: string;
+            /** Folio */
+            folio?: string | null;
+            /**
+             * Spent On
+             * Format: date
+             */
+            spent_on: string;
+            /** Supplier Id */
+            supplier_id?: string | null;
+            /** Supplier Name */
+            supplier_name?: string | null;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -590,6 +773,19 @@ export interface components {
             /** Confirmation Name */
             confirmation_name: string;
         };
+        /** WorkUpdate */
+        WorkUpdate: {
+            /** End Date */
+            end_date?: string | null;
+            /** Location */
+            location?: string | null;
+            /** Name */
+            name: string;
+            /** Start Date */
+            start_date?: string | null;
+            /** State */
+            state: string;
+        };
     };
     responses: never;
     parameters: never;
@@ -704,6 +900,121 @@ export interface operations {
             };
         };
     };
+    post_expense_batch_review_api_v1_expenses_review_batch_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExpenseBatchReview"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_expense_api_v1_expenses__expense_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                expense_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExpenseUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_expense_cancel_api_v1_expenses__expense_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                expense_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExpenseCancel"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     patch_expense_receipt_api_v1_expenses__expense_id__receipt_patch: {
         parameters: {
             query?: never;
@@ -718,6 +1029,45 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["ReceiptUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_expense_review_api_v1_expenses__expense_id__review_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                expense_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExpenseReview"];
             };
         };
         responses: {
@@ -1388,6 +1738,41 @@ export interface operations {
             };
         };
     };
+    get_work_detail_api_v1_works__work_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                work_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     remove_work_api_v1_works__work_id__delete: {
         parameters: {
             query?: never;
@@ -1402,6 +1787,45 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["WorkDelete"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_work_api_v1_works__work_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                work_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkUpdate"];
             };
         };
         responses: {
@@ -1449,6 +1873,122 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_work_expenses_api_v1_works__work_id__expenses_get: {
+        parameters: {
+            query?: {
+                from?: string | null;
+                to?: string | null;
+                state?: string | null;
+                area_id?: string | null;
+                q?: string | null;
+                page?: number;
+                page_size?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                work_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_work_overview_api_v1_works__work_id__overview_get: {
+        parameters: {
+            query?: {
+                from?: string | null;
+                to?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                work_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_weekly_closes_api_v1_works__work_id__weekly_closes_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                work_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
                 };
             };
             /** @description Validation Error */
