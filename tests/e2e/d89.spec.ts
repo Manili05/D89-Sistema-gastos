@@ -288,3 +288,41 @@ test('administrador entra al espacio específico de una obra y recorre sus módu
   await expect(page.getByRole('heading', { name: 'Árbol presupuestal NEODATA' })).toBeVisible();
   await expect(page.getByText('Oficina', { exact: true })).toBeVisible();
 });
+
+test('administrador adjunta un comprobante faltante desde validación', async ({ page }) => {
+  let receiptAttached = false;
+  await page.route(`**/api/v1/works/${workId}/expenses**`, async (route) => {
+    await route.fulfill({ json: { items: [{
+      id: '44444444-4444-4444-8444-444444444444', area_id: areaId,
+      expense_item_id: expensePartidaId, expense_subitem_id: expenseSubpartidaId,
+      expense_category_id: expenseCategoryId, supplier_id: null,
+      proveedor: 'Concretos Toluca', budget_item_id: budgetItemId,
+      fecha: '2026-08-28', concepto: 'Cemento sin comprobante', folio: 'A-2',
+      importe: '4150', comprobante_path: receiptAttached ? 'evidence.pdf' : null,
+      estado: 'pendiente', area: 'Oficina', area_ruta: ['OFICINA'],
+      partida: 'PRELIMINARES', subpartida: 'LIMPIEZA', categoria: 'MATERIAL',
+      autor: 'Administrador D89', motivo_revision: null,
+      creado_por: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', expense_locked: false,
+      can_edit: true, can_cancel: true, can_resubmit: false,
+    }], total: 1, page: 1, page_size: 50 } });
+  });
+  await page.route('**/storage/v1/object/comprobantes/**', async (route) => {
+    await route.fulfill({ status: 200, json: { Key: 'evidence.pdf' } });
+  });
+  await page.route('**/api/v1/expenses/44444444-4444-4444-8444-444444444444/receipt', async (route) => {
+    expect(route.request().method()).toBe('PATCH');
+    receiptAttached = true;
+    await route.fulfill({ json: { id: '44444444-4444-4444-8444-444444444444', comprobante_path: 'evidence.pdf' } });
+  });
+
+  await login(page);
+  await page.goto(`/obras/${workId}/validacion`);
+  await expect(page.getByText('Faltante', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Validar', exact: true })).toBeDisabled();
+  await page.getByLabel('Adjuntar comprobante').setInputFiles({
+    name: 'evidence.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4 test'),
+  });
+  await expect(page.getByRole('status')).toContainText('ya puede validarse');
+  await expect(page.getByRole('button', { name: 'Ver archivo' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Validar', exact: true })).toBeEnabled();
+});
