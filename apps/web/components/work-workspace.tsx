@@ -83,6 +83,11 @@ function rangeFor(period: string, customFrom: string, customTo: string) {
   return { from: local(start), to: local(now) };
 }
 
+function generateReceiptPath(workId: string, expenseId: string, fileName: string): string {
+  const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '-');
+  return `${workId}/${expenseId}/${Date.now()}-${safeName}`;
+}
+
 export function WorkWorkspace({ workId, tab }: { workId: string; tab: Tab }) {
   const [work, setWork] = useState<Work>();
   const [catalog, setCatalog] = useState<WorkCatalog>();
@@ -177,6 +182,44 @@ export function WorkWorkspace({ workId, tab }: { workId: string; tab: Tab }) {
     else window.open(data.signedUrl, '_blank', 'noopener,noreferrer');
   }
 
+  async function attachReceipt(expense: Expense, file: File) {
+    const allowedTypes = new Set(['image/jpeg', 'image/png', 'image/webp', 'application/pdf']);
+    if (!allowedTypes.has(file.type)) {
+      setError('El comprobante debe ser JPG, PNG, WebP o PDF.');
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setError('El comprobante no puede superar 10 MB.');
+      return;
+    }
+
+    setBusy(true); setError(''); setMessage('');
+    const path = generateReceiptPath(workId, expense.id, file.name);
+    const storage = getSupabaseBrowserClient().storage.from('comprobantes');
+    try {
+      const { error: uploadError } = await storage.upload(path, file, {
+        contentType: file.type, upsert: false,
+      });
+      if (uploadError) throw uploadError;
+      try {
+        await apiJson(`/expenses/${expense.id}/receipt`, {
+          method: 'PATCH', body: JSON.stringify({ path }),
+        });
+      } catch (attachError) {
+        await storage.remove([path]);
+        throw attachError;
+      }
+      setMessage('Comprobante adjuntado. El gasto ya puede validarse.');
+      await refresh();
+    } catch (receiptError) {
+      setError(receiptError instanceof Error
+        ? `No fue posible adjuntar el comprobante: ${receiptError.message}`
+        : 'No fue posible adjuntar el comprobante.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function closeCurrentWeek() {
     const current = isoWeek(); setBusy(true); setError('');
     try {
@@ -236,7 +279,7 @@ export function WorkWorkspace({ workId, tab }: { workId: string; tab: Tab }) {
 
     {tab === 'gastos' && <>{(showForm || editing) && catalog && <WorkExpenseForm key={editing?.id || 'new'} workId={workId} catalog={catalog} expense={editing} onCancel={() => { setShowForm(false); setEditing(undefined); }} onSaved={(text) => { setMessage(text); setShowForm(false); setEditing(undefined); void refresh(); }} />}<section className="panel"><div className="panel-header"><div><h2>Movimientos de la obra</h2><p>{expenses?.total || 0} gastos encontrados</p></div><div className="expense-filters"><input aria-label="Buscar gastos" placeholder="Concepto, folio o proveedor" value={search} onChange={(event) => setSearch(event.target.value)} /><select aria-label="Estado del gasto" value={stateFilter} onChange={(event) => setStateFilter(event.target.value)}><option value="">Todos</option><option value="pendiente">Pendientes</option><option value="validado">Validados</option><option value="rechazado">Rechazados</option></select></div></div><ExpenseTable items={expenses?.items || []} busy={busy} onReceipt={openReceipt} onEdit={(expense) => { setEditing(expense); setShowForm(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }} onCancel={cancel} onReview={review} canValidate={Boolean(work?.permissions.can_validate)} /></section></>}
 
-    {tab === 'validacion' && <section className="panel"><div className="panel-header"><div><h2>Gastos pendientes de validar</h2><p>El comprobante es obligatorio para aprobar</p></div><button className="btn" disabled={!selected.length || busy} onClick={() => void batchValidate()}>Validar seleccionados ({selected.length})</button></div><div className="expense-table-wrap"><table className="expense-table"><thead><tr><th aria-label="Seleccionar" /><th>Fecha / concepto</th><th>Clasificación</th><th>Proveedor</th><th>Importe</th><th>Comprobante</th><th>Acciones</th></tr></thead><tbody>{pending.map((expense) => <tr key={expense.id}><td><input type="checkbox" aria-label={`Seleccionar ${expense.concepto}`} checked={selected.includes(expense.id)} disabled={!expense.comprobante_path} onChange={(event) => setSelected((current) => event.target.checked ? [...current, expense.id] : current.filter((id) => id !== expense.id))} /></td><td><strong>{expense.concepto}</strong><small>{expense.fecha} · {expense.autor}</small></td><td>{expense.area_ruta?.join(' › ')}<small>{expense.partida} › {expense.subpartida}</small></td><td>{expense.proveedor}</td><td><strong>{currency(expense.importe)}</strong></td><td><button className="text-action" disabled={!expense.comprobante_path} onClick={() => void openReceipt(expense)}>{expense.comprobante_path ? 'Ver archivo' : 'Faltante'}</button></td><td><button className="text-action" disabled={!expense.comprobante_path || busy} onClick={() => void review(expense.id, 'validate')}>Validar</button><button className="text-action danger" disabled={busy} onClick={() => void review(expense.id, 'reject')}>Rechazar</button></td></tr>)}</tbody></table>{pending.length === 0 && <p className="empty-state">No hay gastos pendientes.</p>}</div></section>}
+    {tab === 'validacion' && <section className="panel"><div className="panel-header"><div><h2>Gastos pendientes de validar</h2><p>El comprobante es obligatorio para aprobar</p></div><button className="btn" disabled={!selected.length || busy} onClick={() => void batchValidate()}>Validar seleccionados ({selected.length})</button></div><div className="expense-table-wrap"><table className="expense-table"><thead><tr><th aria-label="Seleccionar" /><th>Fecha / concepto</th><th>Clasificación</th><th>Proveedor</th><th>Importe</th><th>Comprobante</th><th>Acciones</th></tr></thead><tbody>{pending.map((expense) => <tr key={expense.id}><td><input type="checkbox" aria-label={`Seleccionar ${expense.concepto}`} checked={selected.includes(expense.id)} disabled={!expense.comprobante_path || busy} onChange={(event) => setSelected((current) => event.target.checked ? [...current, expense.id] : current.filter((id) => id !== expense.id))} /></td><td><strong>{expense.concepto}</strong><small>{expense.fecha} · {expense.autor}</small></td><td>{expense.area_ruta?.join(' › ')}<small>{expense.partida} › {expense.subpartida}</small></td><td>{expense.proveedor}</td><td><strong>{currency(expense.importe)}</strong></td><td>{expense.comprobante_path ? <button className="text-action" disabled={busy} onClick={() => void openReceipt(expense)}>Ver archivo</button> : <><span className="missing-receipt">Faltante</span><label className={`text-action receipt-upload${busy ? ' disabled' : ''}`}>Adjuntar comprobante<input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" disabled={busy} onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; if (file) void attachReceipt(expense, file); }} /></label></>}</td><td><button className="text-action" disabled={!expense.comprobante_path || busy} title={!expense.comprobante_path ? 'Adjunta un comprobante para validar' : undefined} onClick={() => void review(expense.id, 'validate')}>Validar</button><button className="text-action danger" disabled={busy} onClick={() => void review(expense.id, 'reject')}>Rechazar</button></td></tr>)}</tbody></table>{pending.length === 0 && <p className="empty-state">No hay gastos pendientes.</p>}</div></section>}
 
     {tab === 'presupuesto' && <section className="panel"><div className="panel-header"><div><h2>Árbol presupuestal NEODATA</h2><p>Los niveles padre acumulan automáticamente sus descendientes</p></div></div><div className="budget-tree">{overview?.areas.map((area) => <div className={`budget-node level-${Math.min(area.nivel, 5)}`} key={area.id}><div><strong>{area.nombre}</strong><small>{area.seleccionable ? 'Nivel con conceptos' : 'Capítulo acumulador'}</small></div><span>{currency(area.budget)}</span><span>{currency(area.validated)}</span><span>{currency(area.committed)}</span><StatusPill tone={Number(area.execution_percent) > 100 ? 'red' : Number(area.execution_percent) >= 85 ? 'amber' : 'green'}>{Number(area.execution_percent).toFixed(1)}%</StatusPill></div>)}</div></section>}
 
