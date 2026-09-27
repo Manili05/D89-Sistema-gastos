@@ -2,7 +2,7 @@ import hashlib
 from collections import Counter
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -154,8 +154,12 @@ def update_work(
             returning id, nombre, ubicacion, fecha_inicio, fecha_fin, estado::text as estado
             """,
             (
-                payload.name.strip(), payload.location, payload.start_date,
-                payload.end_date, payload.state, work_id,
+                payload.name.strip(),
+                payload.location,
+                payload.start_date,
+                payload.end_date,
+                payload.state,
+                work_id,
             ),
         ).fetchone()
         if row is None:
@@ -365,11 +369,11 @@ def work_catalog(settings: Settings, user: UserContext, work_id: UUID) -> dict[s
         }
 
 
-def create_expense(
-    settings: Settings, user: UserContext, payload: ExpenseCreate
-) -> dict[str, Any]:
+def create_expense(settings: Settings, user: UserContext, payload: ExpenseCreate) -> dict[str, Any]:
     with transaction(settings) as connection:
         require_work_access(connection, user, payload.work_id)
+        if _expense_locked(connection, payload.work_id, payload.spent_on):
+            raise HTTPException(status.HTTP_409_CONFLICT, "La semana del gasto está cerrada")
         area = connection.execute(
             """select id from public.area
                where id = %s and obra_id = %s and vigente and seleccionable""",
@@ -490,9 +494,7 @@ def create_expense(
         return row
 
 
-def list_expenses(
-    settings: Settings, user: UserContext, work_id: UUID
-) -> list[dict[str, Any]]:
+def list_expenses(settings: Settings, user: UserContext, work_id: UUID) -> list[dict[str, Any]]:
     with transaction(settings) as connection:
         require_work_access(connection, user, work_id)
         return list(
@@ -529,7 +531,7 @@ def attach_receipt(
     with transaction(settings) as connection:
         expense = connection.execute(
             """select obra_id, creado_por, fecha, estado::text as estado
-               from public.gasto where id = %s and eliminado_en is null""",
+               from public.gasto where id = %s and eliminado_en is null for update""",
             (expense_id,),
         ).fetchone()
         if expense is None:
@@ -557,9 +559,15 @@ def attach_receipt(
         return row
 
 
+def _lock_work_expenses(connection: psycopg.Connection, work_id: UUID) -> None:
+    # Shared by expense mutations and closes, including weeks without a close row.
+    connection.execute("select pg_advisory_xact_lock(hashtextextended(%s, 0))", (str(work_id),))
+
+
 def _expense_locked(
     connection: psycopg.Connection[dict[str, Any]], work_id: UUID, spent_on: date
 ) -> bool:
+    _lock_work_expenses(connection, work_id)
     row = connection.execute(
         """
         select exists (
@@ -688,9 +696,7 @@ def list_work_expenses(
             )
             item["can_edit"] = can_change
             item["can_cancel"] = can_change
-            item["can_resubmit"] = (
-                can_change and item["estado"] == "rechazado"
-            )
+            item["can_resubmit"] = can_change and item["estado"] == "rechazado"
             items.append(item)
         return {
             "items": items,
@@ -720,6 +726,9 @@ def update_expense(
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Solo el autor corrige este gasto")
         if _expense_locked(connection, expense["obra_id"], expense["fecha"]):
             raise HTTPException(status.HTTP_409_CONFLICT, "La semana del gasto está cerrada")
+
+        if _expense_locked(connection, expense["obra_id"], payload.spent_on):
+            raise HTTPException(status.HTTP_409_CONFLICT, "La semana de destino está cerrada")
 
         area = connection.execute(
             """select id from public.area
@@ -936,9 +945,7 @@ def cancel_expense(
         return row
 
 
-def list_incomes(
-    settings: Settings, user: UserContext, work_id: UUID
-) -> list[dict[str, Any]]:
+def list_incomes(settings: Settings, user: UserContext, work_id: UUID) -> list[dict[str, Any]]:
     with transaction(settings) as connection:
         require_work_access(connection, user, work_id)
         return list(
@@ -953,9 +960,7 @@ def list_incomes(
         )
 
 
-def create_income(
-    settings: Settings, user: UserContext, payload: IncomeCreate
-) -> dict[str, Any]:
+def create_income(settings: Settings, user: UserContext, payload: IncomeCreate) -> dict[str, Any]:
     with transaction(settings) as connection:
         require_work_access(connection, user, payload.work_id)
         if user.role is not Role.ADMIN:
@@ -982,9 +987,7 @@ def create_income(
         return row
 
 
-def list_subcontracts(
-    settings: Settings, user: UserContext, work_id: UUID
-) -> list[dict[str, Any]]:
+def list_subcontracts(settings: Settings, user: UserContext, work_id: UUID) -> list[dict[str, Any]]:
     with transaction(settings) as connection:
         require_work_access(connection, user, work_id)
         return list(
@@ -1203,7 +1206,8 @@ def work_overview(
         for row in area_rows:
             row["available"] = row["budget"] - row["validated"]
             row["execution_percent"] = (
-                Decimal("0") if not row["budget"]
+                Decimal("0")
+                if not row["budget"]
                 else row["validated"] / row["budget"] * Decimal("100")
             )
 
@@ -1258,17 +1262,83 @@ def list_weekly_closes(
             connection.execute(
                 """
                 select c.id, c.anio_iso, c.semana_iso, c.estado::text as estado,
-                       c.cerrado_en, c.reabierto_en, c.motivo_reapertura,
+                       c.cerrado_en, c.reabierto_en, c.motivo_reapertura, c.revision,
                        count(cg.gasto_id) as expense_count,
                        coalesce(sum(cg.importe_al_cierre), 0) as amount
                 from public.cierre_semanal c
-                left join public.cierre_semanal_gasto cg on cg.cierre_id = c.id
+                left join public.cierre_semanal_gasto cg
+                  on cg.cierre_id = c.id and cg.revision = c.revision
                 where c.obra_id = %s group by c.id
                 order by c.anio_iso desc, c.semana_iso desc
                 """,
                 (work_id,),
             ).fetchall()
         )
+
+
+def weekly_close_preview(
+    settings: Settings, user: UserContext, work_id: UUID, iso_year: int, iso_week: int
+) -> dict[str, Any]:
+    try:
+        start = date.fromisocalendar(iso_year, iso_week, 1)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Semana ISO inválida") from exc
+    end = start + timedelta(days=6)
+    with transaction(settings) as connection:
+        require_work_access(connection, user, work_id)
+        _lock_work_expenses(connection, work_id)
+        expenses = connection.execute(
+            """select id, fecha, concepto, importe, estado::text as estado,
+                      origen::text as origen
+               from public.gasto where obra_id = %s and eliminado_en is null
+                 and fecha between %s and %s order by fecha, creado_en, id""",
+            (work_id, start, end),
+        ).fetchall()
+        close = connection.execute(
+            """select id, estado::text as estado, revision, cerrado_en, reabierto_en,
+                      motivo_reapertura from public.cierre_semanal
+               where obra_id = %s and anio_iso = %s and semana_iso = %s""",
+            (work_id, iso_year, iso_week),
+        ).fetchone()
+        history = []
+        revisions = []
+        if close:
+            history = connection.execute(
+                """select a.accion, a.creado_en, a.detalle_json, p.nombre as autor
+                   from public.audit_log_negocio a
+                   join public.perfil_usuario p on p.id = a.usuario_id
+                   where a.entidad = 'cierre_semanal' and a.entidad_id = %s
+                   order by a.creado_en, a.id""",
+                (close["id"],),
+            ).fetchall()
+            revisions = connection.execute(
+                """select revision, count(*) as expense_count,
+                          sum(importe_al_cierre) as amount
+                   from public.cierre_semanal_gasto where cierre_id = %s
+                   group by revision order by revision""",
+                (close["id"],),
+            ).fetchall()
+        summary: dict[str, Any] = {"count": len(expenses)}
+        for state in ("pendiente", "validado", "rechazado"):
+            selected = [expense for expense in expenses if expense["estado"] == state]
+            summary[state] = {
+                "count": len(selected),
+                "amount": sum((row["importe"] for row in selected), Decimal(0)),
+            }
+        summary["amount"] = summary["pendiente"]["amount"] + summary["validado"]["amount"]
+        return {
+            "work_id": work_id,
+            "iso_year": iso_year,
+            "iso_week": iso_week,
+            "date_from": start,
+            "date_to": end,
+            "summary": summary,
+            "expenses": list(expenses),
+            "close": close,
+            "history": list(history),
+            "revisions": list(revisions),
+            "permissions": {"can_manage": user.role is Role.ADMIN},
+        }
 
 
 def report_expenses(
@@ -1306,9 +1376,7 @@ def report_expenses(
         return work["nombre"], list(rows)
 
 
-def close_week(
-    settings: Settings, user: UserContext, payload: WeeklyCloseCreate
-) -> dict[str, Any]:
+def close_week(settings: Settings, user: UserContext, payload: WeeklyCloseCreate) -> dict[str, Any]:
     with transaction(settings) as connection:
         require_work_access(connection, user, payload.work_id)
         if user.role is not Role.ADMIN:
@@ -1319,6 +1387,7 @@ def close_week(
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_ENTITY, "Semana ISO inválida"
             ) from exc
+        _lock_work_expenses(connection, payload.work_id)
         existing = connection.execute(
             """
             select id, estado::text as estado from public.cierre_semanal
@@ -1326,8 +1395,8 @@ def close_week(
             """,
             (payload.work_id, payload.iso_year, payload.iso_week),
         ).fetchone()
-        if existing is not None:
-            raise HTTPException(status.HTTP_409_CONFLICT, "La semana ya tiene cierre")
+        if existing is not None and existing["estado"] == "cerrado":
+            raise HTTPException(status.HTTP_409_CONFLICT, "La semana ya está cerrada")
         pending = connection.execute(
             """
             select count(*) as total from public.gasto g
@@ -1347,7 +1416,12 @@ def close_week(
             insert into public.cierre_semanal
               (obra_id, anio_iso, semana_iso, cerrado_por)
             values (%s, %s, %s, %s)
-            returning id, obra_id, anio_iso, semana_iso, estado::text as estado, cerrado_en
+            on conflict (obra_id, anio_iso, semana_iso) do update
+              set estado = 'cerrado', cerrado_por = excluded.cerrado_por, cerrado_en = now(),
+                  revision = cierre_semanal.revision + 1,
+                  reabierto_por = null, reabierto_en = null, motivo_reapertura = null
+            returning id, obra_id, anio_iso, semana_iso, estado::text as estado,
+                      cerrado_en, revision
             """,
             (payload.work_id, payload.iso_year, payload.iso_week, user.id),
         ).fetchone()
@@ -1355,19 +1429,20 @@ def close_week(
         connection.execute(
             """
             insert into public.cierre_semanal_gasto
-              (cierre_id, gasto_id, importe_al_cierre, estado_al_cierre)
-            select %s, g.id, g.importe, g.estado
+              (cierre_id, revision, gasto_id, importe_al_cierre, estado_al_cierre)
+            select %s, %s, g.id, g.importe, g.estado
             from public.gasto g
             where g.obra_id = %s and g.eliminado_en is null
               and g.estado = 'validado'
               and extract(isoyear from g.fecha)::integer = %s
               and extract(week from g.fecha)::integer = %s
             """,
-            (close["id"], payload.work_id, payload.iso_year, payload.iso_week),
+            (close["id"], close["revision"], payload.work_id, payload.iso_year, payload.iso_week),
         )
         count = connection.execute(
-            "select count(*) as total from public.cierre_semanal_gasto where cierre_id = %s",
-            (close["id"],),
+            "select count(*) as total from public.cierre_semanal_gasto "
+            "where cierre_id = %s and revision = %s",
+            (close["id"], close["revision"]),
         ).fetchone()
         close["expense_count"] = count["total"] if count else 0
         connection.execute(
@@ -1376,7 +1451,17 @@ def close_week(
               (entidad, entidad_id, accion, usuario_id, canal, detalle_json)
             values ('cierre_semanal', %s, 'cerrar_lote', %s, 'web', %s)
             """,
-            (close["id"], user.id, Jsonb({"gastos": close["expense_count"]})),
+            (
+                close["id"],
+                user.id,
+                Jsonb(
+                    {
+                        "gastos": close["expense_count"],
+                        "revision": close["revision"],
+                        "transicion": "reabierto_cerrado" if existing else "inicial_cerrado",
+                    }
+                ),
+            ),
         )
         return close
 
@@ -1388,6 +1473,16 @@ def reopen_week(
         require_active_profile(connection, user)
         if user.role is not Role.ADMIN:
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Solo administración reabre semanas")
+        reason = reason.strip()
+        if len(reason) < 10:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Motivo insuficiente")
+        target = connection.execute(
+            "select obra_id from public.cierre_semanal where id = %s", (close_id,)
+        ).fetchone()
+        if target is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Cierre inexistente")
+        require_work_access(connection, user, target["obra_id"])
+        _lock_work_expenses(connection, target["obra_id"])
         row = connection.execute(
             """
             update public.cierre_semanal
@@ -1395,7 +1490,7 @@ def reopen_week(
                 motivo_reapertura = %s
             where id = %s and estado = 'cerrado'
             returning id, obra_id, anio_iso, semana_iso, estado::text as estado,
-                      reabierto_en, motivo_reapertura
+                      reabierto_en, motivo_reapertura, revision
             """,
             (user.id, reason, close_id),
         ).fetchone()
@@ -1407,7 +1502,7 @@ def reopen_week(
               (entidad, entidad_id, accion, usuario_id, canal, detalle_json)
             values ('cierre_semanal', %s, 'reabrir', %s, 'web', %s)
             """,
-            (close_id, user.id, Jsonb({"motivo": reason})),
+            (close_id, user.id, Jsonb({"motivo": reason, "revision": row["revision"]})),
         )
         return row
 
@@ -1649,9 +1744,7 @@ def _consolidate_preview_items(items: list[dict[str, Any]]) -> list[dict[str, An
         target["quantity"] = str(
             Decimal(str(target["quantity"])) + Decimal(str(source["quantity"]))
         )
-        target["amount"] = str(
-            Decimal(str(target["amount"])) + Decimal(str(source["amount"]))
-        )
+        target["amount"] = str(Decimal(str(target["amount"])) + Decimal(str(source["amount"])))
 
     for item in consolidated.values():
         quantity = Decimal(str(item["quantity"]))

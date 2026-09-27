@@ -10,6 +10,7 @@ from app.services.weekly_close import (
     CloseExpenseSnapshot,
     CloseState,
     close_week,
+    reclose_week,
     reopen_week,
 )
 
@@ -36,6 +37,17 @@ def test_weekly_close_reopening_requires_auditable_reason() -> None:
     assert reopened.state is CloseState.REOPENED
     assert reopened.expenses == close.expenses
     assert reopened.reopened_by == admin
+    corrected = (CloseExpenseSnapshot(close.expenses[0].expense_id, Decimal("200"), "validado"),)
+    reclosed = reclose_week(reopened, admin, corrected)
+    assert reclosed.state is CloseState.CLOSED
+    assert reclosed.id == close.id and reclosed.revision == 2
+    assert reclosed.previous == reopened
+    assert reclosed.previous.expenses[0].amount == Decimal("350.50")
+    assert reclosed.expenses[0].amount == Decimal("200")
+    with pytest.raises(ValueError):
+        reclose_week(reclosed, admin, corrected)
+    with pytest.raises(ValueError):
+        close_week(uuid4(), 2021, 53, admin, corrected)
 
 
 def test_whatsapp_catalog_has_exactly_ten_safe_tools() -> None:

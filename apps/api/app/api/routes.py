@@ -77,6 +77,7 @@ from app.services.repository import (
     update_import_preview,
     update_work,
     validate_expenses_batch,
+    weekly_close_preview,
     work_catalog,
     work_overview,
 )
@@ -558,6 +559,17 @@ def get_weekly_closes(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> list[dict[str, Any]]:
     return list_weekly_closes(settings, user, work_id)
+
+
+@router.get("/works/{work_id}/weekly-closes/preview", tags=["closes"])
+def get_weekly_close_preview(
+    work_id: UUID,
+    user: CurrentUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+    iso_year: Annotated[int, Query(ge=2000, le=2200)],
+    iso_week: Annotated[int, Query(ge=1, le=53)],
+) -> dict[str, Any]:
+    return weekly_close_preview(settings, user, work_id, iso_year, iso_week)
 
 
 @router.post("/weekly-closes/{close_id}/reopen", tags=["closes"])

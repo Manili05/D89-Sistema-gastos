@@ -425,12 +425,68 @@ test('gasto: corregir y reintentar comprobante no repite la edición ni crea otr
   expect(creations).toBe(0);
 });
 
-test('cierre semanal crea evidencia de lote', async ({ page }) => {
+test('cierre semanal navega el historial, cierra y reabre con evidencia', async ({ page }) => {
+  const closeId = '66666666-6666-4666-8666-666666666666';
+  const requestedWeeks: string[] = [];
+  const closes: { iso_year: number; iso_week: number }[] = [];
+  const reopenReasons: string[] = [];
+  let state: 'none' | 'cerrado' | 'reabierto' = 'none';
+  const total = (count: number, amount: string) => ({ count, amount });
+  await page.route(`**/api/v1/works/${workId}/weekly-closes/preview**`, async (route) => {
+    const url = new URL(route.request().url());
+    const year = Number(url.searchParams.get('iso_year'));
+    const week = Number(url.searchParams.get('iso_week'));
+    requestedWeeks.push(`${year}-W${week}`);
+    const history = [
+      ...(state !== 'none' ? [{ accion: 'cerrar_lote', creado_en: '2026-08-30T18:00:00Z', autor: 'Sergio Gómez', detalle_json: { revision: 1 } }] : []),
+      ...(state === 'reabierto' ? [{ accion: 'reabrir', creado_en: '2026-08-31T18:00:00Z', autor: 'Sergio Gómez', detalle_json: { revision: 1, motivo: reopenReasons[0] } }] : []),
+    ];
+    await route.fulfill({
+      json: {
+        work_id: workId, iso_year: year, iso_week: week,
+        date_from: '2026-08-24', date_to: '2026-08-30',
+        summary: { count: 1, amount: '4150', pendiente: total(0, '0'), validado: total(1, '4150'), rechazado: total(0, '0') },
+        expenses: [{ id: '44444444-4444-4444-8444-444444444444', fecha: '2026-08-28', concepto: 'Cemento y adhesivo', importe: '4150', estado: 'validado', origen: 'web' }],
+        close: state === 'none' ? null : { id: closeId, estado: state, revision: 1 },
+        revisions: state === 'none' ? [] : [{ revision: 1, expense_count: 1, amount: '4150' }],
+        history,
+        permissions: { can_manage: true },
+      },
+    });
+  });
+  await page.route('**/api/v1/weekly-closes', async (route) => {
+    closes.push(route.request().postDataJSON());
+    state = 'cerrado';
+    await route.fulfill({ status: 201, json: { id: closeId, expense_count: 1, revision: 1 } });
+  });
+  await page.route(`**/api/v1/weekly-closes/${closeId}/reopen`, async (route) => {
+    reopenReasons.push(route.request().postDataJSON().reason);
+    state = 'reabierto';
+    await route.fulfill({ json: { id: closeId, estado: 'reabierto', revision: 1 } });
+  });
+
   await login(page);
   await page.goto('/cierres');
+  await page.getByLabel('Semana ISO').fill('2026-W36');
+  await expect(page.getByRole('heading', { name: /semana 36 \/ 2026/ })).toBeVisible();
+  await page.getByRole('button', { name: 'Anterior' }).click();
+  await expect(page.getByRole('heading', { name: /semana 35 \/ 2026/ })).toBeVisible();
+  expect(requestedWeeks).toContain('2026-W35');
+
   await page.getByRole('button', { name: 'Cerrar semana 35' }).click();
-  await expect(page.getByRole('status')).toContainText('Cierre confirmado');
-  await expect(page.getByText('Semana cerrada')).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: 'Cierre confirmado' })).toBeVisible();
+  expect(closes).toEqual([{ work_id: workId, iso_year: 2026, iso_week: 35 }]);
+  await expect(page.getByText('Cerrado', { exact: true })).toBeVisible();
+  await expect(page.locator('strong', { hasText: /^Revisión 1$/ })).toBeVisible();
+
+  const reopen = page.getByRole('button', { name: 'Reabrir semana' });
+  await expect(reopen).toBeDisabled();
+  await page.getByLabel('Motivo de reapertura').fill('Factura duplicada del proveedor');
+  await reopen.click();
+  await expect(page.getByRole('status').filter({ hasText: 'Semana reabierta' })).toBeVisible();
+  expect(reopenReasons).toEqual(['Factura duplicada del proveedor']);
+  await expect(page.getByText('Reapertura · revisión 1')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Cerrar semana 35' })).toBeEnabled();
 });
 
 test('directorio muestra ficha, especialidad y evaluación del proveedor', async ({ page }) => {

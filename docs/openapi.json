@@ -4893,6 +4893,89 @@
           "closes"
         ]
       }
+    },
+    "/api/v1/works/{work_id}/weekly-closes/preview": {
+      "get": {
+        "operationId": "get_weekly_close_preview_api_v1_works__work_id__weekly_closes_preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "iso_year",
+            "required": true,
+            "schema": {
+              "maximum": 2200,
+              "minimum": 2000,
+              "title": "Iso Year",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "iso_week",
+            "required": true,
+            "schema": {
+              "maximum": 53,
+              "minimum": 1,
+              "title": "Iso Week",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Weekly Close Preview Api V1 Works  Work Id  Weekly Closes Preview Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Weekly Close Preview",
+        "tags": [
+          "closes"
+        ]
+      }
     }
   }
 }
