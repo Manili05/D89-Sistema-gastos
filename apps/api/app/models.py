@@ -48,6 +48,14 @@ class WorkUpdate(BaseModel):
         return self
 
 
+def normalize_rfc(value: str) -> str:
+    """Uppercase alphanumeric RFC; personas morales use 12 characters, físicas 13."""
+    cleaned = "".join(character for character in value.upper() if character.isalnum())
+    if len(cleaned) not in {12, 13}:
+        raise ValueError("El RFC debe contener 12 o 13 caracteres")
+    return cleaned
+
+
 class SupplierProfile(BaseModel):
     name: str = Field(min_length=2, max_length=250)
     legal_name: str | None = Field(default=None, max_length=250)
@@ -85,10 +93,7 @@ class SupplierProfile(BaseModel):
     def validate_supplier_identity(self) -> "SupplierProfile":
         self.name = self.name.strip()
         if self.tax_id:
-            cleaned = "".join(character for character in self.tax_id.upper() if character.isalnum())
-            if len(cleaned) not in {12, 13}:
-                raise ValueError("El RFC debe contener 12 o 13 caracteres")
-            self.tax_id = cleaned
+            self.tax_id = normalize_rfc(self.tax_id)
         if self.email and (
             "@" not in self.email or self.email.startswith("@") or self.email.endswith("@")
         ):
@@ -280,3 +285,70 @@ class ToolDefinition(BaseModel):
     mutates: bool
     requires_confirmation: bool = False
     description: str
+
+
+class CsfModelOutput(BaseModel):
+    """Strict schema the model must return for a Constancia de Situación Fiscal."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    rfc: str | None
+    razon_social: str | None
+    regimen_fiscal: str | None
+    codigo_postal: str | None
+    requiere_validacion_humana: bool
+    motivos_revision: list[str]
+
+
+class ReceiptConceptOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    cantidad: float | None
+    precio_unitario: float | None
+    descripcion: str | None
+
+
+class ReceiptModelOutput(BaseModel):
+    """Strict schema the model must return for a ticket or nota de remisión."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    total_detectado: float | None
+    conceptos: list[ReceiptConceptOutput]
+    requiere_validacion_humana: bool
+    motivos_revision: list[str]
+
+
+class CsfExtraction(BaseModel):
+    rfc: str | None
+    razon_social: str | None
+    regimen_fiscal: str | None
+    codigo_postal: str | None
+    requiere_validacion_humana: bool
+    motivos_revision: list[str]
+
+
+class ReceiptConcept(BaseModel):
+    cantidad: Decimal | None
+    precio_unitario: Decimal | None
+    descripcion: str | None
+
+
+class ReceiptExtraction(BaseModel):
+    total_detectado: Decimal | None
+    conceptos: list[ReceiptConcept]
+    suma_conceptos: Decimal | None
+    requiere_validacion_humana: bool
+    motivos_revision: list[str]
+
+
+class CsfExtractionResponse(BaseModel):
+    extraction: CsfExtraction
+    model: str | None
+    tool_call_log_id: UUID
+
+
+class ReceiptExtractionResponse(BaseModel):
+    extraction: ReceiptExtraction
+    model: str | None
+    tool_call_log_id: UUID

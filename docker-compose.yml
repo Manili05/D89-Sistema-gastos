@@ -231,6 +231,9 @@ services:
       HERMES_HMAC_KEY_ID: ${HERMES_HMAC_KEY_ID:-hermes-staging}
       HERMES_HMAC_SECRET: ${HERMES_HMAC_SECRET}
       HERMES_SANDBOX_MODE: ${HERMES_SANDBOX_MODE:-true}
+      # No depends_on on litellm: if the proxy is down only extraction fails (503).
+      LITELLM_BASE_URL: http://litellm:4000/v1
+      LITELLM_API_KEY: ${LITELLM_EXTRACTION_API_KEY:-}
     healthcheck:
       test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
       interval: 10s
@@ -281,12 +284,14 @@ services:
 
   litellm:
     <<: *service-defaults
-    profiles: [whatsapp]
+    # Always on: the API uses it for CSF/receipt extraction; Hermes stays in `whatsapp`.
     image: ghcr.io/berriai/litellm:v1.83.3-stable
     depends_on: { postgres: { condition: service_healthy } }
     command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "1"]
     environment:
       MOONSHOT_API_KEY: ${MOONSHOT_API_KEY:?set MOONSHOT_API_KEY}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY}
       LITELLM_SALT_KEY: ${LITELLM_SALT_KEY:?set LITELLM_SALT_KEY}
       LITELLM_DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/litellm

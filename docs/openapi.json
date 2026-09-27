@@ -1,6 +1,36 @@
 {
   "components": {
     "schemas": {
+      "Body_post_extract_csf_api_v1_suppliers_extract_csf_post": {
+        "properties": {
+          "file": {
+            "description": "Constancia de Situación Fiscal del SAT (PDF)",
+            "format": "binary",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_post_extract_csf_api_v1_suppliers_extract_csf_post",
+        "type": "object"
+      },
+      "Body_post_extract_receipt_api_v1_expenses_extract_receipt_post": {
+        "properties": {
+          "file": {
+            "description": "Foto del ticket o nota de remisión",
+            "format": "binary",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_post_extract_receipt_api_v1_expenses_extract_receipt_post",
+        "type": "object"
+      },
       "Body_preview_neodata_api_v1_neodata_preview_post": {
         "properties": {
           "file": {
@@ -77,6 +107,105 @@
           "file"
         ],
         "title": "Body_preview_neodata_api_v1_neodata_preview_post",
+        "type": "object"
+      },
+      "CsfExtraction": {
+        "properties": {
+          "codigo_postal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Codigo Postal"
+          },
+          "motivos_revision": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Motivos Revision",
+            "type": "array"
+          },
+          "razon_social": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Razon Social"
+          },
+          "regimen_fiscal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Regimen Fiscal"
+          },
+          "requiere_validacion_humana": {
+            "title": "Requiere Validacion Humana",
+            "type": "boolean"
+          },
+          "rfc": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rfc"
+          }
+        },
+        "required": [
+          "rfc",
+          "razon_social",
+          "regimen_fiscal",
+          "codigo_postal",
+          "requiere_validacion_humana",
+          "motivos_revision"
+        ],
+        "title": "CsfExtraction",
+        "type": "object"
+      },
+      "CsfExtractionResponse": {
+        "properties": {
+          "extraction": {
+            "$ref": "#/components/schemas/CsfExtraction"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "tool_call_log_id": {
+            "format": "uuid",
+            "title": "Tool Call Log Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "extraction",
+          "model",
+          "tool_call_log_id"
+        ],
+        "title": "CsfExtractionResponse",
         "type": "object"
       },
       "ExpenseBatchReview": {
@@ -540,6 +669,137 @@
           "unit"
         ],
         "title": "PreviewItemCorrection",
+        "type": "object"
+      },
+      "ReceiptConcept": {
+        "properties": {
+          "cantidad": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cantidad"
+          },
+          "descripcion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Descripcion"
+          },
+          "precio_unitario": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Precio Unitario"
+          }
+        },
+        "required": [
+          "cantidad",
+          "precio_unitario",
+          "descripcion"
+        ],
+        "title": "ReceiptConcept",
+        "type": "object"
+      },
+      "ReceiptExtraction": {
+        "properties": {
+          "conceptos": {
+            "items": {
+              "$ref": "#/components/schemas/ReceiptConcept"
+            },
+            "title": "Conceptos",
+            "type": "array"
+          },
+          "motivos_revision": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Motivos Revision",
+            "type": "array"
+          },
+          "requiere_validacion_humana": {
+            "title": "Requiere Validacion Humana",
+            "type": "boolean"
+          },
+          "suma_conceptos": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suma Conceptos"
+          },
+          "total_detectado": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Detectado"
+          }
+        },
+        "required": [
+          "total_detectado",
+          "conceptos",
+          "suma_conceptos",
+          "requiere_validacion_humana",
+          "motivos_revision"
+        ],
+        "title": "ReceiptExtraction",
+        "type": "object"
+      },
+      "ReceiptExtractionResponse": {
+        "properties": {
+          "extraction": {
+            "$ref": "#/components/schemas/ReceiptExtraction"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "tool_call_log_id": {
+            "format": "uuid",
+            "title": "Tool Call Log Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "extraction",
+          "model",
+          "tool_call_log_id"
+        ],
+        "title": "ReceiptExtractionResponse",
         "type": "object"
       },
       "ReceiptUpdate": {
@@ -1591,6 +1851,66 @@
           }
         },
         "summary": "Post Expense",
+        "tags": [
+          "expenses"
+        ]
+      }
+    },
+    "/api/v1/expenses/extract-receipt": {
+      "post": {
+        "description": "Propose receipt lines from an image; the server recomputes totals before answering.",
+        "operationId": "post_extract_receipt_api_v1_expenses_extract_receipt_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_post_extract_receipt_api_v1_expenses_extract_receipt_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceiptExtractionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Extract Receipt",
         "tags": [
           "expenses"
         ]
@@ -3417,6 +3737,66 @@
           }
         },
         "summary": "Get Supplier Analytics",
+        "tags": [
+          "suppliers"
+        ]
+      }
+    },
+    "/api/v1/suppliers/extract-csf": {
+      "post": {
+        "description": "Propose supplier fiscal data from a CSF; nothing is persisted besides tool_call_log.",
+        "operationId": "post_extract_csf_api_v1_suppliers_extract_csf_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_post_extract_csf_api_v1_suppliers_extract_csf_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CsfExtractionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Extract Csf",
         "tags": [
           "suppliers"
         ]

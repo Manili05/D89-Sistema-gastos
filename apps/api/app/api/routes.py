@@ -20,6 +20,7 @@ from fastapi.responses import Response
 from app.core.config import Settings, get_settings
 from app.core.security import AdminUser, CurrentUser, HermesSignature
 from app.models import (
+    CsfExtractionResponse,
     ExpenseBatchReview,
     ExpenseCancel,
     ExpenseCreate,
@@ -29,6 +30,7 @@ from app.models import (
     ImportConfirm,
     ImportPreviewUpdate,
     IncomeCreate,
+    ReceiptExtractionResponse,
     ReceiptUpdate,
     SubcontractCreate,
     SubcontractPaymentCreate,
@@ -48,6 +50,7 @@ from app.models import (
     WorkSupplierAssignment,
     WorkUpdate,
 )
+from app.services.ai_extraction import extract_csf, extract_receipt
 from app.services.neodata import NeodataError, parse_neodata_workbook
 from app.services.reports import build_excel_report, build_pdf_report
 from app.services.repository import (
@@ -276,6 +279,17 @@ def delete_supplier(
     return archive_supplier(settings, user, supplier_id, payload)
 
 
+@router.post("/suppliers/extract-csf", response_model=CsfExtractionResponse, tags=["suppliers"])
+async def post_extract_csf(
+    admin: AdminUser,
+    file: Annotated[UploadFile, File(description="Constancia de Situación Fiscal del SAT (PDF)")],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> CsfExtractionResponse:
+    """Propose supplier fiscal data from a CSF; nothing is persisted besides tool_call_log."""
+    content = await file.read(settings.ai_max_upload_bytes + 1)
+    return await extract_csf(settings, admin, content, file.content_type)
+
+
 @router.post("/suppliers/{supplier_id}/restore", tags=["suppliers"])
 def post_supplier_restore(
     supplier_id: UUID,
@@ -418,6 +432,19 @@ def patch_expense(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> dict[str, Any]:
     return update_expense(settings, user, expense_id, payload)
+
+
+@router.post(
+    "/expenses/extract-receipt", response_model=ReceiptExtractionResponse, tags=["expenses"]
+)
+async def post_extract_receipt(
+    user: CurrentUser,
+    file: Annotated[UploadFile, File(description="Foto del ticket o nota de remisión")],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> ReceiptExtractionResponse:
+    """Propose receipt lines from an image; the server recomputes totals before answering."""
+    content = await file.read(settings.ai_max_upload_bytes + 1)
+    return await extract_receipt(settings, user, content, file.content_type)
 
 
 @router.post("/expenses/{expense_id}/review", tags=["expenses"])

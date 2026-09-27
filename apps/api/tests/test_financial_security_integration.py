@@ -311,6 +311,17 @@ def test_financial_security_end_to_end(isolated_services, installation):
                             == 422
                         )
                         receipt = f"{ids['work']}/{expense_id}/receipt.pdf"
+                        missing = api.patch(
+                            f"/api/v1/expenses/{expense_id}/receipt",
+                            json={"path": f"{ids['work']}/{expense_id}/never-uploaded.pdf"},
+                            headers=headers("operativo"),
+                        )
+                        assert missing.status_code == 422, missing.text
+                        assert missing.json()["detail"] == "El comprobante no existe en Storage"
+                        assert connection.execute(
+                            "select comprobante_path from public.gasto where id=%s",
+                            (expense_id,),
+                        ).fetchone() == (None,)
                         connection.execute(
                             "insert into storage.objects(bucket_id,name) "
                             "values ('comprobantes',%s)",

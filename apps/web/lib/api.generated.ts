@@ -39,6 +39,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/expenses/extract-receipt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Extract Receipt
+         * @description Propose receipt lines from an image; the server recomputes totals before answering.
+         */
+        post: operations["post_extract_receipt_api_v1_expenses_extract_receipt_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/expenses/review-batch": {
         parameters: {
             query?: never;
@@ -400,6 +420,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/suppliers/extract-csf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Extract Csf
+         * @description Propose supplier fiscal data from a CSF; nothing is persisted besides tool_call_log.
+         */
+        post: operations["post_extract_csf_api_v1_suppliers_extract_csf_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/suppliers/{supplier_id}": {
         parameters: {
             query?: never;
@@ -649,6 +689,24 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** Body_post_extract_csf_api_v1_suppliers_extract_csf_post */
+        Body_post_extract_csf_api_v1_suppliers_extract_csf_post: {
+            /**
+             * File
+             * Format: binary
+             * @description Constancia de Situación Fiscal del SAT (PDF)
+             */
+            file: string;
+        };
+        /** Body_post_extract_receipt_api_v1_expenses_extract_receipt_post */
+        Body_post_extract_receipt_api_v1_expenses_extract_receipt_post: {
+            /**
+             * File
+             * Format: binary
+             * @description Foto del ticket o nota de remisión
+             */
+            file: string;
+        };
         /** Body_preview_neodata_api_v1_neodata_preview_post */
         Body_preview_neodata_api_v1_neodata_preview_post: {
             /**
@@ -669,6 +727,32 @@ export interface components {
             work_name?: string | null;
             /** Work Start Date */
             work_start_date?: string | null;
+        };
+        /** CsfExtraction */
+        CsfExtraction: {
+            /** Codigo Postal */
+            codigo_postal: string | null;
+            /** Motivos Revision */
+            motivos_revision: string[];
+            /** Razon Social */
+            razon_social: string | null;
+            /** Regimen Fiscal */
+            regimen_fiscal: string | null;
+            /** Requiere Validacion Humana */
+            requiere_validacion_humana: boolean;
+            /** Rfc */
+            rfc: string | null;
+        };
+        /** CsfExtractionResponse */
+        CsfExtractionResponse: {
+            extraction: components["schemas"]["CsfExtraction"];
+            /** Model */
+            model: string | null;
+            /**
+             * Tool Call Log Id
+             * Format: uuid
+             */
+            tool_call_log_id: string;
         };
         /** ExpenseBatchReview */
         ExpenseBatchReview: {
@@ -854,6 +938,39 @@ export interface components {
             unit: string;
             /** Work Class */
             work_class: string;
+        };
+        /** ReceiptConcept */
+        ReceiptConcept: {
+            /** Cantidad */
+            cantidad: string | null;
+            /** Descripcion */
+            descripcion: string | null;
+            /** Precio Unitario */
+            precio_unitario: string | null;
+        };
+        /** ReceiptExtraction */
+        ReceiptExtraction: {
+            /** Conceptos */
+            conceptos: components["schemas"]["ReceiptConcept"][];
+            /** Motivos Revision */
+            motivos_revision: string[];
+            /** Requiere Validacion Humana */
+            requiere_validacion_humana: boolean;
+            /** Suma Conceptos */
+            suma_conceptos: string | null;
+            /** Total Detectado */
+            total_detectado: string | null;
+        };
+        /** ReceiptExtractionResponse */
+        ReceiptExtractionResponse: {
+            extraction: components["schemas"]["ReceiptExtraction"];
+            /** Model */
+            model: string | null;
+            /**
+             * Tool Call Log Id
+             * Format: uuid
+             */
+            tool_call_log_id: string;
         };
         /** ReceiptUpdate */
         ReceiptUpdate: {
@@ -1203,6 +1320,41 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_extract_receipt_api_v1_expenses_extract_receipt_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_post_extract_receipt_api_v1_expenses_extract_receipt_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReceiptExtractionResponse"];
                 };
             };
             /** @description Validation Error */
@@ -2119,6 +2271,41 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_extract_csf_api_v1_suppliers_extract_csf_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_post_extract_csf_api_v1_suppliers_extract_csf_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CsfExtractionResponse"];
                 };
             };
             /** @description Validation Error */

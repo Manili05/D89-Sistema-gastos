@@ -548,6 +548,15 @@ def attach_receipt(
             raise HTTPException(status.HTTP_409_CONFLICT, "El gasto validado está bloqueado")
         if _expense_locked(connection, expense["obra_id"], expense["fecha"]):
             raise HTTPException(status.HTTP_409_CONFLICT, "La semana del gasto está cerrada")
+        stored = connection.execute(
+            """select exists(select 1 from storage.objects
+                 where bucket_id = 'comprobantes' and name = %s) as receipt_exists""",
+            (path,),
+        ).fetchone()
+        if not stored or not stored["receipt_exists"]:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY, "El comprobante no existe en Storage"
+            )
         row = connection.execute(
             """
             update public.gasto set comprobante_path = %s, editado_por = %s, editado_en = now()

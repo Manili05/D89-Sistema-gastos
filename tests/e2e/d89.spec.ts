@@ -248,22 +248,50 @@ test('portal admin prepara preview NEODATA sin confirmar', async ({ page }) => {
   await expect(page.getByRole('status')).toContainText('1 corrección');
 });
 
-test('captura gasto y comprobante queda pendiente', async ({ page }) => {
+test('/gastos usa el formulario unificado y no duplica el gasto al reintentar la subida', async ({ page }) => {
+  const expenseId = '44444444-4444-4444-8444-444444444444';
+  const payloads: Record<string, unknown>[] = [];
+  let uploads = 0;
+  let links = 0;
+  await page.route('**/api/v1/expenses', async (route) => {
+    payloads.push(route.request().postDataJSON());
+    await route.fulfill({ status: 201, json: { id: expenseId } });
+  });
+  await page.route('**/storage/v1/object/comprobantes/**', async (route) => {
+    uploads += 1;
+    if (uploads === 1) await route.fulfill({ status: 500, json: { message: 'Fallo simulado de subida' } });
+    else await route.fulfill({ json: { Key: 'comprobantes/receipt.png' } });
+  });
+  await page.route(`**/api/v1/expenses/${expenseId}/receipt`, async (route) => {
+    links += 1;
+    await route.fulfill({ json: { id: expenseId } });
+  });
+
   await login(page);
   await page.goto('/gastos');
-  const partida = page.getByLabel('Partida', { exact: true });
-  const subpartida = page.getByLabel('Subpartida', { exact: true });
-  await expect(partida).toBeEnabled();
+  const form = page.locator('form.work-expense-form');
+  await expect(form.getByLabel('Buscar área NEODATA')).toBeVisible();
+  await expect(form.getByLabel('Partida NEODATA')).toBeVisible();
+  const partida = form.getByLabel('Partida', { exact: true });
+  const subpartida = form.getByLabel('Subpartida', { exact: true });
   await expect(partida).toHaveValue(expensePartidaId);
-  await expect(subpartida).toHaveValue(expenseSubpartidaId);
   await partida.selectOption(secondExpensePartidaId);
   await expect(subpartida).toHaveValue(secondExpenseSubpartidaId);
-  await expect(page.getByLabel('Categoría', { exact: true })).toHaveValue(expenseCategoryId);
-  await page.getByLabel('Proveedor', { exact: true }).selectOption(supplierId);
-  await page.getByLabel('Importe').fill('18450');
-  await page.getByLabel('Concepto').fill('Cemento y adhesivo para firme de oficina');
-  await page.getByRole('button', { name: /Guardar pendiente/ }).click();
+  await form.getByLabel('Importe').fill('18450');
+  await form.getByLabel('Concepto').fill('Cemento y adhesivo para firme de oficina');
+  await form.getByLabel('Comprobante').setInputFiles({
+    name: 'receipt.png', mimeType: 'image/png', buffer: Buffer.from('test-image'),
+  });
+  await form.getByRole('button', { name: /Guardar pendiente/ }).click();
+  await expect(form.getByRole('alert')).toContainText('Reintenta sólo el comprobante');
+  await form.getByRole('button', { name: 'Reintentar comprobante' }).click();
   await expect(page.getByRole('status')).toContainText('Gasto guardado como pendiente');
+  expect(payloads).toHaveLength(1);
+  expect(payloads[0]).toMatchObject({ work_id: workId, expense_item_id: secondExpensePartidaId });
+  expect(payloads[0]).not.toHaveProperty('state');
+  expect(uploads).toBe(2);
+  expect(links).toBe(1);
+  await expect(form.getByLabel('Importe')).toBeEmpty();
 });
 
 for (const failure of ['upload', 'link'] as const) {
@@ -576,7 +604,9 @@ test('pestaña Cierres de la obra usa el selector ISO con el workId del espacio'
 
   await login(page);
   await page.goto(`/obras/${workId}/cierres`);
-  await expect(page.getByLabel('Obra')).toHaveCount(0);
+  await expect(page.getByLabel('Semana ISO')).toBeVisible();
+  // Exact match: 'Secciones de la obra' (workspace nav) must not count as a work selector.
+  await expect(page.getByLabel('Obra', { exact: true })).toHaveCount(0);
   await page.getByLabel('Semana ISO').fill('2026-W36');
   await page.getByRole('button', { name: 'Anterior' }).click();
   await expect(page.getByRole('heading', { name: /^semana 35 \/ 2026$/ })).toBeVisible();

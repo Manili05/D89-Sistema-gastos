@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Provision the budgeted LiteLLM key used by Hermes without logging secrets."""
+"""Provision D89's budgeted LiteLLM team and virtual keys without logging secrets.
+
+One team carries the single monthly ceiling (LITELLM_MONTHLY_BUDGET_MXN); Hermes and
+the API's document extraction get separate keys inside it, each restricted to its
+own models. The master key never leaves the LiteLLM container.
+"""
 
 from __future__ import annotations
 
@@ -105,49 +110,51 @@ def replace_env_values(updates: dict[str, str]) -> None:
             os.unlink(temporary)
 
 
-def main() -> None:
-    values = load_env()
-    require_value(values, "MOONSHOT_API_KEY")
-    require_value(values, "LITELLM_MASTER_KEY")
-    require_value(values, "LITELLM_SALT_KEY")
-    current_key = values.get("LITELLM_D89_API_KEY", "").strip()
-    if current_key and not current_key.startswith(PLACEHOLDERS):
-        raise SystemExit("La clave D89 ya existe; no se generó otra clave ni se alteró .env")
+HERMES_MODELS = [
+    "kimi-k3",
+    "gemini-3.8-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash-lite",
+    "claude-sonnet-5",
+    "claude-opus-5-5",
+]
+# Extraction aliases plus their fallback targets (see infra/litellm/config.yaml).
+EXTRACTION_MODELS = ["d89-documentos", "d89-vision", "gemini-3.6-flash", "claude-sonnet-5"]
+BUDGET_DURATION = "30d"
 
-    budget_usd = usd_budget(values)
-    run_compose("--profile", "whatsapp", "up", "-d", "postgres", "litellm")
-    request = json.dumps(
-        {
-            "key_alias": "d89-hermes",
-            "models": ["kimi-k3"],
-            "max_budget": float(budget_usd),
-            "budget_duration": "monthly",
-            "metadata": {
-                "budget_currency": "MXN",
-                "budget_mxn": values["LITELLM_MONTHLY_BUDGET_MXN"],
-                "mxn_per_usd": values["LITELLM_MXN_PER_USD"],
-                "rate_date": values["LITELLM_RATE_DATE"],
-            },
-        }
-    )
-    generate_script = f"""
+
+def is_provisioned(values: dict[str, str], key: str) -> bool:
+    value = values.get(key, "").strip()
+    return bool(value) and not value.startswith(PLACEHOLDERS)
+
+
+def post_master(path: str, payload: dict[str, object]) -> dict[str, object]:
+    request = json.dumps(payload)
+    script = f"""
 import json, os, urllib.request
 payload = {request!r}.encode()
 request = urllib.request.Request(
-    'http://127.0.0.1:4000/key/generate', data=payload,
+    'http://127.0.0.1:4000{path}', data=payload,
     headers={{'Authorization': 'Bearer ' + os.environ['LITELLM_MASTER_KEY'],
              'Content-Type': 'application/json'}}, method='POST')
 with urllib.request.urlopen(request, timeout=30) as response:
     print(response.read().decode())
 """
-    response = call_proxy(generate_script)
+    return call_proxy(script)
+
+
+def generate_key(alias: str, models: list[str], team_id: str, metadata: dict[str, str]) -> str:
+    response = post_master(
+        "/key/generate",
+        {"key_alias": alias, "models": models, "team_id": team_id, "metadata": metadata},
+    )
     virtual_key = str(response.get("key", ""))
     if not virtual_key.startswith("sk-"):
-        raise SystemExit("LiteLLM no devolvió una clave virtual válida")
-    returned_models = response.get("models", ["kimi-k3"])
-    returned_budget = Decimal(str(response.get("max_budget", budget_usd)))
-    if "kimi-k3" not in returned_models or returned_budget != budget_usd:
-        raise SystemExit("LiteLLM no confirmó el modelo o presupuesto solicitado")
+        raise SystemExit(f"LiteLLM no devolvió una clave virtual válida para {alias}")
+    if not set(models).issubset(set(response.get("models", []))):
+        raise SystemExit(f"LiteLLM no confirmó los modelos solicitados para {alias}")
+    if response.get("team_id") != team_id:
+        raise SystemExit(f"LiteLLM no asoció {alias} al equipo con presupuesto")
 
     verify_script = """
 import json, os, urllib.request
@@ -157,19 +164,73 @@ request = urllib.request.Request(
 with urllib.request.urlopen(request, timeout=30) as response:
     print(response.read().decode())
 """
-    models = call_proxy(verify_script, virtual_key=virtual_key)
-    if not any(model.get("id") == "kimi-k3" for model in models.get("data", [])):
-        raise SystemExit("La clave virtual no quedó restringida al alias kimi-k3")
+    listed = call_proxy(verify_script, virtual_key=virtual_key)
+    available = {model.get("id") for model in listed.get("data", [])}
+    if available != set(models):
+        raise SystemExit(f"La clave {alias} no quedó restringida a sus modelos autorizados")
+    return virtual_key
 
-    replace_env_values(
-        {
-            "LITELLM_D89_API_KEY": virtual_key,
-            "LITELLM_MONTHLY_BUDGET_USD": str(budget_usd),
-        }
-    )
+
+def main() -> None:
+    values = load_env()
+    require_value(values, "MOONSHOT_API_KEY")
+    require_value(values, "GEMINI_API_KEY")
+    require_value(values, "ANTHROPIC_API_KEY")
+    require_value(values, "LITELLM_MASTER_KEY")
+    require_value(values, "LITELLM_SALT_KEY")
+    hermes_done = is_provisioned(values, "LITELLM_D89_API_KEY")
+    extraction_done = is_provisioned(values, "LITELLM_EXTRACTION_API_KEY")
+    team_done = is_provisioned(values, "LITELLM_TEAM_ID")
+    if hermes_done and extraction_done:
+        raise SystemExit("Las claves D89 ya existen; no se generó otra clave ni se alteró .env")
+    if (hermes_done or extraction_done) and not team_done:
+        # A key created before the shared team has its own ceiling: adding another
+        # key would silently double the approved monthly budget.
+        raise SystemExit(
+            "Existe una clave sin equipo con presupuesto compartido; revócala en LiteLLM, "
+            "vacía LITELLM_D89_API_KEY y vuelve a ejecutar este script"
+        )
+
+    budget_usd = usd_budget(values)
+    run_compose("up", "-d", "postgres", "litellm")
+    metadata = {
+        "budget_currency": "MXN",
+        "budget_mxn": values["LITELLM_MONTHLY_BUDGET_MXN"],
+        "mxn_per_usd": values["LITELLM_MXN_PER_USD"],
+        "rate_date": values["LITELLM_RATE_DATE"],
+    }
+    updates: dict[str, str] = {"LITELLM_MONTHLY_BUDGET_USD": str(budget_usd)}
+    if team_done:
+        team_id = values["LITELLM_TEAM_ID"].strip()
+    else:
+        team = post_master(
+            "/team/new",
+            {
+                "team_alias": "d89",
+                "max_budget": float(budget_usd),
+                "budget_duration": BUDGET_DURATION,
+                "models": sorted(set(HERMES_MODELS + EXTRACTION_MODELS)),
+                "metadata": metadata,
+            },
+        )
+        team_id = str(team.get("team_id", ""))
+        returned_budget = Decimal(str(team.get("max_budget", "")))
+        if not team_id or returned_budget != budget_usd:
+            raise SystemExit("LiteLLM no confirmó el equipo o su presupuesto")
+        updates["LITELLM_TEAM_ID"] = team_id
+    if not hermes_done:
+        updates["LITELLM_D89_API_KEY"] = generate_key(
+            "d89-hermes", HERMES_MODELS, team_id, metadata
+        )
+    if not extraction_done:
+        updates["LITELLM_EXTRACTION_API_KEY"] = generate_key(
+            "d89-api-extraccion", EXTRACTION_MODELS, team_id, metadata
+        )
+
+    replace_env_values(updates)
     print(
-        "Clave virtual D89 provisionada sin exponerla: "
-        f"tope mensual USD {budget_usd}, equivalente operativo a "
+        "Equipo y claves virtuales D89 provisionados sin exponerlos: "
+        f"tope mensual compartido USD {budget_usd}, equivalente operativo a "
         f"MXN {values['LITELLM_MONTHLY_BUDGET_MXN']}"
     )
 

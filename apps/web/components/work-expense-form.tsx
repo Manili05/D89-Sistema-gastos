@@ -137,7 +137,6 @@ export function WorkExpenseForm({
           concept: form.get('concept'),
           folio: form.get('folio') || null,
           amount: form.get('amount'),
-          ...(expense ? {} : { state: 'pendiente' }),
         };
         const saved = await apiJson<{ id: string }>(expense ? `/expenses/${expense.id}` : '/expenses', {
           method: expense ? 'PATCH' : 'POST', body: JSON.stringify(payload),

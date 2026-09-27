@@ -49,6 +49,37 @@ alcance de monolito simple sin importación automática de Excel ni agente de IA
 - **WhatsApp:** se exponen exactamente diez tools de negocio. Importar presupuesto y eliminar
   gasto permanecen exclusivamente en la web.
 
+## Cambio 6 — Captura inteligente: extracción de CSF y comprobantes con IA (2026-09-27)
+- **Naturaleza:** cambio de alcance **funcional**, **acordado con el cliente**. No figuraba en
+  la sección 4 de `spec.md`.
+- **Qué incluye:**
+  - `POST /api/v1/suppliers/extract-csf` (sólo admin): lee la Constancia de Situación Fiscal
+    (PDF) y propone RFC, razón social, régimen fiscal y código postal.
+  - `POST /api/v1/expenses/extract-receipt`: lee la foto de un ticket o nota de remisión y
+    propone total, conceptos (cantidad, precio unitario, descripción) y la bandera
+    `requiere_validacion_humana`.
+- **Límites (constitution §3):**
+  - Las extracciones sólo **proponen**: no escriben proveedores ni gastos.
+  - FastAPI revalida el esquema y recalcula la suma de conceptos. La bandera de revisión humana
+    sólo puede endurecerse en el servidor, nunca relajarse.
+  - Cada llamada queda en `tool_call_log` (modelo, tokens, costo y resultado) sin el contenido
+    del documento.
+- **Modelos:** por alias configurable de LiteLLM.
+  - `d89-documentos` → `gemini-3.5-flash-lite`, con respaldo `gemini-3.6-flash` y luego
+    `claude-sonnet-5`.
+  - `d89-vision` → `gemini-3.8-flash`, con respaldo `claude-sonnet-5`.
+  - `claude-opus-5-5` queda registrado fuera de las cadenas automáticas por costo.
+- **Impacto operativo:**
+  - LiteLLM pasa a estar siempre encendido (antes sólo con el perfil `whatsapp`), con unos
+    512 MB de RAM en el VPS.
+  - Hermes y la extracción comparten **un solo** tope mensual de $1,000 MXN mediante un equipo
+    de LiteLLM con dos claves virtuales (`provision-litellm-budget.py`).
+  - Se requieren `GEMINI_API_KEY` y `ANTHROPIC_API_KEY`.
+- **Deuda técnica pagada en el mismo cambio:**
+  - `/gastos` usa ahora el mismo formulario que `/obras/[id]/gastos`, que no duplica gastos al
+    reintentar el comprobante.
+  - Vincular un comprobante exige que el archivo exista en Supabase Storage.
+
 ---
 *Cualquier desviación nueva de alcance detectada durante el desarrollo debe agregarse aquí,
 siguiendo el mismo formato: naturaleza del cambio, si fue acordado con el cliente o es decisión
