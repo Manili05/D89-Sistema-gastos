@@ -360,3 +360,40 @@ class ReceiptExtractionResponse(BaseModel):
     extraction: ReceiptExtraction
     model: str | None
     tool_call_log_id: UUID
+
+
+class JevModelOutput(BaseModel):
+    """Strict schema for the Árbitro Jev: the corrected receipt plus a short reply."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    total_detectado: float | None
+    conceptos: list[ReceiptConceptOutput]
+    requiere_validacion_humana: bool
+    motivos_revision: list[str]
+    respuesta: str
+
+
+class JevChatRequest(BaseModel):
+    extraction: ReceiptExtraction
+    instruction: str = Field(min_length=2, max_length=1000)
+
+    @model_validator(mode="after")
+    def bound_prompt_size(self) -> "JevChatRequest":
+        self.instruction = self.instruction.strip()
+        if len(self.instruction) < 2:
+            raise ValueError("Escribe la corrección que necesitas")
+        if len(self.extraction.conceptos) > 100:
+            raise ValueError("El comprobante no puede tener más de 100 conceptos")
+        if any(len(item.descripcion or "") > 500 for item in self.extraction.conceptos):
+            raise ValueError("Cada descripción debe tener como máximo 500 caracteres")
+        if len(self.extraction.motivos_revision) > 50:
+            raise ValueError("Demasiados motivos de revisión")
+        return self
+
+
+class JevChatResponse(BaseModel):
+    extraction: ReceiptExtraction
+    respuesta: str
+    model: str | None
+    tool_call_log_id: UUID

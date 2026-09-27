@@ -58,6 +58,10 @@ alcance de monolito simple sin importación automática de Excel ni agente de IA
   - `POST /api/v1/expenses/extract-receipt`: lee la foto de un ticket o nota de remisión y
     propone total, conceptos (cantidad, precio unitario, descripción) y la bandera
     `requiere_validacion_humana`.
+  - `POST /api/v1/expenses/jev-chat` ("Árbitro Jev", alias `d89-documentos`, sólo texto):
+    aplica correcciones en lenguaje natural a la lectura del ticket. El formulario de gasto
+    muestra la lectura y el chat; el usuario decide si copia los valores o captura a mano, y
+    la foto se vincula como comprobante al guardar.
 - **Límites (constitution §3):**
   - Las extracciones sólo **proponen**: no escriben proveedores ni gastos.
   - FastAPI revalida el esquema y recalcula la suma de conceptos. La bandera de revisión humana

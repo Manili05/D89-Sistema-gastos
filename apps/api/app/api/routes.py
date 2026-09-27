@@ -30,6 +30,8 @@ from app.models import (
     ImportConfirm,
     ImportPreviewUpdate,
     IncomeCreate,
+    JevChatRequest,
+    JevChatResponse,
     ReceiptExtractionResponse,
     ReceiptUpdate,
     SubcontractCreate,
@@ -50,7 +52,7 @@ from app.models import (
     WorkSupplierAssignment,
     WorkUpdate,
 )
-from app.services.ai_extraction import extract_csf, extract_receipt
+from app.services.ai_extraction import extract_csf, extract_receipt, jev_chat
 from app.services.neodata import NeodataError, parse_neodata_workbook
 from app.services.reports import build_excel_report, build_pdf_report
 from app.services.repository import (
@@ -445,6 +447,16 @@ async def post_extract_receipt(
     """Propose receipt lines from an image; the server recomputes totals before answering."""
     content = await file.read(settings.ai_max_upload_bytes + 1)
     return await extract_receipt(settings, user, content, file.content_type)
+
+
+@router.post("/expenses/jev-chat", response_model=JevChatResponse, tags=["expenses"])
+async def post_jev_chat(
+    payload: JevChatRequest,
+    user: CurrentUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> JevChatResponse:
+    """Árbitro Jev: correct a receipt extraction in natural language; nothing is persisted."""
+    return await jev_chat(settings, user, payload)
 
 
 @router.post("/expenses/{expense_id}/review", tags=["expenses"])

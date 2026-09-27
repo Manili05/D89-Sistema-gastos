@@ -7,7 +7,8 @@ import { ArrowIcon, PlusIcon, SuppliersIcon, UploadIcon } from './icons';
 import { PageHeader } from './page-header';
 import { StatusPill } from './status-pill';
 import type { components } from '@/lib/api.generated';
-import { apiFetch, apiJson } from '@/lib/auth';
+import { AI_MANUAL_FALLBACK, aiErrorMessage, aiRequest, isAbort } from '@/lib/ai';
+import { apiJson } from '@/lib/auth';
 
 type Specialty = { id: string; nombre: string; activo: boolean; supplier_count: number };
 type Supplier = {
@@ -43,33 +44,19 @@ type CsfExtractionResponse = components['schemas']['CsfExtractionResponse'];
 type FiscalFields = { legal_name: string; tax_id: string; tax_regime: string; postal_code: string };
 
 const CSF_MAX_BYTES = 10 * 1024 * 1024;
-const MANUAL_FALLBACK = 'Puedes capturar los datos manualmente.';
+const MANUAL_FALLBACK = AI_MANUAL_FALLBACK;
 const CSF_ERRORS: Record<number, string> = {
-  401: 'Tu sesión expiró. Vuelve a ingresar para usar la extracción.',
   403: 'Sólo administración puede extraer datos de una constancia.',
   413: 'El PDF supera el límite de 10 MB.',
   415: 'El archivo no es un PDF válido.',
-  429: 'Se agotó el presupuesto mensual de IA.',
   502: 'La IA no pudo leer la constancia con certeza.',
-  503: 'El servicio de IA no está disponible en este momento.',
 };
 
 /** POST the PDF as multipart; apiFetch adds the session JWT and leaves the boundary to the browser. */
 export async function extractCsf(file: File, signal?: AbortSignal): Promise<CsfExtractionResponse> {
   const body = new FormData();
   body.append('file', file, file.name);
-  let response: Response;
-  try {
-    response = await apiFetch('/suppliers/extract-csf', { method: 'POST', body, signal });
-  } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') throw error;
-    if (error instanceof Error && error.message.includes('sesión')) throw error;
-    throw new Error(CSF_ERRORS[503]);
-  }
-  if (!response.ok) {
-    throw new Error(CSF_ERRORS[response.status] || `La extracción falló (${response.status}).`);
-  }
-  return response.json() as Promise<CsfExtractionResponse>;
+  return aiRequest<CsfExtractionResponse>('/suppliers/extract-csf', { method: 'POST', body, signal }, CSF_ERRORS);
 }
 
 /** Shared by create and edit so every supplier field, fiscal data included, is always sent. */
@@ -250,11 +237,11 @@ export function SupplierFields({
   async function analyze(file: File) {
     if (analyzing) return;
     if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
-      setNotice({ tone: 'error', text: `${CSF_ERRORS[415]} ${MANUAL_FALLBACK}` });
+      setNotice({ tone: 'error', text: `${aiErrorMessage(415, CSF_ERRORS)} ${MANUAL_FALLBACK}` });
       return;
     }
     if (file.size > CSF_MAX_BYTES) {
-      setNotice({ tone: 'error', text: `${CSF_ERRORS[413]} ${MANUAL_FALLBACK}` });
+      setNotice({ tone: 'error', text: `${aiErrorMessage(413, CSF_ERRORS)} ${MANUAL_FALLBACK}` });
       return;
     }
     controller.current = new AbortController();
@@ -273,8 +260,8 @@ export function SupplierFields({
         ? { tone: 'warning', text: 'Datos cargados parcialmente. Revisa y corrige antes de guardar:', reasons: extraction.motivos_revision }
         : { tone: 'success', text: 'Datos cargados desde la constancia. Revísalos antes de guardar.' });
     } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError') return;
-      const detail = error instanceof Error ? error.message : CSF_ERRORS[503];
+      if (isAbort(error)) return;
+      const detail = error instanceof Error ? error.message : aiErrorMessage(503);
       setNotice({ tone: 'error', text: `${detail} ${MANUAL_FALLBACK}` });
     } finally {
       controller.current = null;

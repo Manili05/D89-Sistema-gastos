@@ -363,3 +363,143 @@ def test_aliases_come_from_settings(client, settings, proxy, logs):
     proxy.answer(receipt(100, [(1, 100, "Arena")]))
     client.post(RECEIPT_URL, files=upload(PNG, "image/png"), headers=auth(settings))
     assert proxy.requests[0]["body"]["model"] == "d89-vision-alternativa"
+
+
+# --- Árbitro Jev -----------------------------------------------------------------
+
+JEV_URL = "/api/v1/expenses/jev-chat"
+CURRENT = {
+    "total_detectado": "1250.50",
+    "conceptos": [
+        {"cantidad": "10", "precio_unitario": "100", "descripcion": "Cemento gris 50 kg"},
+        {"cantidad": "1", "precio_unitario": "250.50", "descripcion": "Cemento blanco"},
+    ],
+    "suma_conceptos": "1250.50",
+    "requiere_validacion_humana": False,
+    "motivos_revision": [],
+}
+
+
+def jev(total, concepts, respuesta="Cambié el segundo concepto a pintura.", flagged=False):
+    return {**receipt(total, concepts, flagged), "respuesta": respuesta}
+
+
+def test_jev_sends_text_only_prompt_and_returns_updated_extraction(client, settings, proxy, logs):
+    proxy.answer(jev(1250.5, [(10, 100, "Cemento gris 50 kg"), (1, 250.5, "Pintura vinílica")]))
+    instruction = "El segundo concepto es pintura, no cemento"
+    response = client.post(
+        JEV_URL,
+        json={"extraction": CURRENT, "instruction": f"  {instruction}  "},
+        headers=auth(settings, "operativo"),
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["respuesta"] == "Cambié el segundo concepto a pintura."
+    assert data["extraction"]["conceptos"][1]["descripcion"] == "Pintura vinílica"
+    assert data["extraction"]["requiere_validacion_humana"] is False
+    body = proxy.requests[0]["body"]
+    assert body["model"] == "d89-documentos"
+    fmt = body["response_format"]["json_schema"]
+    assert fmt["strict"] is True and "respuesta" in fmt["schema"]["required"]
+    parts = body["messages"][1]["content"]
+    assert [part["type"] for part in parts] == ["text", "text"]
+    current, correction = parts[0]["text"], parts[1]["text"]
+    assert current.startswith("<comprobante_actual>") and "Cemento blanco" in current
+    # Client-computed flags and sums never reach the model; the server recomputes them.
+    assert "suma_conceptos" not in current and "requiere_validacion_humana" not in current
+    assert correction == f"<correccion_usuario>\n{instruction}\n</correccion_usuario>"
+    [log] = logs
+    assert (log["tool_name"], log["resultado"]) == ("jev_corregir_comprobante", "ejecutado")
+    assert log["parametros"] == {
+        "alias": "d89-documentos",
+        "conceptos": 2,
+        "instruccion_caracteres": len(instruction),
+        "requiere_validacion_humana": False,
+    }
+    assert instruction not in json.dumps(log["parametros"])
+
+
+def test_jev_cannot_clear_the_flag_when_arithmetic_still_fails(client, settings, proxy, logs):
+    proxy.answer(jev(1250.5, [(10, 100, "Cemento"), (1, 999, "Pintura")], flagged=False))
+    data = client.post(
+        JEV_URL, json={"extraction": CURRENT, "instruction": "El flete cuesta 999"},
+        headers=auth(settings),
+    ).json()["extraction"]
+    assert data["requiere_validacion_humana"] is True
+    assert Decimal(data["suma_conceptos"]) == Decimal("1999.00")
+    assert any("no coincide con el total" in reason for reason in data["motivos_revision"])
+
+
+def test_jev_correction_that_fixes_the_math_clears_the_flag(client, settings, proxy, logs):
+    doubtful = {
+        **CURRENT,
+        "total_detectado": "900",
+        "requiere_validacion_humana": True,
+        "motivos_revision": ["La suma de conceptos (1250.50) no coincide con el total (900)."],
+    }
+    proxy.answer(jev(1250.5, [(10, 100, "Cemento"), (1, 250.5, "Pintura")], "Total corregido."))
+    data = client.post(
+        JEV_URL, json={"extraction": doubtful, "instruction": "El total es 1250.50"},
+        headers=auth(settings),
+    ).json()["extraction"]
+    assert data["requiere_validacion_humana"] is False
+    assert data["motivos_revision"] == []
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"extraction": CURRENT, "instruction": "   "},
+        {"extraction": CURRENT, "instruction": "x" * 1001},
+        {"extraction": {**CURRENT, "conceptos": CURRENT["conceptos"] * 51}, "instruction": "ok ok"},
+        {"extraction": {**CURRENT, "conceptos": [{"cantidad": "1", "precio_unitario": "1",
+                                                   "descripcion": "x" * 501}]},
+         "instruction": "ok ok"},
+        {"instruction": "falta la extracción"},
+    ],
+)
+def test_jev_rejects_invalid_or_oversized_requests_before_calling_ai(
+    client, settings, proxy, logs, payload
+):
+    response = client.post(JEV_URL, json=payload, headers=auth(settings))
+    assert response.status_code == 422
+    assert proxy.requests == [] and logs == []
+
+
+@pytest.mark.parametrize(
+    "content",
+    [json.dumps(receipt(100, [(1, 100, "Arena")])), "no es json"],  # missing `respuesta`
+)
+def test_jev_invalid_model_output_is_rejected_and_logged(client, settings, proxy, logs, content):
+    proxy.answer(content)
+    response = client.post(
+        JEV_URL, json={"extraction": CURRENT, "instruction": "corrige"}, headers=auth(settings)
+    )
+    assert response.status_code == 502
+    assert logs[0]["resultado"] == "error" and logs[0]["parametros"]["error"] == "invalid"
+
+
+@pytest.mark.parametrize(
+    ("reply", "status_code"),
+    [(httpx.ConnectError("caído"), 503), (httpx.Response(429, json={}), 429)],
+)
+def test_jev_gateway_failures_are_mapped_and_logged(
+    client, settings, proxy, logs, reply, status_code
+):
+    proxy.reply = reply
+    response = client.post(
+        JEV_URL, json={"extraction": CURRENT, "instruction": "corrige"}, headers=auth(settings)
+    )
+    assert response.status_code == status_code
+    assert logs[0]["tool_name"] == "jev_corregir_comprobante"
+
+
+def test_jev_requires_session_and_uses_configured_alias(client, settings, proxy, logs):
+    anonymous = client.post(JEV_URL, json={"extraction": CURRENT, "instruction": "x y"})
+    assert anonymous.status_code == 401
+    settings.ai_jev_model = "d89-texto-alternativo"
+    proxy.answer(jev(1250.5, [(10, 100, "Cemento"), (1, 250.5, "Pintura")]))
+    client.post(
+        JEV_URL, json={"extraction": CURRENT, "instruction": "corrige"}, headers=auth(settings)
+    )
+    assert proxy.requests[0]["body"]["model"] == "d89-texto-alternativo"

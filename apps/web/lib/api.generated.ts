@@ -59,6 +59,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/expenses/jev-chat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Jev Chat
+         * @description Árbitro Jev: correct a receipt extraction in natural language; nothing is persisted.
+         */
+        post: operations["post_jev_chat_api_v1_expenses_jev_chat_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/expenses/review-batch": {
         parameters: {
             query?: never;
@@ -920,6 +940,25 @@ export interface components {
              */
             work_id: string;
         };
+        /** JevChatRequest */
+        JevChatRequest: {
+            extraction: components["schemas"]["ReceiptExtraction-Input"];
+            /** Instruction */
+            instruction: string;
+        };
+        /** JevChatResponse */
+        JevChatResponse: {
+            extraction: components["schemas"]["ReceiptExtraction-Output"];
+            /** Model */
+            model: string | null;
+            /** Respuesta */
+            respuesta: string;
+            /**
+             * Tool Call Log Id
+             * Format: uuid
+             */
+            tool_call_log_id: string;
+        };
         /** PreviewItemCorrection */
         PreviewItemCorrection: {
             /** Area */
@@ -940,7 +979,16 @@ export interface components {
             work_class: string;
         };
         /** ReceiptConcept */
-        ReceiptConcept: {
+        "ReceiptConcept-Input": {
+            /** Cantidad */
+            cantidad: number | string | null;
+            /** Descripcion */
+            descripcion: string | null;
+            /** Precio Unitario */
+            precio_unitario: number | string | null;
+        };
+        /** ReceiptConcept */
+        "ReceiptConcept-Output": {
             /** Cantidad */
             cantidad: string | null;
             /** Descripcion */
@@ -949,9 +997,22 @@ export interface components {
             precio_unitario: string | null;
         };
         /** ReceiptExtraction */
-        ReceiptExtraction: {
+        "ReceiptExtraction-Input": {
             /** Conceptos */
-            conceptos: components["schemas"]["ReceiptConcept"][];
+            conceptos: components["schemas"]["ReceiptConcept-Input"][];
+            /** Motivos Revision */
+            motivos_revision: string[];
+            /** Requiere Validacion Humana */
+            requiere_validacion_humana: boolean;
+            /** Suma Conceptos */
+            suma_conceptos: number | string | null;
+            /** Total Detectado */
+            total_detectado: number | string | null;
+        };
+        /** ReceiptExtraction */
+        "ReceiptExtraction-Output": {
+            /** Conceptos */
+            conceptos: components["schemas"]["ReceiptConcept-Output"][];
             /** Motivos Revision */
             motivos_revision: string[];
             /** Requiere Validacion Humana */
@@ -963,7 +1024,7 @@ export interface components {
         };
         /** ReceiptExtractionResponse */
         ReceiptExtractionResponse: {
-            extraction: components["schemas"]["ReceiptExtraction"];
+            extraction: components["schemas"]["ReceiptExtraction-Output"];
             /** Model */
             model: string | null;
             /**
@@ -1363,6 +1424,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReceiptExtractionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_jev_chat_api_v1_expenses_jev_chat_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["JevChatRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JevChatResponse"];
                 };
             };
             /** @description Validation Error */

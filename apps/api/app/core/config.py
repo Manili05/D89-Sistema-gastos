@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     litellm_api_key: str = ""
     ai_csf_model: str = "d89-documentos"
     ai_receipt_model: str = "d89-vision"
+    # Text-only reasoning over an existing extraction; no vision needed.
+    ai_jev_model: str = "d89-documentos"
     ai_timeout_seconds: float = 60
     ai_max_upload_bytes: int = 10 * 1024 * 1024
 

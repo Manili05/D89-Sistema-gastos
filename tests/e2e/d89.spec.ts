@@ -683,6 +683,182 @@ test('editar proveedor conserva régimen fiscal y código postal', async ({ page
   await expect.poll(() => patched).toMatchObject({ tax_regime: '626 - RESICO', postal_code: '50100', tax_id: 'CVA010203AB1' });
 });
 
+test('Jev: foto del ticket, corrección conversacional y guardado con el ticket vinculado', async ({ page }) => {
+  const expenseId = '45454545-4545-4545-8545-454545454545';
+  let releaseExtraction!: () => void;
+  const extractionGate = new Promise<void>((resolve) => { releaseExtraction = resolve; });
+  let releaseJev!: () => void;
+  const jevGate = new Promise<void>((resolve) => { releaseJev = resolve; });
+  const jevBodies: { extraction: { conceptos: { descripcion: string }[] }; instruction: string }[] = [];
+  const created: Record<string, unknown>[] = [];
+  const uploads: string[] = [];
+  const links: string[] = [];
+  const line = (cantidad: string, precio: string, descripcion: string) => ({ cantidad, precio_unitario: precio, descripcion });
+  await page.route('**/api/v1/expenses/extract-receipt', async (route) => {
+    await extractionGate;
+    await route.fulfill({ json: {
+      extraction: {
+        total_detectado: '1250.5000', suma_conceptos: '1100.00', requiere_validacion_humana: true,
+        conceptos: [line('10.0000', '100.0000', 'Cemento gris 50 kg'), line('1.0000', '100.0000', 'Cemento blanco')],
+        motivos_revision: ['La suma de conceptos (1100.00) no coincide con el total (1250.5000).'],
+      },
+      model: 'gemini-3.8-flash', tool_call_log_id: 'abababab-0000-4000-8000-000000000010',
+    } });
+  });
+  await page.route('**/api/v1/expenses/jev-chat', async (route) => {
+    jevBodies.push(route.request().postDataJSON());
+    if (jevBodies.length === 1) await jevGate;
+    await route.fulfill({ json: {
+      extraction: {
+        total_detectado: '1250.5000', suma_conceptos: '1250.50', requiere_validacion_humana: false,
+        conceptos: [line('10.0000', '100.0000', 'Cemento gris 50 kg'), line('1.0000', '250.5000', 'Pintura vinílica')],
+        motivos_revision: [],
+      },
+      respuesta: 'Cambié el segundo concepto a pintura vinílica de $250.50.',
+      model: 'gemini-3.5-flash-lite', tool_call_log_id: 'abababab-0000-4000-8000-000000000011',
+    } });
+  });
+  await page.route('**/api/v1/expenses', async (route) => {
+    created.push(route.request().postDataJSON());
+    await route.fulfill({ status: 201, json: { id: expenseId } });
+  });
+  await page.route('**/storage/v1/object/comprobantes/**', async (route) => {
+    uploads.push(decodeURIComponent(new URL(route.request().url()).pathname));
+    await route.fulfill({ json: { Key: 'comprobantes/ticket.jpg' } });
+  });
+  await page.route(`**/api/v1/expenses/${expenseId}/receipt`, async (route) => {
+    links.push(route.request().postDataJSON().path);
+    await route.fulfill({ json: { id: expenseId } });
+  });
+
+  await login(page);
+  await page.goto(`/obras/${workId}/gastos`);
+  await page.getByRole('button', { name: 'Nuevo gasto', exact: true }).click();
+  const form = page.locator('form.work-expense-form');
+  const save = form.getByRole('button', { name: /Guardar pendiente/ });
+  const assistant = form.getByRole('region', { name: 'Captura inteligente del ticket' });
+  try {
+    await assistant.getByLabel('Foto del ticket o nota de remisión').setInputFiles({
+      name: 'ticket.jpg', mimeType: 'image/jpeg', buffer: Buffer.from([0xff, 0xd8, 0xff, 0xe0]),
+    });
+    await expect(assistant.getByText('Leyendo ticket con IA…').first()).toBeVisible();
+    await expect(save).toBeDisabled();
+  } finally {
+    releaseExtraction();
+  }
+  await expect(assistant.getByRole('cell', { name: 'Cemento blanco' })).toBeVisible();
+  await expect(assistant.getByText('Revisa antes de guardar.')).toBeVisible();
+  await expect(assistant.getByText(/no coincide con el total/)).toBeVisible();
+  await expect(form.getByText('Se adjuntará la foto del ticket (ticket.jpg)')).toBeVisible();
+
+  const chat = assistant.getByLabel('Corrección para Jev');
+  await chat.fill('El segundo concepto es pintura, no cemento, y cuesta 250.50');
+  try {
+    await assistant.getByRole('button', { name: 'Enviar a Jev' }).click();
+    await expect(assistant.getByRole('button', { name: 'Jev está revisando…' })).toBeDisabled();
+    await expect(chat).toBeDisabled();
+    await expect(save).toBeDisabled();
+  } finally {
+    releaseJev();
+  }
+  await expect(assistant.getByRole('cell', { name: 'Pintura vinílica' })).toBeVisible();
+  await expect(assistant.getByRole('cell', { name: 'Cemento blanco' })).toHaveCount(0);
+  await expect(assistant.getByText('La suma de conceptos coincide con el total.')).toBeVisible();
+  await expect(assistant.getByText('Cambié el segundo concepto a pintura vinílica de $250.50.')).toBeVisible();
+  expect(jevBodies[0].instruction).toBe('El segundo concepto es pintura, no cemento, y cuesta 250.50');
+  expect(jevBodies[0].extraction.conceptos[1].descripcion).toBe('Cemento blanco');
+  await expect(save).toBeEnabled();
+
+  await assistant.getByRole('button', { name: 'Usar en el formulario' }).click();
+  await expect(form.getByLabel('Importe')).toHaveValue('1250.50');
+  await expect(form.getByLabel('Concepto')).toHaveValue('10 × Cemento gris 50 kg; 1 × Pintura vinílica');
+  // Manual fallback: the regular fields stay editable after applying Jev's result.
+  await form.getByLabel('Concepto').fill('Cemento y pintura para oficina');
+  // With a complete, valid form, Enter in the chat must never submit the expense: neither
+  // when the text is too short to reach Jev (nothing gets disabled) nor when it is sent.
+  await chat.fill('x');
+  await chat.press('Enter');
+  await expect(chat).toHaveValue('x');
+  expect(created).toHaveLength(0);
+  expect(jevBodies).toHaveLength(1);
+  await chat.fill('Confirma el total');
+  await chat.press('Enter');
+  await expect.poll(() => jevBodies.length).toBe(2);
+  expect(jevBodies[1].extraction.conceptos[1].descripcion).toBe('Pintura vinílica');
+  await expect(assistant.getByText('Cambié el segundo concepto', { exact: false })).toHaveCount(2);
+  expect(created).toHaveLength(0);
+  // A new Jev answer does not overwrite what the user typed in the form.
+  await expect(form.getByLabel('Concepto')).toHaveValue('Cemento y pintura para oficina');
+  await save.click();
+  await expect(form).toHaveCount(0);
+  await expect(page.getByRole('status')).toContainText('Gasto guardado como pendiente');
+  expect(created).toHaveLength(1);
+  expect(created[0]).toMatchObject({ work_id: workId, amount: '1250.50', concept: 'Cemento y pintura para oficina' });
+  expect(created[0]).not.toHaveProperty('state');
+  expect(uploads).toHaveLength(1);
+  expect(uploads[0]).toContain(`/${workId}/${expenseId}/`);
+  expect(uploads[0]).toMatch(/ticket\.jpg$/);
+  expect(links).toHaveLength(1);
+  expect(links[0]).toMatch(new RegExp(`^${workId}/${expenseId}/\\d+-ticket\\.jpg$`));
+});
+
+test('Jev: si la IA está caída se captura a mano y un comprobante elegido reemplaza la foto', async ({ page }) => {
+  const expenseId = '46464646-4646-4646-8646-464646464646';
+  const uploads: string[] = [];
+  let created = 0;
+  await page.route('**/api/v1/expenses/extract-receipt', async (route) => {
+    await route.fulfill({ status: 503, json: { detail: 'Servicio de IA no disponible' } });
+  });
+  await page.route('**/api/v1/expenses', async (route) => {
+    created += 1;
+    await route.fulfill({ status: 201, json: { id: expenseId } });
+  });
+  await page.route('**/storage/v1/object/comprobantes/**', async (route) => {
+    uploads.push(decodeURIComponent(new URL(route.request().url()).pathname));
+    await route.fulfill({ json: { Key: 'ok' } });
+  });
+  await page.route(`**/api/v1/expenses/${expenseId}/receipt`, async (route) => {
+    await route.fulfill({ json: { id: expenseId } });
+  });
+  await login(page);
+  await page.goto('/gastos');
+  const form = page.locator('form.work-expense-form');
+  await form.getByLabel('Foto del ticket o nota de remisión').setInputFiles({
+    name: 'ticket.png', mimeType: 'image/png', buffer: Buffer.from('png'),
+  });
+  const alert = form.getByRole('alert');
+  await expect(alert).toContainText('El servicio de IA no está disponible');
+  await expect(alert).toContainText('Puedes capturar los datos manualmente');
+  await expect(form.getByLabel('Corrección para Jev')).toHaveCount(0);
+  await form.getByLabel('Importe').fill('80');
+  await form.getByLabel('Concepto').fill('Clavos, capturado a mano');
+  await form.getByLabel('Comprobante').setInputFiles({
+    name: 'factura.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.7'),
+  });
+  await form.getByRole('button', { name: /Guardar pendiente/ }).click();
+  await expect(page.getByRole('status')).toContainText('Gasto guardado como pendiente');
+  expect(created).toBe(1);
+  expect(uploads).toHaveLength(1);
+  expect(uploads[0]).toMatch(/factura\.pdf$/);
+});
+
+test('Jev: un archivo que no es imagen se rechaza sin llamar a la IA', async ({ page }) => {
+  let calls = 0;
+  await page.route('**/api/v1/expenses/extract-receipt', async (route) => {
+    calls += 1;
+    await route.fulfill({ status: 500, json: {} });
+  });
+  await login(page);
+  await page.goto('/gastos');
+  const form = page.locator('form.work-expense-form');
+  await form.getByLabel('Foto del ticket o nota de remisión').setInputFiles({
+    name: 'ticket.gif', mimeType: 'image/gif', buffer: Buffer.from('GIF89a'),
+  });
+  await expect(form.getByRole('alert')).toContainText('JPEG, PNG o WebP');
+  await expect(form.getByText(/Se adjuntará la foto del ticket/)).toHaveCount(0);
+  expect(calls).toBe(0);
+});
+
 test('dashboard es usable en viewport móvil', async ({ page }, testInfo) => {
   test.skip(!testInfo.project.name.includes('mobile'), 'Solo valida el proyecto móvil');
   await login(page);

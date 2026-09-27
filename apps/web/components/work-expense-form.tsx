@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { type FormEvent, useMemo, useRef, useState } from 'react';
 import { PlusIcon } from '@/components/icons';
+import { ReceiptAssistant } from '@/components/receipt-assistant';
 import { apiJson, getSupabaseBrowserClient } from '@/lib/auth';
 
 export type CatalogOption = { id: string; nombre: string };
@@ -79,6 +80,12 @@ export function WorkExpenseForm({
   const submitting = useRef(false);
   const [createdExpenseId, setCreatedExpenseId] = useState<string | null>(null);
   const [uploadedReceiptPath, setUploadedReceiptPath] = useState<string | null>(null);
+  // Ticket photo read by the AI assistant; linked as the receipt unless another file is chosen.
+  const [scannedReceipt, setScannedReceipt] = useState<File | null>(null);
+  const [assistantBusy, setAssistantBusy] = useState(false);
+  const [assistantKey, setAssistantKey] = useState(0);
+  const amountRef = useRef<HTMLInputElement>(null);
+  const conceptRef = useRef<HTMLTextAreaElement>(null);
   const budgetItems = catalog.items.filter((item) => item.area_id === areaId);
   const matchingAreas = useMemo(
     () => filterAreas(catalog.areas, areaSearch),
@@ -116,7 +123,7 @@ export function WorkExpenseForm({
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     // A ref also guards submissions before React has rendered the disabled controls.
-    if (submitting.current) return;
+    if (submitting.current || assistantBusy) return;
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
     submitting.current = true;
@@ -144,7 +151,8 @@ export function WorkExpenseForm({
         savedExpenseId = saved.id;
         setCreatedExpenseId(saved.id);
       }
-      const receipt = form.get('receipt');
+      const chosen = form.get('receipt');
+      const receipt = chosen instanceof File && chosen.size > 0 ? chosen : scannedReceipt;
       let path = uploadedReceiptPath;
       if (!path && receipt instanceof File && receipt.size > 0) {
         const safeName = receipt.name.replace(/[^a-zA-Z0-9._-]/g, '-');
@@ -165,6 +173,8 @@ export function WorkExpenseForm({
       }
       setCreatedExpenseId(null);
       setUploadedReceiptPath(null);
+      setScannedReceipt(null);
+      setAssistantKey((value) => value + 1);
       formElement.reset();
       setAreaId(expense?.area_id || firstArea);
       setAreaSearch('');
@@ -191,6 +201,11 @@ export function WorkExpenseForm({
     <div className="panel-header"><div><h2>{expense ? 'Corregir gasto' : 'Nuevo gasto'}</h2><p>Clasificación operativa y vínculo presupuestal opcional</p></div></div>
     {message && <p className="notice error" role="alert">{message}</p>}
     <fieldset disabled={busy} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
+    {!expense && <div className="form-section"><ReceiptAssistant key={assistantKey} disabled={Boolean(createdExpenseId)} onBusyChange={setAssistantBusy} onFile={setScannedReceipt} onApply={({ amount, concept }) => {
+      // Uncontrolled inputs: write the values and leave them editable (manual fallback).
+      if (amountRef.current && amount) amountRef.current.value = amount;
+      if (conceptRef.current && concept) conceptRef.current.value = concept;
+    }} /></div>}
     <div className="form-section"><fieldset className="form-grid three" aria-label="Datos del gasto" disabled={Boolean(createdExpenseId)} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
       <label className="field area-picker">Área NEODATA<span className="field-hint">{areaSearch ? `${matchingAreas.length} coincidencia${matchingAreas.length === 1 ? '' : 's'} de ` : 'Busca dentro de '}{catalog.areas.filter((area) => area.seleccionable).length} rutas</span><input aria-label="Buscar área NEODATA" type="search" placeholder="Ej. cimentación sótano" value={areaSearch} onChange={(event) => changeAreaSearch(event.target.value)} /><select aria-label="Área NEODATA" value={areaId} onChange={(event) => { setAreaId(event.target.value); setBudgetItemId(''); }} required><option value="">Seleccionar</option>{selectableAreas.map((area) => <option key={area.id} value={area.id}>{area.ruta.join(' › ')}</option>)}</select>{areaSearch && matchingAreas.length === 0 && <small className="field-error">No hay áreas que coincidan.</small>}</label>
       <label className="field">Partida<select aria-label="Partida" value={partidaId} onChange={(event) => changePartida(event.target.value)} required>{catalog.expense_partidas.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}</select></label>
@@ -199,13 +214,13 @@ export function WorkExpenseForm({
       <label className="field">Proveedor<select aria-label="Proveedor" value={supplierId} onChange={(event) => setSupplierId(event.target.value)} required><option value="">Seleccionar proveedor</option>{selectableSuppliers.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}</select></label>
       <label className="field">Partida NEODATA (opcional)<select aria-label="Partida NEODATA" value={budgetItemId} onChange={(event) => setBudgetItemId(event.target.value)}><option value="">Sin vínculo específico</option>{budgetItems.map((item) => <option key={item.budget_item_id} value={item.budget_item_id}>{item.codigo} · {item.descripcion} · {money.format(Number(item.presupuesto))}</option>)}</select></label>
       <label className="field">Fecha<input name="spent_on" type="date" defaultValue={expense?.fecha || localDate()} required /></label>
-      <label className="field">Importe<input name="amount" type="number" min="0.01" step="0.01" defaultValue={expense ? String(expense.importe) : ''} required /></label>
+      <label className="field">Importe<input ref={amountRef} name="amount" type="number" min="0.01" step="0.01" defaultValue={expense ? String(expense.importe) : ''} required /></label>
       <label className="field">Folio<input name="folio" defaultValue={expense?.folio || ''} /></label>
-      <label className="field full">Concepto<textarea name="concept" defaultValue={expense?.concepto || ''} required /></label>
+      <label className="field full">Concepto<textarea ref={conceptRef} name="concept" defaultValue={expense?.concepto || ''} required /></label>
     </fieldset>
-      <label className="field full">Comprobante {expense?.comprobante_path ? '(ya existe; selecciona otro sólo para reemplazarlo)' : ''}<input name="receipt" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" disabled={Boolean(uploadedReceiptPath)} required={Boolean(createdExpenseId && !uploadedReceiptPath)} /></label>
+      <label className="field full">Comprobante {expense?.comprobante_path ? '(ya existe; selecciona otro sólo para reemplazarlo)' : ''}<input name="receipt" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" disabled={Boolean(uploadedReceiptPath)} required={Boolean(createdExpenseId && !uploadedReceiptPath && !scannedReceipt)} />{scannedReceipt && !uploadedReceiptPath ? <span className="field-hint">Se adjuntará la foto del ticket ({scannedReceipt.name}) salvo que elijas otro archivo.</span> : null}</label>
     {!expense && catalog.suppliers.length === 0 ? <p className="notice">No hay proveedores asignados a esta obra. <Link className="text-action" href="/proveedores">Asigna uno desde el directorio</Link> antes de registrar gastos.</p> : null}</div>
-    <div className="form-section"><div className="header-actions">{onCancel && <button className="btn secondary" type="button" onClick={onCancel}>{createdExpenseId ? 'Cerrar (gasto guardado)' : 'Cancelar'}</button>}<button type="submit" className="btn" disabled={busy || !areaId || !subpartidaId || !categoryId || !supplierId}><PlusIcon />{busy ? 'Guardando…' : createdExpenseId ? 'Reintentar comprobante' : expense ? 'Guardar corrección' : 'Guardar pendiente'}</button></div></div>
+    <div className="form-section"><div className="header-actions">{onCancel && <button className="btn secondary" type="button" onClick={onCancel}>{createdExpenseId ? 'Cerrar (gasto guardado)' : 'Cancelar'}</button>}<button type="submit" className="btn" disabled={busy || assistantBusy || !areaId || !subpartidaId || !categoryId || !supplierId}><PlusIcon />{busy ? 'Guardando…' : createdExpenseId ? 'Reintentar comprobante' : expense ? 'Guardar corrección' : 'Guardar pendiente'}</button></div></div>
     </fieldset>
   </form>;
 }

@@ -126,6 +126,23 @@ button { cursor: pointer; }
 .csf-autofill { margin-top: 18px; }
 .csf-autofill .notice { margin-top: 10px; }
 .csf-autofill .notice ul { margin: 6px 0 0; padding-left: 18px; }
+.receipt-assistant { display: grid; gap: 12px; }
+.receipt-summary { padding: 16px; display: grid; gap: 14px; border: 1px solid var(--line); background: #fdfcfa; }
+.receipt-summary h3 { margin: 0; color: var(--navy); font: 500 16px/1.2 Georgia, serif; }
+.receipt-summary-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.receipt-summary .notice { margin: 0; }
+.receipt-summary .notice ul { margin: 6px 0 0; padding-left: 18px; }
+.receipt-lines td:nth-child(n+2), .receipt-lines th:nth-child(n+2) { text-align: right; white-space: nowrap; }
+.receipt-totals { margin: 0; display: flex; flex-wrap: wrap; gap: 10px 28px; }
+.receipt-totals dt { color: var(--muted); font-size: 11px; }
+.receipt-totals dd { margin: 2px 0 0; color: var(--navy); font-weight: 700; }
+.jev-chat { display: grid; gap: 10px; padding-top: 12px; border-top: 1px solid var(--line); }
+.jev-messages { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; max-height: 220px; overflow-y: auto; }
+.jev-messages li { max-width: 85%; padding: 8px 11px; font-size: 12px; line-height: 1.45; background: #f4f1ec; }
+.jev-messages li.usuario { justify-self: end; background: #e8eef6; }
+.jev-messages li span { display: block; margin-bottom: 2px; color: var(--muted); font-size: 10px; font-weight: 700; text-transform: uppercase; }
+.jev-input { display: flex; flex-wrap: wrap; gap: 8px; }
+.jev-input input { flex: 1 1 220px; min-width: 0; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .import-panel { max-width: none; }
 .target-switch { display: inline-flex; gap: 4px; margin: 0 0 18px; padding: 4px; border: 1px solid var(--line); border-radius: 5px; background: var(--paper); }
