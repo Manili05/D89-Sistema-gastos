@@ -531,6 +531,158 @@ test('directorio muestra ficha, especialidad y evaluación del proveedor', async
   await expect(page.getByLabel('Obra')).toHaveValue(workId);
 });
 
+test('alta de proveedor se auto-rellena desde la CSF y bloquea el formulario mientras analiza', async ({ page }) => {
+  let releaseExtraction!: () => void;
+  const extractionGate = new Promise<void>((resolve) => { releaseExtraction = resolve; });
+  const extractionRequests: { auth: string | null; contentType: string | null; body: string }[] = [];
+  let created: Record<string, unknown> | undefined;
+  await page.route('**/api/v1/suppliers/extract-csf', async (route) => {
+    const request = route.request();
+    extractionRequests.push({
+      auth: await request.headerValue('authorization'),
+      contentType: await request.headerValue('content-type'),
+      body: request.postDataBuffer()?.toString('latin1') || '',
+    });
+    await extractionGate;
+    await route.fulfill({ json: {
+      extraction: {
+        rfc: 'CTO010203AB1', razon_social: 'Concretos Toluca SA de CV',
+        regimen_fiscal: '601 - General de Ley Personas Morales', codigo_postal: '50000',
+        requiere_validacion_humana: false, motivos_revision: [],
+      },
+      model: 'gemini-3.5-flash-lite', tool_call_log_id: 'abababab-0000-4000-8000-000000000001',
+    } });
+  });
+  await page.route('**/api/v1/suppliers', async (route) => {
+    created = route.request().postDataJSON();
+    await route.fulfill({ status: 201, json: { id: supplierId, nombre: 'Concretos', activo: true } });
+  });
+
+  await login(page);
+  await page.goto('/proveedores');
+  await page.getByRole('button', { name: /Nuevo proveedor/ }).click();
+  const dialog = page.locator('form.supplier-dialog');
+  await dialog.getByLabel('Nombre comercial').fill('Concretos');
+  await dialog.getByLabel('Persona de contacto').fill('Ana Torres');
+  const upload = dialog.getByLabel('Auto-rellenar desde Constancia (PDF)');
+  await expect(upload).toHaveAttribute('accept', '.pdf,application/pdf');
+  try {
+    await upload.setInputFiles({ name: 'csf.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.7 csf') });
+    await expect(dialog.getByText('Analizando documento con IA…').first()).toBeVisible();
+    await expect(dialog.getByLabel('RFC')).toBeDisabled();
+    await expect(dialog.getByLabel('Nombre comercial')).toBeDisabled();
+    await expect(dialog.getByRole('button', { name: 'Analizando documento con IA…' })).toBeDisabled();
+  } finally {
+    releaseExtraction();
+  }
+  await expect(dialog.getByRole('status').filter({ hasText: 'Datos cargados desde la constancia' })).toBeVisible();
+  await expect(dialog.getByLabel('Razón social')).toHaveValue('Concretos Toluca SA de CV');
+  await expect(dialog.getByLabel('RFC')).toHaveValue('CTO010203AB1');
+  await expect(dialog.getByLabel('Régimen fiscal')).toHaveValue('601 - General de Ley Personas Morales');
+  await expect(dialog.getByLabel('Código postal fiscal')).toHaveValue('50000');
+  // Fields the user typed before the extraction are preserved.
+  await expect(dialog.getByLabel('Nombre comercial')).toHaveValue('Concretos');
+  await expect(dialog.getByLabel('Persona de contacto')).toHaveValue('Ana Torres');
+  expect(extractionRequests).toHaveLength(1);
+  expect(extractionRequests[0].auth).toMatch(/^Bearer /);
+  expect(extractionRequests[0].contentType).toMatch(/^multipart\/form-data; boundary=/);
+  expect(extractionRequests[0].body).toContain('name="file"; filename="csf.pdf"');
+
+  await dialog.getByRole('button', { name: 'Crear proveedor' }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(created).toMatchObject({
+    name: 'Concretos', legal_name: 'Concretos Toluca SA de CV', tax_id: 'CTO010203AB1',
+    tax_regime: '601 - General de Ley Personas Morales', postal_code: '50000', contact_name: 'Ana Torres',
+  });
+});
+
+for (const [status, text] of [
+  [503, 'El servicio de IA no está disponible'],
+  [429, 'Se agotó el presupuesto mensual de IA'],
+  [502, 'La IA no pudo leer la constancia'],
+] as const) {
+  test(`CSF: error ${status} muestra aviso y permite captura manual`, async ({ page }) => {
+    await page.route('**/api/v1/suppliers/extract-csf', async (route) => {
+      await route.fulfill({ status, json: { detail: 'detalle técnico' } });
+    });
+    await login(page);
+    await page.goto('/proveedores');
+    await page.getByRole('button', { name: /Nuevo proveedor/ }).click();
+    const dialog = page.locator('form.supplier-dialog');
+    await dialog.getByLabel('Auto-rellenar desde Constancia (PDF)').setInputFiles({
+      name: 'csf.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.7'),
+    });
+    const alert = dialog.getByRole('alert');
+    await expect(alert).toContainText(text);
+    await expect(alert).toContainText('Puedes capturar los datos manualmente');
+    await expect(dialog.getByLabel('RFC')).toBeEnabled();
+    await dialog.getByLabel('RFC').fill('CTO010203AB1');
+    await expect(dialog.getByRole('button', { name: 'Crear proveedor' })).toBeEnabled();
+  });
+}
+
+test('CSF: un archivo que no es PDF se rechaza sin llamar a la API', async ({ page }) => {
+  let calls = 0;
+  await page.route('**/api/v1/suppliers/extract-csf', async (route) => {
+    calls += 1;
+    await route.fulfill({ status: 500, json: {} });
+  });
+  await login(page);
+  await page.goto('/proveedores');
+  await page.getByRole('button', { name: /Nuevo proveedor/ }).click();
+  const dialog = page.locator('form.supplier-dialog');
+  await dialog.getByLabel('Auto-rellenar desde Constancia (PDF)').setInputFiles({
+    name: 'foto.png', mimeType: 'image/png', buffer: Buffer.from('png'),
+  });
+  await expect(dialog.getByRole('alert')).toContainText('El archivo no es un PDF válido');
+  expect(calls).toBe(0);
+});
+
+test('CSF: una extracción dudosa avisa qué revisar', async ({ page }) => {
+  await page.route('**/api/v1/suppliers/extract-csf', async (route) => {
+    await route.fulfill({ json: {
+      extraction: {
+        rfc: 'CTO010203AB1', razon_social: null, regimen_fiscal: null, codigo_postal: '50000',
+        requiere_validacion_humana: true, motivos_revision: ['No se pudo leer el campo razon_social.'],
+      },
+      model: 'gemini-3.5-flash-lite', tool_call_log_id: 'abababab-0000-4000-8000-000000000002',
+    } });
+  });
+  await login(page);
+  await page.goto('/proveedores');
+  await page.getByRole('button', { name: /Nuevo proveedor/ }).click();
+  const dialog = page.locator('form.supplier-dialog');
+  await dialog.getByLabel('Razón social').fill('Capturada a mano');
+  await dialog.getByLabel('Auto-rellenar desde Constancia (PDF)').setInputFiles({
+    name: 'csf.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.7'),
+  });
+  await expect(dialog.getByRole('status').filter({ hasText: 'Revisa y corrige' })).toContainText('razon_social');
+  await expect(dialog.getByLabel('RFC')).toHaveValue('CTO010203AB1');
+  // A null from the AI never erases what the user already captured.
+  await expect(dialog.getByLabel('Razón social')).toHaveValue('Capturada a mano');
+});
+
+test('editar proveedor conserva régimen fiscal y código postal', async ({ page }) => {
+  let patched: Record<string, unknown> | undefined;
+  await page.route(new RegExp(`/api/v1/suppliers/${supplierId}$`), async (route) => {
+    if (route.request().method() === 'PATCH') {
+      patched = route.request().postDataJSON();
+      await route.fulfill({ json: { id: supplierId } });
+    } else {
+      await route.fallback();
+    }
+  });
+  await login(page);
+  await page.goto(`/proveedores/${supplierId}`);
+  await page.getByRole('button', { name: /Editar/ }).first().click();
+  const dialog = page.locator('form.supplier-dialog');
+  await expect(dialog.getByLabel('Auto-rellenar desde Constancia (PDF)')).toHaveCount(0);
+  await dialog.getByLabel('Régimen fiscal').fill('626 - RESICO');
+  await dialog.getByLabel('Código postal fiscal').fill('50100');
+  await dialog.getByRole('button', { name: 'Guardar cambios' }).click();
+  await expect.poll(() => patched).toMatchObject({ tax_regime: '626 - RESICO', postal_code: '50100', tax_id: 'CVA010203AB1' });
+});
+
 test('dashboard es usable en viewport móvil', async ({ page }, testInfo) => {
   test.skip(!testInfo.project.name.includes('mobile'), 'Solo valida el proyecto móvil');
   await login(page);

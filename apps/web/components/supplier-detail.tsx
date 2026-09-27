@@ -6,7 +6,7 @@ import { AppShell } from './app-shell';
 import { PlusIcon } from './icons';
 import { PageHeader } from './page-header';
 import { StatusPill } from './status-pill';
-import { SupplierFields } from './supplier-directory';
+import { SupplierFields, supplierPayload } from './supplier-directory';
 import { apiJson } from '@/lib/auth';
 
 type Specialty = { id: string; nombre: string; activo: boolean; supplier_count: number };
@@ -26,6 +26,7 @@ type Expense = {
 };
 type Supplier = {
   id: string; nombre: string; razon_social: string | null; rfc: string | null;
+  regimen_fiscal: string | null; codigo_postal: string | null;
   contacto: string | null; telefono: string | null; whatsapp: string | null;
   email: string | null; direccion: string | null; cobertura: string | null;
   notas: string | null; activo: boolean;
@@ -116,14 +117,7 @@ export function SupplierDetail({ supplierId }: { supplierId: string }) {
     try {
       await apiJson(`/suppliers/${supplierId}`, {
         method: 'PATCH',
-        body: JSON.stringify({
-          name: form.get('name'), legal_name: form.get('legal_name') || null,
-          tax_id: form.get('tax_id') || null, contact_name: form.get('contact_name') || null,
-          phone: form.get('phone') || null, whatsapp: form.get('whatsapp') || null,
-          email: form.get('email') || null, address: form.get('address') || null,
-          coverage: form.get('coverage') || null, notes: form.get('notes') || null,
-          specialty_ids: form.getAll('specialty_ids'),
-        }),
+        body: JSON.stringify(supplierPayload(form)),
       });
       setEditingProfile(false);
       setMessage('Datos del proveedor actualizados.');

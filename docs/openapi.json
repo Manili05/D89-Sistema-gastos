@@ -1026,6 +1026,18 @@
             ],
             "title": "Phone"
           },
+          "postal_code": {
+            "anyOf": [
+              {
+                "maxLength": 10,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Postal Code"
+          },
           "specialty_ids": {
             "items": {
               "format": "uuid",
@@ -1046,6 +1058,18 @@
               }
             ],
             "title": "Tax Id"
+          },
+          "tax_regime": {
+            "anyOf": [
+              {
+                "maxLength": 250,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tax Regime"
           },
           "whatsapp": {
             "anyOf": [
@@ -1380,6 +1404,18 @@
             ],
             "title": "Phone"
           },
+          "postal_code": {
+            "anyOf": [
+              {
+                "maxLength": 10,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Postal Code"
+          },
           "specialty_ids": {
             "items": {
               "format": "uuid",
@@ -1400,6 +1436,18 @@
               }
             ],
             "title": "Tax Id"
+          },
+          "tax_regime": {
+            "anyOf": [
+              {
+                "maxLength": 250,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tax Regime"
           },
           "whatsapp": {
             "anyOf": [

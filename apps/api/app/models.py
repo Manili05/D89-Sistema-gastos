@@ -60,6 +60,8 @@ class SupplierProfile(BaseModel):
     name: str = Field(min_length=2, max_length=250)
     legal_name: str | None = Field(default=None, max_length=250)
     tax_id: str | None = Field(default=None, max_length=20)
+    tax_regime: str | None = Field(default=None, max_length=250)
+    postal_code: str | None = Field(default=None, max_length=10)
     contact_name: str | None = Field(default=None, max_length=180)
     phone: str | None = Field(default=None, max_length=40)
     whatsapp: str | None = Field(default=None, max_length=40)
@@ -73,6 +75,8 @@ class SupplierProfile(BaseModel):
         "name",
         "legal_name",
         "tax_id",
+        "tax_regime",
+        "postal_code",
         "contact_name",
         "phone",
         "whatsapp",
@@ -94,6 +98,10 @@ class SupplierProfile(BaseModel):
         self.name = self.name.strip()
         if self.tax_id:
             self.tax_id = normalize_rfc(self.tax_id)
+        if self.postal_code and not (
+            len(self.postal_code) == 5 and self.postal_code.isascii() and self.postal_code.isdigit()
+        ):
+            raise ValueError("El código postal debe tener 5 dígitos")
         if self.email and (
             "@" not in self.email or self.email.startswith("@") or self.email.endswith("@")
         ):

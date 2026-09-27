@@ -1,12 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import { type FormEvent, useCallback, useEffect, useState } from 'react';
+import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { AppShell } from './app-shell';
-import { ArrowIcon, PlusIcon, SuppliersIcon } from './icons';
+import { ArrowIcon, PlusIcon, SuppliersIcon, UploadIcon } from './icons';
 import { PageHeader } from './page-header';
 import { StatusPill } from './status-pill';
-import { apiJson } from '@/lib/auth';
+import type { components } from '@/lib/api.generated';
+import { apiFetch, apiJson } from '@/lib/auth';
 
 type Specialty = { id: string; nombre: string; activo: boolean; supplier_count: number };
 type Supplier = {
@@ -38,6 +39,51 @@ type Analytics = {
   };
 };
 
+type CsfExtractionResponse = components['schemas']['CsfExtractionResponse'];
+type FiscalFields = { legal_name: string; tax_id: string; tax_regime: string; postal_code: string };
+
+const CSF_MAX_BYTES = 10 * 1024 * 1024;
+const MANUAL_FALLBACK = 'Puedes capturar los datos manualmente.';
+const CSF_ERRORS: Record<number, string> = {
+  401: 'Tu sesión expiró. Vuelve a ingresar para usar la extracción.',
+  403: 'Sólo administración puede extraer datos de una constancia.',
+  413: 'El PDF supera el límite de 10 MB.',
+  415: 'El archivo no es un PDF válido.',
+  429: 'Se agotó el presupuesto mensual de IA.',
+  502: 'La IA no pudo leer la constancia con certeza.',
+  503: 'El servicio de IA no está disponible en este momento.',
+};
+
+/** POST the PDF as multipart; apiFetch adds the session JWT and leaves the boundary to the browser. */
+export async function extractCsf(file: File, signal?: AbortSignal): Promise<CsfExtractionResponse> {
+  const body = new FormData();
+  body.append('file', file, file.name);
+  let response: Response;
+  try {
+    response = await apiFetch('/suppliers/extract-csf', { method: 'POST', body, signal });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw error;
+    if (error instanceof Error && error.message.includes('sesión')) throw error;
+    throw new Error(CSF_ERRORS[503]);
+  }
+  if (!response.ok) {
+    throw new Error(CSF_ERRORS[response.status] || `La extracción falló (${response.status}).`);
+  }
+  return response.json() as Promise<CsfExtractionResponse>;
+}
+
+/** Shared by create and edit so every supplier field, fiscal data included, is always sent. */
+export function supplierPayload(form: FormData): Record<string, unknown> {
+  const optional = (name: string) => form.get(name) || null;
+  return {
+    name: form.get('name'), legal_name: optional('legal_name'), tax_id: optional('tax_id'),
+    tax_regime: optional('tax_regime'), postal_code: optional('postal_code'),
+    contact_name: optional('contact_name'), phone: optional('phone'), whatsapp: optional('whatsapp'),
+    email: optional('email'), address: optional('address'), coverage: optional('coverage'),
+    notes: optional('notes'), specialty_ids: form.getAll('specialty_ids'),
+  };
+}
+
 const emptyAnalytics: Analytics = {
   summary: { active_suppliers: 0, archived_suppliers: 0, evaluations: 0, average_rating: null },
 };
@@ -58,6 +104,7 @@ export function SupplierDirectory() {
   const [statusFilter, setStatusFilter] = useState('active');
   const [sort, setSort] = useState('name');
   const [showCreate, setShowCreate] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
   const [busy, setBusy] = useState(true);
   const [message, setMessage] = useState('');
 
@@ -93,21 +140,12 @@ export function SupplierDirectory() {
 
   async function createSupplier(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (analyzing) return;
     const form = new FormData(event.currentTarget);
     setBusy(true);
     setMessage('');
     try {
-      await apiJson('/suppliers', {
-        method: 'POST',
-        body: JSON.stringify({
-          name: form.get('name'), legal_name: form.get('legal_name') || null,
-          tax_id: form.get('tax_id') || null, contact_name: form.get('contact_name') || null,
-          phone: form.get('phone') || null, whatsapp: form.get('whatsapp') || null,
-          email: form.get('email') || null, address: form.get('address') || null,
-          coverage: form.get('coverage') || null, notes: form.get('notes') || null,
-          specialty_ids: form.getAll('specialty_ids'),
-        }),
-      });
+      await apiJson('/suppliers', { method: 'POST', body: JSON.stringify(supplierPayload(form)) });
       setShowCreate(false);
       setMessage('Proveedor agregado al directorio.');
       await loadDirectory();
@@ -168,22 +206,94 @@ export function SupplierDirectory() {
       </Link>)}
       {!busy && suppliers.items.length === 0 ? <div className="panel supplier-empty"><SuppliersIcon size={30} /><h2>No encontramos proveedores</h2><p>Ajusta los filtros o agrega el primer registro al directorio.</p></div> : null}
     </div>
-    {showCreate ? <div className="dialog-backdrop" role="presentation" onMouseDown={() => setShowCreate(false)}><form className="confirm-dialog supplier-dialog" onSubmit={createSupplier} onMouseDown={(event) => event.stopPropagation()}><span className="eyebrow">Alta de proveedor</span><h2>Nuevo contacto comercial</h2><p>Los datos bancarios no forman parte de este directorio.</p><SupplierFields specialties={specialties} /><div className="dialog-actions"><button type="button" className="btn secondary" onClick={() => setShowCreate(false)}>Cancelar</button><button className="btn" disabled={busy}>{busy ? 'Guardando…' : 'Crear proveedor'}</button></div></form></div> : null}
+    {showCreate ? <div className="dialog-backdrop" role="presentation" onMouseDown={() => setShowCreate(false)}><form className="confirm-dialog supplier-dialog" onSubmit={createSupplier} onMouseDown={(event) => event.stopPropagation()} aria-busy={analyzing || busy}><span className="eyebrow">Alta de proveedor</span><h2>Nuevo contacto comercial</h2><p>Los datos bancarios no forman parte de este directorio.</p><SupplierFields specialties={specialties} autofill onAnalyzingChange={setAnalyzing} /><div className="dialog-actions"><button type="button" className="btn secondary" onClick={() => setShowCreate(false)}>Cancelar</button><button className="btn" disabled={busy || analyzing}>{analyzing ? 'Analizando documento con IA…' : busy ? 'Guardando…' : 'Crear proveedor'}</button></div></form></div> : null}
   </AppShell>;
 }
 
 export function SupplierFields({
   specialties,
   supplier,
+  autofill = false,
+  onAnalyzingChange,
 }: {
   specialties: Specialty[];
-  supplier?: Supplier & { rfc?: string | null; direccion?: string | null; notas?: string | null };
+  supplier?: Supplier & {
+    rfc?: string | null; regimen_fiscal?: string | null; codigo_postal?: string | null;
+    direccion?: string | null; notas?: string | null;
+  };
+  autofill?: boolean;
+  onAnalyzingChange?: (analyzing: boolean) => void;
 }) {
   const selected = new Set(supplier?.specialties.map((item) => item.id));
-  return <div className="form-grid two supplier-form-grid">
+  // Fiscal fields are controlled so a CSF extraction can fill them in place
+  // without resetting whatever else the user already typed.
+  const [fiscal, setFiscal] = useState<FiscalFields>({
+    legal_name: supplier?.razon_social || '', tax_id: supplier?.rfc || '',
+    tax_regime: supplier?.regimen_fiscal || '', postal_code: supplier?.codigo_postal || '',
+  });
+  const [analyzing, setAnalyzing] = useState(false);
+  const [notice, setNotice] = useState<{ tone: 'success' | 'warning' | 'error'; text: string; reasons?: string[] } | null>(null);
+  const controller = useRef<AbortController | null>(null);
+
+  // Abort an in-flight extraction if the dialog closes.
+  useEffect(() => () => controller.current?.abort(), []);
+
+  function setField(name: keyof FiscalFields, value: string) {
+    setFiscal((current) => ({ ...current, [name]: value }));
+  }
+
+  function setBusy(value: boolean) {
+    setAnalyzing(value);
+    onAnalyzingChange?.(value);
+  }
+
+  async function analyze(file: File) {
+    if (analyzing) return;
+    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+      setNotice({ tone: 'error', text: `${CSF_ERRORS[415]} ${MANUAL_FALLBACK}` });
+      return;
+    }
+    if (file.size > CSF_MAX_BYTES) {
+      setNotice({ tone: 'error', text: `${CSF_ERRORS[413]} ${MANUAL_FALLBACK}` });
+      return;
+    }
+    controller.current = new AbortController();
+    setBusy(true);
+    setNotice(null);
+    try {
+      const { extraction } = await extractCsf(file, controller.current.signal);
+      // Only overwrite with values the AI could read; keep manual input otherwise.
+      setFiscal((current) => ({
+        legal_name: extraction.razon_social ?? current.legal_name,
+        tax_id: extraction.rfc ?? current.tax_id,
+        tax_regime: extraction.regimen_fiscal ?? current.tax_regime,
+        postal_code: extraction.codigo_postal ?? current.postal_code,
+      }));
+      setNotice(extraction.requiere_validacion_humana
+        ? { tone: 'warning', text: 'Datos cargados parcialmente. Revisa y corrige antes de guardar:', reasons: extraction.motivos_revision }
+        : { tone: 'success', text: 'Datos cargados desde la constancia. Revísalos antes de guardar.' });
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return;
+      const detail = error instanceof Error ? error.message : CSF_ERRORS[503];
+      setNotice({ tone: 'error', text: `${detail} ${MANUAL_FALLBACK}` });
+    } finally {
+      controller.current = null;
+      setBusy(false);
+    }
+  }
+
+  return <>
+    {autofill && <div className="csf-autofill">
+      <label className={`dropzone compact${analyzing ? ' busy' : ''}`}><span><span className="dropzone-icon"><UploadIcon size={22} /></span><strong>{analyzing ? 'Analizando documento con IA…' : 'Auto-rellenar desde Constancia (PDF)'}</strong><p>{analyzing ? 'Esto puede tardar unos segundos.' : 'Constancia de Situación Fiscal del SAT · máximo 10 MB'}</p><input type="file" accept=".pdf,application/pdf" aria-label="Auto-rellenar desde Constancia (PDF)" disabled={analyzing} onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; if (file) void analyze(file); }} /></span></label>
+      {analyzing && <p className="sr-only" role="status">Analizando documento con IA…</p>}
+      {notice && <div className={`notice ${notice.tone === 'warning' ? '' : notice.tone}`} role={notice.tone === 'error' ? 'alert' : 'status'}>{notice.text}{notice.reasons?.length ? <ul>{notice.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul> : null}</div>}
+    </div>}
+    <fieldset className="form-grid two supplier-form-grid" disabled={analyzing} style={{ border: 0, padding: 0, minWidth: 0 }}>
     <label className="field">Nombre comercial<input name="name" defaultValue={supplier?.nombre || ''} required minLength={2} /></label>
-    <label className="field">Razón social<input name="legal_name" defaultValue={supplier?.razon_social || ''} /></label>
-    <label className="field">RFC<input name="tax_id" defaultValue={supplier?.rfc || ''} minLength={12} maxLength={13} /></label>
+    <label className="field">Razón social<input name="legal_name" value={fiscal.legal_name} onChange={(event) => setField('legal_name', event.target.value)} /></label>
+    <label className="field">RFC<input name="tax_id" value={fiscal.tax_id} onChange={(event) => setField('tax_id', event.target.value)} minLength={12} maxLength={13} /></label>
+    <label className="field">Régimen fiscal<input name="tax_regime" value={fiscal.tax_regime} onChange={(event) => setField('tax_regime', event.target.value)} maxLength={250} /></label>
+    <label className="field">Código postal fiscal<input name="postal_code" value={fiscal.postal_code} onChange={(event) => setField('postal_code', event.target.value)} inputMode="numeric" pattern="[0-9]{5}" maxLength={5} title="5 dígitos" /></label>
     <label className="field">Persona de contacto<input name="contact_name" defaultValue={supplier?.contacto || ''} /></label>
     <label className="field">Teléfono<input name="phone" defaultValue={supplier?.telefono || ''} inputMode="tel" /></label>
     <label className="field">WhatsApp<input name="whatsapp" defaultValue={supplier?.whatsapp || ''} inputMode="tel" /></label>
@@ -192,5 +302,6 @@ export function SupplierFields({
     <label className="field full">Dirección<input name="address" defaultValue={supplier?.direccion || ''} /></label>
     <fieldset className="specialty-field full"><legend>Especialidades</legend><div>{specialties.map((item) => <label key={item.id}><input name="specialty_ids" type="checkbox" value={item.id} defaultChecked={selected.has(item.id)} />{item.nombre}</label>)}</div></fieldset>
     <label className="field full">Notas<textarea name="notes" defaultValue={supplier?.notas || ''} placeholder="Condiciones, referencias o información útil para el equipo" /></label>
-  </div>;
+    </fieldset>
+  </>;
 }

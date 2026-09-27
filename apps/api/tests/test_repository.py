@@ -86,6 +86,23 @@ def test_supplier_normalizes_rfc_and_specialties() -> None:
     assert supplier.specialty_ids == [specialty_id]
 
 
+def test_supplier_accepts_csf_fiscal_data() -> None:
+    supplier = SupplierCreate.model_validate(
+        {
+            "name": "Concretos Toluca",
+            "tax_regime": "  601 - General de Ley Personas Morales ",
+            "postal_code": " 50000 ",
+        }
+    )
+    assert supplier.tax_regime == "601 - General de Ley Personas Morales"
+    assert supplier.postal_code == "50000"
+    blank = SupplierCreate.model_validate({"name": "Sin CSF", "postal_code": "  "})
+    assert blank.postal_code is None
+    for invalid in ("5000", "500000", "5OOOO", "５００００"):
+        with pytest.raises(ValidationError):
+            SupplierCreate.model_validate({"name": "Proveedor", "postal_code": invalid})
+
+
 def test_supplier_evaluation_enforces_five_point_scale() -> None:
     payload = {
         "work_id": uuid4(),

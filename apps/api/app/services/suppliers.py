@@ -76,7 +76,8 @@ def _set_specialties(
 
 def _supplier_select() -> str:
     return """
-        select p.id, p.nombre, p.razon_social, p.rfc, p.contacto,
+        select p.id, p.nombre, p.razon_social, p.rfc, p.regimen_fiscal, p.codigo_postal,
+               p.contacto,
                p.telefono, p.whatsapp, p.email, p.direccion, p.cobertura,
                p.notas, p.activo, p.creado_en, p.actualizado_en, p.archivado_en,
                coalesce(sp.specialties, '[]'::jsonb) as specialties,
@@ -375,15 +376,18 @@ def create_supplier(
         row = connection.execute(
             """
             insert into public.catalogo_proveedor
-              (nombre, razon_social, rfc, contacto, telefono, whatsapp, email,
-               direccion, cobertura, notas, creado_por, actualizado_por)
-            values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+              (nombre, razon_social, rfc, regimen_fiscal, codigo_postal, contacto,
+               telefono, whatsapp, email, direccion, cobertura, notas,
+               creado_por, actualizado_por)
+            values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             returning id, nombre, activo
             """,
             (
                 payload.name,
                 payload.legal_name,
                 payload.tax_id,
+                payload.tax_regime,
+                payload.postal_code,
                 payload.contact_name,
                 payload.phone,
                 payload.whatsapp,
@@ -420,7 +424,8 @@ def update_supplier(
         row = connection.execute(
             """
             update public.catalogo_proveedor set
-              nombre = %s, razon_social = %s, rfc = %s, contacto = %s,
+              nombre = %s, razon_social = %s, rfc = %s, regimen_fiscal = %s,
+              codigo_postal = %s, contacto = %s,
               telefono = %s, whatsapp = %s, email = %s, direccion = %s,
               cobertura = %s, notas = %s, actualizado_por = %s, actualizado_en = now()
             where id = %s returning id, nombre, activo
@@ -429,6 +434,8 @@ def update_supplier(
                 payload.name,
                 payload.legal_name,
                 payload.tax_id,
+                payload.tax_regime,
+                payload.postal_code,
                 payload.contact_name,
                 payload.phone,
                 payload.whatsapp,

@@ -1033,10 +1033,14 @@ export interface components {
             notes?: string | null;
             /** Phone */
             phone?: string | null;
+            /** Postal Code */
+            postal_code?: string | null;
             /** Specialty Ids */
             specialty_ids?: string[];
             /** Tax Id */
             tax_id?: string | null;
+            /** Tax Regime */
+            tax_regime?: string | null;
             /** Whatsapp */
             whatsapp?: string | null;
         };
@@ -1136,10 +1140,14 @@ export interface components {
             notes?: string | null;
             /** Phone */
             phone?: string | null;
+            /** Postal Code */
+            postal_code?: string | null;
             /** Specialty Ids */
             specialty_ids?: string[];
             /** Tax Id */
             tax_id?: string | null;
+            /** Tax Regime */
+            tax_regime?: string | null;
             /** Whatsapp */
             whatsapp?: string | null;
         };
