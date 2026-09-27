@@ -462,7 +462,7 @@ def create_expense(
                 payload.concept,
                 payload.folio,
                 payload.amount,
-                payload.state.value,
+                "pendiente",  # Never trust the client to perform administrative validation.
                 user.id,
             ),
         ).fetchone()
