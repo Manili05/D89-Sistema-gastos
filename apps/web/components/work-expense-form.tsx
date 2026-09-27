@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { type FormEvent, useMemo, useState } from 'react';
+import { type FormEvent, useMemo, useRef, useState } from 'react';
 import { PlusIcon } from '@/components/icons';
 import { apiJson, getSupabaseBrowserClient } from '@/lib/auth';
 
@@ -76,6 +76,9 @@ export function WorkExpenseForm({
   );
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
+  const submitting = useRef(false);
+  const [createdExpenseId, setCreatedExpenseId] = useState<string | null>(null);
+  const [uploadedReceiptPath, setUploadedReceiptPath] = useState<string | null>(null);
   const budgetItems = catalog.items.filter((item) => item.area_id === areaId);
   const matchingAreas = useMemo(
     () => filterAreas(catalog.areas, areaSearch),
@@ -112,50 +115,84 @@ export function WorkExpenseForm({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    // A ref also guards submissions before React has rendered the disabled controls.
+    if (submitting.current) return;
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    submitting.current = true;
     setBusy(true);
     setMessage('');
+    let savedExpenseId = createdExpenseId;
     try {
-      const payload = {
-        ...(expense ? {} : { work_id: workId }),
-        area_id: areaId,
-        expense_item_id: partidaId,
-        expense_subitem_id: subpartidaId,
-        expense_category_id: categoryId,
-        budget_item_id: budgetItemId || null,
-        supplier_id: supplierId,
-        spent_on: form.get('spent_on'),
-        concept: form.get('concept'),
-        folio: form.get('folio') || null,
-        amount: form.get('amount'),
-        ...(expense ? {} : { state: 'pendiente' }),
-      };
-      const saved = await apiJson<{ id: string }>(expense ? `/expenses/${expense.id}` : '/expenses', {
-        method: expense ? 'PATCH' : 'POST', body: JSON.stringify(payload),
-      });
+      if (!savedExpenseId) {
+        const payload = {
+          ...(expense ? {} : { work_id: workId }),
+          area_id: areaId,
+          expense_item_id: partidaId,
+          expense_subitem_id: subpartidaId,
+          expense_category_id: categoryId,
+          budget_item_id: budgetItemId || null,
+          supplier_id: supplierId,
+          spent_on: form.get('spent_on'),
+          concept: form.get('concept'),
+          folio: form.get('folio') || null,
+          amount: form.get('amount'),
+          ...(expense ? {} : { state: 'pendiente' }),
+        };
+        const saved = await apiJson<{ id: string }>(expense ? `/expenses/${expense.id}` : '/expenses', {
+          method: expense ? 'PATCH' : 'POST', body: JSON.stringify(payload),
+        });
+        savedExpenseId = saved.id;
+        setCreatedExpenseId(saved.id);
+      }
       const receipt = form.get('receipt');
-      if (receipt instanceof File && receipt.size > 0) {
+      let path = uploadedReceiptPath;
+      if (!path && receipt instanceof File && receipt.size > 0) {
         const safeName = receipt.name.replace(/[^a-zA-Z0-9._-]/g, '-');
-        const path = `${workId}/${saved.id}/${Date.now()}-${safeName}`;
+        path = `${workId}/${savedExpenseId}/${Date.now()}-${safeName}`;
         const { error } = await getSupabaseBrowserClient().storage
           .from('comprobantes').upload(path, receipt, { contentType: receipt.type, upsert: false });
-        if (error) throw new Error(`Movimiento guardado, pero falló el comprobante: ${error.message}`);
-        await apiJson(`/expenses/${saved.id}/receipt`, {
+        if (error) throw new Error(error.message);
+        // If linking fails, retry that operation without uploading another object.
+        setUploadedReceiptPath(path);
+      }
+      if (createdExpenseId && !path) {
+        throw new Error('Selecciona un comprobante para completar la subida.');
+      }
+      if (path) {
+        await apiJson(`/expenses/${savedExpenseId}/receipt`, {
           method: 'PATCH', body: JSON.stringify({ path }),
         });
       }
+      setCreatedExpenseId(null);
+      setUploadedReceiptPath(null);
+      formElement.reset();
+      setAreaId(expense?.area_id || firstArea);
+      setAreaSearch('');
+      const initialPartida = expense?.expense_item_id || catalog.expense_partidas[0]?.id || '';
+      setPartidaId(initialPartida);
+      setSubpartidaId(expense?.expense_subitem_id
+        || catalog.expense_subitems.find((item) => item.partida_id === initialPartida)?.id || '');
+      setCategoryId(expense?.expense_category_id || catalog.expense_categories[0]?.id || '');
+      setBudgetItemId(expense?.budget_item_id || '');
+      setSupplierId(expense?.supplier_id || catalog.suppliers[0]?.id || '');
       onSaved(expense ? 'Gasto corregido correctamente.' : 'Gasto guardado como pendiente.');
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'No fue posible guardar el gasto.');
+      const detail = error instanceof Error ? error.message : 'No fue posible completar la operación.';
+      setMessage(savedExpenseId
+        ? `El gasto ya está guardado. Reintenta sólo el comprobante; no se creará otro gasto. ${detail}`
+        : detail);
     } finally {
+      submitting.current = false;
       setBusy(false);
     }
   }
 
-  return <form className="panel work-expense-form" onSubmit={submit}>
+  return <form className="panel work-expense-form" onSubmit={submit} aria-busy={busy}>
     <div className="panel-header"><div><h2>{expense ? 'Corregir gasto' : 'Nuevo gasto'}</h2><p>Clasificación operativa y vínculo presupuestal opcional</p></div></div>
     {message && <p className="notice error" role="alert">{message}</p>}
-    <div className="form-section"><div className="form-grid three">
+    <fieldset disabled={busy} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
+    <div className="form-section"><fieldset className="form-grid three" aria-label="Datos del gasto" disabled={Boolean(createdExpenseId)} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
       <label className="field area-picker">Área NEODATA<span className="field-hint">{areaSearch ? `${matchingAreas.length} coincidencia${matchingAreas.length === 1 ? '' : 's'} de ` : 'Busca dentro de '}{catalog.areas.filter((area) => area.seleccionable).length} rutas</span><input aria-label="Buscar área NEODATA" type="search" placeholder="Ej. cimentación sótano" value={areaSearch} onChange={(event) => changeAreaSearch(event.target.value)} /><select aria-label="Área NEODATA" value={areaId} onChange={(event) => { setAreaId(event.target.value); setBudgetItemId(''); }} required><option value="">Seleccionar</option>{selectableAreas.map((area) => <option key={area.id} value={area.id}>{area.ruta.join(' › ')}</option>)}</select>{areaSearch && matchingAreas.length === 0 && <small className="field-error">No hay áreas que coincidan.</small>}</label>
       <label className="field">Partida<select aria-label="Partida" value={partidaId} onChange={(event) => changePartida(event.target.value)} required>{catalog.expense_partidas.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}</select></label>
       <label className="field">Subpartida<select aria-label="Subpartida" value={subpartidaId} onChange={(event) => setSubpartidaId(event.target.value)} required>{availableSubitems.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}</select></label>
@@ -166,8 +203,10 @@ export function WorkExpenseForm({
       <label className="field">Importe<input name="amount" type="number" min="0.01" step="0.01" defaultValue={expense ? String(expense.importe) : ''} required /></label>
       <label className="field">Folio<input name="folio" defaultValue={expense?.folio || ''} /></label>
       <label className="field full">Concepto<textarea name="concept" defaultValue={expense?.concepto || ''} required /></label>
-      <label className="field full">Comprobante {expense?.comprobante_path ? '(ya existe; selecciona otro sólo para reemplazarlo)' : ''}<input name="receipt" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" /></label>
-    </div>{!expense && catalog.suppliers.length === 0 ? <p className="notice">No hay proveedores asignados a esta obra. <Link className="text-action" href="/proveedores">Asigna uno desde el directorio</Link> antes de registrar gastos.</p> : null}</div>
-    <div className="form-section"><div className="header-actions">{onCancel && <button className="btn secondary" type="button" onClick={onCancel}>Cancelar</button>}<button className="btn" disabled={busy || !areaId || !subpartidaId || !categoryId || !supplierId}><PlusIcon />{busy ? 'Guardando…' : expense ? 'Guardar corrección' : 'Guardar pendiente'}</button></div></div>
+    </fieldset>
+      <label className="field full">Comprobante {expense?.comprobante_path ? '(ya existe; selecciona otro sólo para reemplazarlo)' : ''}<input name="receipt" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" disabled={Boolean(uploadedReceiptPath)} required={Boolean(createdExpenseId && !uploadedReceiptPath)} /></label>
+    {!expense && catalog.suppliers.length === 0 ? <p className="notice">No hay proveedores asignados a esta obra. <Link className="text-action" href="/proveedores">Asigna uno desde el directorio</Link> antes de registrar gastos.</p> : null}</div>
+    <div className="form-section"><div className="header-actions">{onCancel && <button className="btn secondary" type="button" onClick={onCancel}>{createdExpenseId ? 'Cerrar (gasto guardado)' : 'Cancelar'}</button>}<button type="submit" className="btn" disabled={busy || !areaId || !subpartidaId || !categoryId || !supplierId}><PlusIcon />{busy ? 'Guardando…' : createdExpenseId ? 'Reintentar comprobante' : expense ? 'Guardar corrección' : 'Guardar pendiente'}</button></div></div>
+    </fieldset>
   </form>;
 }

@@ -266,6 +266,165 @@ test('captura gasto y comprobante queda pendiente', async ({ page }) => {
   await expect(page.getByRole('status')).toContainText('Gasto guardado como pendiente');
 });
 
+for (const failure of ['upload', 'link'] as const) {
+  test(`gasto: reintentar ${failure} no duplica el alta y bloquea envíos simultáneos`, async ({ page }) => {
+    const expenseId = '44444444-4444-4444-8444-444444444444';
+    let creations = 0;
+    let uploads = 0;
+    let links = 0;
+    const linkedPaths: string[] = [];
+    let releaseCreation!: () => void;
+    const creationGate = new Promise<void>((resolve) => { releaseCreation = resolve; });
+    await page.route('**/api/v1/expenses', async (route) => {
+      expect(route.request().method()).toBe('POST');
+      creations += 1;
+      await creationGate;
+      await route.fulfill({ status: 201, json: { id: expenseId } });
+    });
+    await page.route('**/storage/v1/object/comprobantes/**', async (route) => {
+      uploads += 1;
+      if (failure === 'upload' && uploads === 1) {
+        await route.fulfill({ status: 500, json: { message: 'Fallo simulado de subida' } });
+      } else {
+        await route.fulfill({ json: { Key: 'comprobantes/receipt.png' } });
+      }
+    });
+    await page.route(`**/api/v1/expenses/${expenseId}/receipt`, async (route) => {
+      expect(route.request().method()).toBe('PATCH');
+      links += 1;
+      linkedPaths.push(route.request().postDataJSON().path);
+      if (failure === 'link' && links === 1) {
+        await route.fulfill({ status: 500, json: { detail: 'Fallo simulado de vinculación' } });
+      } else {
+        await route.fulfill({ json: { id: expenseId } });
+      }
+    });
+    await login(page);
+    await page.goto(`/obras/${workId}/gastos`);
+    await page.getByRole('button', { name: 'Nuevo gasto', exact: true }).click();
+    const form = page.locator('form.work-expense-form');
+    await form.getByLabel('Importe').fill('321.00');
+    await form.getByLabel('Concepto').fill('Gasto que sólo debe crearse una vez');
+    await form.getByLabel('Comprobante').setInputFiles({
+      name: 'receipt.png', mimeType: 'image/png', buffer: Buffer.from('test-image'),
+    });
+    try {
+      // Two submits in the same JS turn test the synchronous guard, before re-render.
+      await form.evaluate((element) => {
+        element.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        element.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      });
+      await expect.poll(() => creations).toBe(1);
+      await expect(form.getByRole('button', { name: 'Guardando…' })).toBeDisabled();
+      await expect(form.getByRole('button', { name: 'Cancelar', exact: true })).toBeDisabled();
+      await expect(form.getByLabel('Importe')).toBeDisabled();
+      await expect(form.getByLabel('Comprobante')).toBeDisabled();
+    } finally {
+      releaseCreation();
+    }
+    await expect(form.getByRole('alert')).toContainText('El gasto ya está guardado');
+    await expect(form.getByRole('alert')).toContainText('Reintenta sólo el comprobante');
+    await expect(form.getByLabel('Importe')).toHaveValue('321.00');
+    await expect(form.getByLabel('Concepto')).toHaveValue('Gasto que sólo debe crearse una vez');
+    await expect(form.getByLabel('Importe')).toBeDisabled();
+    expect(creations).toBe(1);
+    if (failure === 'link') {
+      await expect(form.getByLabel('Comprobante')).toBeDisabled();
+    } else {
+      await expect(form.getByLabel('Comprobante')).toBeEnabled();
+      // Clearing the file cannot silently finish a partially saved operation.
+      await form.getByLabel('Comprobante').setInputFiles([]);
+      await form.getByRole('button', { name: 'Reintentar comprobante' }).click();
+      await expect(form).toBeVisible();
+      expect(uploads).toBe(1);
+      await form.getByLabel('Comprobante').setInputFiles({
+        name: 'receipt.png', mimeType: 'image/png', buffer: Buffer.from('test-image'),
+      });
+    }
+    await form.getByRole('button', { name: 'Reintentar comprobante' }).click();
+    await expect(form).toHaveCount(0);
+    await expect(page.getByRole('status')).toContainText('Gasto guardado como pendiente');
+    expect(creations).toBe(1);
+    expect(uploads).toBe(failure === 'upload' ? 2 : 1);
+    expect(links).toBe(failure === 'link' ? 2 : 1);
+    expect(new Set(linkedPaths).size).toBe(1);
+    expect(linkedPaths[0]).toContain(`/${expenseId}/`);
+    await page.getByRole('button', { name: 'Nuevo gasto', exact: true }).click();
+    await expect(form.getByLabel('Importe')).toBeEmpty();
+    await expect(form.getByLabel('Concepto')).toBeEmpty();
+    await form.getByLabel('Importe').fill('99');
+    await form.getByLabel('Concepto').fill('Otro gasto intencional');
+    await form.getByRole('button', { name: 'Guardar pendiente' }).click();
+    await expect(form).toHaveCount(0);
+    expect(creations).toBe(2);
+  });
+}
+
+test('gasto: error al crear conserva datos editables para reintentar', async ({ page }) => {
+  let creations = 0;
+  await page.route('**/api/v1/expenses', async (route) => {
+    creations += 1;
+    await route.fulfill(creations === 1
+      ? { status: 503, json: { detail: 'Alta no disponible' } }
+      : { status: 201, json: { id: '44444444-4444-4444-8444-444444444444' } });
+  });
+  await login(page);
+  await page.goto(`/obras/${workId}/gastos`);
+  await page.getByRole('button', { name: 'Nuevo gasto', exact: true }).click();
+  const form = page.locator('form.work-expense-form');
+  await form.getByLabel('Importe').fill('100');
+  await form.getByLabel('Concepto').fill('Intento no guardado');
+  await form.getByRole('button', { name: 'Guardar pendiente' }).click();
+  await expect(form.getByRole('alert')).toHaveText('Alta no disponible');
+  await expect(form.getByLabel('Importe')).toBeEnabled();
+  await expect(form.getByLabel('Importe')).toHaveValue('100');
+  await form.getByRole('button', { name: 'Guardar pendiente' }).click();
+  await expect(form).toHaveCount(0);
+  expect(creations).toBe(2);
+});
+
+test('gasto: corregir y reintentar comprobante no repite la edición ni crea otro gasto', async ({ page }) => {
+  const expenseId = '44444444-4444-4444-8444-444444444444';
+  let updates = 0;
+  let creations = 0;
+  let uploads = 0;
+  await page.route('**/api/v1/expenses', async (route) => {
+    creations += 1;
+    await route.fulfill({ status: 500, json: { detail: 'No debe crear al editar' } });
+  });
+  await page.route(`**/api/v1/expenses/${expenseId}`, async (route) => {
+    expect(route.request().method()).toBe('PATCH');
+    updates += 1;
+    await route.fulfill({ json: { id: expenseId } });
+  });
+  await page.route('**/storage/v1/object/comprobantes/**', async (route) => {
+    uploads += 1;
+    await route.fulfill(uploads === 1
+      ? { status: 500, json: { message: 'Fallo simulado' } }
+      : { json: { Key: 'comprobantes/receipt.pdf' } });
+  });
+  await page.route(`**/api/v1/expenses/${expenseId}/receipt`, async (route) => {
+    await route.fulfill({ json: { id: expenseId } });
+  });
+  await login(page);
+  await page.goto(`/obras/${workId}/gastos`);
+  await page.getByRole('button', { name: 'Editar', exact: true }).click();
+  const form = page.locator('form.work-expense-form');
+  await form.getByLabel('Concepto').fill('Concepto corregido');
+  await form.getByLabel('Comprobante').setInputFiles({
+    name: 'receipt.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-test'),
+  });
+  await form.getByRole('button', { name: 'Guardar corrección' }).click();
+  await expect(form.getByRole('alert')).toContainText('El gasto ya está guardado');
+  await expect(form.getByLabel('Concepto')).toHaveValue('Concepto corregido');
+  await form.getByRole('button', { name: 'Reintentar comprobante' }).click();
+  await expect(form).toHaveCount(0);
+  await expect(page.getByRole('status')).toContainText('Gasto corregido correctamente');
+  expect(updates).toBe(1);
+  expect(uploads).toBe(2);
+  expect(creations).toBe(0);
+});
+
 test('cierre semanal crea evidencia de lote', async ({ page }) => {
   await login(page);
   await page.goto('/cierres');
