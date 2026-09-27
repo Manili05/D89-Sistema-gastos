@@ -544,6 +544,52 @@ test('administrador entra al espacio específico de una obra y recorre sus módu
   await expect(page.getByText('Oficina', { exact: true })).toBeVisible();
 });
 
+test('pestaña Cierres de la obra usa el selector ISO con el workId del espacio', async ({ page }) => {
+  const previewPaths: string[] = [];
+  const closes: unknown[] = [];
+  let expenseLoads = 0;
+  let closed = false;
+  await page.route(`**/api/v1/works/${workId}/expenses**`, async (route) => {
+    expenseLoads += 1;
+    await route.fulfill({ json: { items: [], total: 0, page: 1, page_size: 50 } });
+  });
+  await page.route('**/api/v1/works/*/weekly-closes/preview**', async (route) => {
+    const url = new URL(route.request().url());
+    previewPaths.push(`${url.pathname}?${url.searchParams}`);
+    const week = Number(url.searchParams.get('iso_week'));
+    const total = { count: 0, amount: '0' };
+    await route.fulfill({
+      json: {
+        work_id: workId, iso_year: 2026, iso_week: week, date_from: '2026-08-24', date_to: '2026-08-30',
+        summary: { count: 0, amount: '0', pendiente: total, validado: total, rechazado: total },
+        expenses: [], history: [],
+        close: closed ? { id: '66666666-6666-4666-8666-666666666666', estado: 'cerrado', revision: 1 } : null,
+        revisions: [], permissions: { can_manage: true },
+      },
+    });
+  });
+  await page.route('**/api/v1/weekly-closes', async (route) => {
+    closes.push(route.request().postDataJSON());
+    closed = true;
+    await route.fulfill({ status: 201, json: { expense_count: 0 } });
+  });
+
+  await login(page);
+  await page.goto(`/obras/${workId}/cierres`);
+  await expect(page.getByLabel('Obra')).toHaveCount(0);
+  await page.getByLabel('Semana ISO').fill('2026-W36');
+  await page.getByRole('button', { name: 'Anterior' }).click();
+  await expect(page.getByRole('heading', { name: /^semana 35 \/ 2026$/ })).toBeVisible();
+  expect(previewPaths).toContain(`/api/v1/works/${workId}/weekly-closes/preview?iso_year=2026&iso_week=35`);
+  expect(previewPaths.every((path) => path.startsWith(`/api/v1/works/${workId}/`))).toBe(true);
+
+  const loadsBeforeClose = expenseLoads;
+  await page.getByRole('button', { name: 'Cerrar semana 35' }).click();
+  await expect(page.getByText('Cerrado', { exact: true })).toBeVisible();
+  expect(closes).toEqual([{ work_id: workId, iso_year: 2026, iso_week: 35 }]);
+  await expect.poll(() => expenseLoads).toBeGreaterThan(loadsBeforeClose);
+});
+
 test('administrador adjunta un comprobante faltante desde validación', async ({ page }) => {
   let receiptAttached = false;
   await page.route(`**/api/v1/works/${workId}/expenses**`, async (route) => {

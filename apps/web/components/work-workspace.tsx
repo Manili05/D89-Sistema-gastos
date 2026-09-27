@@ -7,6 +7,7 @@ import { AppShell } from '@/components/app-shell';
 import { PlusIcon } from '@/components/icons';
 import { PageHeader } from '@/components/page-header';
 import { StatusPill } from '@/components/status-pill';
+import { WeeklyClosePanel } from '@/components/weekly-close-panel';
 import { EditableExpense, WorkCatalog, WorkExpenseForm } from '@/components/work-expense-form';
 import { apiFetch, apiJson, getSupabaseBrowserClient } from '@/lib/auth';
 
@@ -39,7 +40,6 @@ type Expense = EditableExpense & {
   can_edit: boolean; can_cancel: boolean; can_resubmit: boolean;
 };
 type ExpensesPage = { items: Expense[]; total: number; page: number; page_size: number };
-type WeeklyClose = { id: string; anio_iso: number; semana_iso: number; estado: string; expense_count: number; amount: Amount; motivo_reapertura: string | null };
 
 const money = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' });
 const currency = (value?: Amount) => value === undefined ? '—' : money.format(Number(value));
@@ -59,14 +59,6 @@ function statusTone(state: string): 'green' | 'amber' | 'red' | 'navy' {
   if (state === 'rechazado') return 'red';
   if (state === 'reabierto') return 'navy';
   return 'amber';
-}
-
-function isoWeek(date = new Date()): { year: number; week: number } {
-  const value = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-  const day = value.getUTCDay() || 7;
-  value.setUTCDate(value.getUTCDate() + 4 - day);
-  const yearStart = new Date(Date.UTC(value.getUTCFullYear(), 0, 1));
-  return { year: value.getUTCFullYear(), week: Math.ceil((((+value - +yearStart) / 86400000) + 1) / 7) };
 }
 
 function rangeFor(period: string, customFrom: string, customTo: string) {
@@ -93,7 +85,6 @@ export function WorkWorkspace({ workId, tab }: { workId: string; tab: Tab }) {
   const [catalog, setCatalog] = useState<WorkCatalog>();
   const [overview, setOverview] = useState<Overview>();
   const [expenses, setExpenses] = useState<ExpensesPage>();
-  const [closes, setCloses] = useState<WeeklyClose[]>([]);
   const [period, setPeriod] = useState('acumulado');
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
@@ -116,16 +107,15 @@ export function WorkWorkspace({ workId, tab }: { workId: string; tab: Tab }) {
       if (stateFilter) expenseParams.set('state', stateFilter);
       if (search.trim()) expenseParams.set('q', search.trim());
       expenseParams.set('page_size', '50');
-      const [workData, catalogData, overviewData, expenseData, closeData] = await Promise.all([
+      const [workData, catalogData, overviewData, expenseData] = await Promise.all([
         apiJson<Work>(`/works/${workId}`),
         apiJson<WorkCatalog>(`/works/${workId}/catalog`),
         apiJson<Overview>(`/works/${workId}/overview?${params}`),
         apiJson<ExpensesPage>(`/works/${workId}/expenses?${expenseParams}`),
-        apiJson<WeeklyClose[]>(`/works/${workId}/weekly-closes`),
       ]);
       setError('');
       setWork(workData); setCatalog(catalogData); setOverview(overviewData);
-      setExpenses(expenseData); setCloses(closeData);
+      setExpenses(expenseData);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'No fue posible cargar la obra.');
     }
@@ -220,26 +210,6 @@ export function WorkWorkspace({ workId, tab }: { workId: string; tab: Tab }) {
     }
   }
 
-  async function closeCurrentWeek() {
-    const current = isoWeek(); setBusy(true); setError('');
-    try {
-      await apiJson('/weekly-closes', { method: 'POST', body: JSON.stringify({ work_id: workId, iso_year: current.year, iso_week: current.week }) });
-      setMessage(`Semana ${current.week} cerrada.`); await refresh();
-    } catch (reason) { setError(reason instanceof Error ? reason.message : 'No fue posible cerrar la semana.'); }
-    finally { setBusy(false); }
-  }
-
-  async function reopen(closeId: string) {
-    const reason = window.prompt('Motivo de reapertura (mínimo 10 caracteres):');
-    if (!reason || reason.trim().length < 10) return;
-    setBusy(true);
-    try {
-      await apiJson(`/weekly-closes/${closeId}/reopen`, { method: 'POST', body: JSON.stringify({ reason }) });
-      setMessage('Semana reabierta con evidencia en auditoría.'); await refresh();
-    } catch (reasonError) { setError(reasonError instanceof Error ? reasonError.message : 'No fue posible reabrir.'); }
-    finally { setBusy(false); }
-  }
-
   async function saveWork(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); const form = new FormData(event.currentTarget); setBusy(true);
     try {
@@ -283,7 +253,7 @@ export function WorkWorkspace({ workId, tab }: { workId: string; tab: Tab }) {
 
     {tab === 'presupuesto' && <section className="panel"><div className="panel-header"><div><h2>Árbol presupuestal NEODATA</h2><p>Los niveles padre acumulan automáticamente sus descendientes</p></div></div><div className="budget-tree">{overview?.areas.map((area) => <div className={`budget-node level-${Math.min(area.nivel, 5)}`} key={area.id}><div><strong>{area.nombre}</strong><small>{area.seleccionable ? 'Nivel con conceptos' : 'Capítulo acumulador'}</small></div><span>{currency(area.budget)}</span><span>{currency(area.validated)}</span><span>{currency(area.committed)}</span><StatusPill tone={Number(area.execution_percent) > 100 ? 'red' : Number(area.execution_percent) >= 85 ? 'amber' : 'green'}>{Number(area.execution_percent).toFixed(1)}%</StatusPill></div>)}</div></section>}
 
-    {tab === 'cierres' && <section className="panel"><div className="panel-header"><div><h2>Cierres semanales</h2><p>Sólo incluye gastos validados; pendientes bloquean el cierre</p></div>{work?.permissions.can_manage && <button className="btn" disabled={busy} onClick={() => void closeCurrentWeek()}>Cerrar semana {isoWeek().week}</button>}</div><div className="close-list">{closes.map((close) => <div className="close-row" key={close.id}><div><strong>Semana {close.semana_iso} · {close.anio_iso}</strong><p>{close.expense_count} gastos</p></div><span>{currency(close.amount)}</span><span>{close.motivo_reapertura || 'Sin observaciones'}</span><div><StatusPill tone={statusTone(close.estado)}>{close.estado}</StatusPill>{close.estado === 'cerrado' && work?.permissions.can_manage && <button className="text-action" onClick={() => void reopen(close.id)}>Reabrir</button>}</div></div>)}{closes.length === 0 && <p className="empty-state">Aún no existen cierres para esta obra.</p>}</div></section>}
+    {tab === 'cierres' && <WeeklyClosePanel workId={workId} onChanged={() => void refresh()} />}
 
     {tab === 'configuracion' && work && <div className="work-config-grid"><section className="panel form-panel"><div className="panel-header"><div><h2>Datos generales</h2><p>Nombre, ubicación, calendario y estado</p></div></div>{work.permissions.can_manage ? <form onSubmit={saveWork}><div className="form-section"><div className="form-grid"><label className="field">Nombre<input name="name" defaultValue={work.nombre} required /></label><label className="field">Ubicación<input name="location" defaultValue={work.ubicacion || ''} /></label><label className="field">Fecha inicial<input name="start_date" type="date" defaultValue={work.fecha_inicio || ''} /></label><label className="field">Fecha final<input name="end_date" type="date" defaultValue={work.fecha_fin || ''} /></label><label className="field">Estado<select name="state" defaultValue={work.estado}><option value="activa">Activa</option><option value="pausada">Pausada</option><option value="cerrada">Cerrada</option></select></label></div></div><div className="form-section"><button className="btn" disabled={busy}>Guardar cambios</button></div></form> : <p className="empty-state">Sólo administración puede modificar estos datos.</p>}</section><section className="panel"><div className="panel-header"><div><h2>Proveedores de la obra</h2><p>{catalog?.suppliers.length || 0} disponibles para registrar gastos</p></div><Link className="btn secondary" href="/proveedores">Administrar</Link></div><div className="work-supplier-list">{catalog?.suppliers.map((supplier) => <Link key={supplier.id} href={`/proveedores/${supplier.id}` as Route}><span>{supplier.nombre}</span><span>Ver ficha →</span></Link>)}{!catalog?.suppliers.length ? <p className="empty-state">No hay proveedores asignados. Agrégalos desde el directorio.</p> : null}</div></section></div>}
   </AppShell>;
