@@ -1,15 +1,22 @@
 # Modelos vigentes (2026). La imagen v1.83.3-stable no trae precio para los modelos
 # Gemini 3.x ni Claude 5; `model_info` copia la tarifa del mapa oficial de LiteLLM
 # (model_prices_and_context_window.json) para que el tope mensual los contabilice.
+# Extracción: fallar rápido (30 s, sin reintentos) para que los respaldos alcancen a
+# actuar dentro del tiempo de la API (ai_timeout_seconds = 100 s ≥ 3 × 30 s).
+# Gemini 3.x ha mostrado latencias de 1–30 s y 503 "high demand" en picos.
 x-model-defaults: &defaults
-  timeout: 60
-  stream_timeout: 60
-  max_retries: 2
+  timeout: 30
+  stream_timeout: 30
+  max_retries: 0
 
 model_list:
   - model_name: kimi-k3
     litellm_params:
+      # Conversación de Hermes: más tolerante que la extracción.
       <<: *defaults
+      timeout: 60
+      stream_timeout: 60
+      max_retries: 2
       model: moonshot/kimi-k3
       api_key: os.environ/MOONSHOT_API_KEY
 

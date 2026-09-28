@@ -25,7 +25,8 @@ class Settings(BaseSettings):
     ai_receipt_model: str = "d89-vision"
     # Text-only reasoning over an existing extraction; no vision needed.
     ai_jev_model: str = "d89-documentos"
-    ai_timeout_seconds: float = 60
+    # Covers the LiteLLM fallback chain (up to 3 models × 30 s); Nginx allows 120 s.
+    ai_timeout_seconds: float = 100
     ai_max_upload_bytes: int = 10 * 1024 * 1024
 
 
