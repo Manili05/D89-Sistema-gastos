@@ -173,7 +173,10 @@ with urllib.request.urlopen(request, timeout=30) as response:
 
 def main() -> None:
     values = load_env()
-    require_value(values, "MOONSHOT_API_KEY")
+    moonshot = values.get("MOONSHOT_API_KEY", "").strip()
+    if not moonshot or moonshot.startswith(PLACEHOLDERS):
+        # Only Hermes (profile `whatsapp`) uses kimi-k3; extraction does not need it.
+        print("Aviso: MOONSHOT_API_KEY sin configurar; Hermes no podrá usar kimi-k3 hasta definirla")
     require_value(values, "GEMINI_API_KEY")
     require_value(values, "ANTHROPIC_API_KEY")
     require_value(values, "LITELLM_MASTER_KEY")
