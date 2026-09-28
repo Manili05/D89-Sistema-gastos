@@ -2,7 +2,8 @@
 # Gemini 3.x ni Claude 5; `model_info` copia la tarifa del mapa oficial de LiteLLM
 # (model_prices_and_context_window.json) para que el tope mensual los contabilice.
 # Extracción: fallar rápido (30 s, sin reintentos) para que los respaldos alcancen a
-# actuar dentro del tiempo de la API (ai_timeout_seconds = 100 s ≥ 3 × 30 s).
+# actuar dentro del tiempo de la API (ai_timeout_seconds = 100 s ≥ 3 × 30 s; ambas
+# cadenas tienen como máximo 3 modelos).
 # Gemini 3.x ha mostrado latencias de 1–30 s y 503 "high demand" en picos.
 x-model-defaults: &defaults
   timeout: 30
@@ -57,7 +58,7 @@ router_settings:
   # Los respaldos aplican sólo a los alias d89-*; las llamadas por nombre base no cambian.
   fallbacks:
     - d89-documentos: [gemini-3.6-flash, claude-sonnet-5]
-    - d89-vision: [claude-sonnet-5]
+    - d89-vision: [gemini-3.6-flash, claude-sonnet-5]
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY

@@ -71,7 +71,9 @@ alcance de monolito simple sin importación automática de Excel ni agente de IA
 - **Modelos:** por alias configurable de LiteLLM.
   - `d89-documentos` → `gemini-3.5-flash-lite`, con respaldo `gemini-3.6-flash` y luego
     `claude-sonnet-5`.
-  - `d89-vision` → `gemini-3.8-flash`, con respaldo `claude-sonnet-5`.
+  - `d89-vision` → `gemini-3.8-flash`, con respaldo `gemini-3.6-flash` y luego
+    `claude-sonnet-5` (respaldo intermedio agregado el 2026-09-28 tras observar 503
+    "high demand" en `gemini-3.8-flash`).
   - `claude-opus-5-5` queda registrado fuera de las cadenas automáticas por costo.
 - **Impacto operativo:**
   - LiteLLM pasa a estar siempre encendido (antes sólo con el perfil `whatsapp`), con unos
