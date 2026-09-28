@@ -103,7 +103,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * Get Expense Detail
+         * @description Header, lines and receipts of one expense (edit form).
+         */
+        get: operations["get_expense_detail_api_v1_expenses__expense_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -791,8 +795,6 @@ export interface components {
         };
         /** ExpenseCreate */
         ExpenseCreate: {
-            /** Amount */
-            amount: number | string;
             /**
              * Area Id
              * Format: uuid
@@ -817,8 +819,10 @@ export interface components {
              * Format: uuid
              */
             expense_subitem_id: string;
-            /** Folio */
-            folio?: string | null;
+            /** Iva */
+            iva?: number | string | null;
+            /** Lines */
+            lines: components["schemas"]["ExpenseLineInput"][];
             /**
              * Spent On
              * Format: date
@@ -826,11 +830,104 @@ export interface components {
             spent_on: string;
             /** @default pendiente */
             state: components["schemas"]["ExpenseState"];
+            /** Supplier Folio */
+            supplier_folio?: string | null;
             /**
              * Supplier Id
              * Format: uuid
              */
             supplier_id: string;
+            /**
+             * Work Id
+             * Format: uuid
+             */
+            work_id: string;
+        };
+        /** ExpenseLine */
+        ExpenseLine: {
+            /** Amount */
+            amount: string;
+            /** Description */
+            description: string;
+            /** Discount */
+            discount: string;
+            /** Position */
+            position: number;
+            /** Quantity */
+            quantity: string;
+            /** Unit */
+            unit: string;
+            /** Unit Price */
+            unit_price: string;
+        };
+        /**
+         * ExpenseLineInput
+         * @description One concept of an expense. Prices include IVA; the server computes the amount.
+         */
+        ExpenseLineInput: {
+            /** Description */
+            description: string;
+            /**
+             * Discount
+             * @default 0
+             */
+            discount: number | string;
+            /** Quantity */
+            quantity: number | string;
+            /** Unit */
+            unit: string;
+            /** Unit Price */
+            unit_price: number | string;
+        };
+        /** ExpenseReceipt */
+        ExpenseReceipt: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Kind */
+            kind: string;
+            /** Path */
+            path: string;
+        };
+        /** ExpenseResponse */
+        ExpenseResponse: {
+            /** Amount */
+            amount: string;
+            /** Concept */
+            concept: string;
+            /** Folio */
+            folio: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Iva */
+            iva: string;
+            /** Iva Breakdown */
+            iva_breakdown: boolean;
+            /** Lines */
+            lines: components["schemas"]["ExpenseLine"][];
+            /** Receipts */
+            receipts: components["schemas"]["ExpenseReceipt"][];
+            /**
+             * Spent On
+             * Format: date
+             */
+            spent_on: string;
+            /** State */
+            state: string;
+            /** Subtotal */
+            subtotal: string;
+            /** Supplier Folio */
+            supplier_folio: string | null;
             /**
              * Work Id
              * Format: uuid
@@ -851,8 +948,6 @@ export interface components {
         ExpenseState: "pendiente" | "validado" | "rechazado";
         /** ExpenseUpdate */
         ExpenseUpdate: {
-            /** Amount */
-            amount: number | string;
             /**
              * Area Id
              * Format: uuid
@@ -877,13 +972,17 @@ export interface components {
              * Format: uuid
              */
             expense_subitem_id: string;
-            /** Folio */
-            folio?: string | null;
+            /** Iva */
+            iva?: number | string | null;
+            /** Lines */
+            lines: components["schemas"]["ExpenseLineInput"][];
             /**
              * Spent On
              * Format: date
              */
             spent_on: string;
+            /** Supplier Folio */
+            supplier_folio?: string | null;
             /**
              * Supplier Id
              * Format: uuid
@@ -984,8 +1083,12 @@ export interface components {
             cantidad: number | string | null;
             /** Descripcion */
             descripcion: string | null;
+            /** Importe */
+            importe?: number | string | null;
             /** Precio Unitario */
             precio_unitario: number | string | null;
+            /** Unidad */
+            unidad?: string | null;
         };
         /** ReceiptConcept */
         "ReceiptConcept-Output": {
@@ -993,8 +1096,12 @@ export interface components {
             cantidad: string | null;
             /** Descripcion */
             descripcion: string | null;
+            /** Importe */
+            importe?: string | null;
             /** Precio Unitario */
             precio_unitario: string | null;
+            /** Unidad */
+            unidad?: string | null;
         };
         /** ReceiptExtraction */
         "ReceiptExtraction-Input": {
@@ -1386,9 +1493,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ExpenseResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1509,6 +1614,39 @@ export interface operations {
             };
         };
     };
+    get_expense_detail_api_v1_expenses__expense_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                expense_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExpenseResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     patch_expense_api_v1_expenses__expense_id__patch: {
         parameters: {
             query?: never;
@@ -1532,9 +1670,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ExpenseResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1610,9 +1746,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ExpenseResponse"];
                 };
             };
             /** @description Validation Error */

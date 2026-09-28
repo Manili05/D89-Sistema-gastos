@@ -27,6 +27,7 @@ from app.models import (
     WorkDelete,
     WorkUpdate,
 )
+from app.services.expense_totals import ExpenseTotals, ExpenseTotalsError, compute_totals
 from app.services.neodata import normalized_text
 
 
@@ -239,8 +240,9 @@ def delete_work(
         assert counts is not None
         receipt_rows = connection.execute(
             """
-            select comprobante_path from public.gasto
-            where obra_id = %s and comprobante_path is not null
+            select k.ruta as comprobante_path
+            from public.gasto_comprobante k join public.gasto g on g.id = k.gasto_id
+            where g.obra_id = %s
             """,
             (work_id,),
         ).fetchall()
@@ -369,7 +371,107 @@ def work_catalog(settings: Settings, user: UserContext, work_id: UUID) -> dict[s
         }
 
 
+def _totals_or_422(payload: ExpenseCreate | ExpenseUpdate) -> ExpenseTotals:
+    try:
+        return compute_totals(list(payload.lines), payload.iva)
+    except ExpenseTotalsError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+
+
+def _insert_lines(
+    connection: psycopg.Connection[dict[str, Any]],
+    expense_id: UUID,
+    payload: ExpenseCreate | ExpenseUpdate,
+    totals: ExpenseTotals,
+) -> None:
+    with connection.cursor() as cursor:
+        cursor.executemany(
+            """
+            insert into public.gasto_concepto
+              (gasto_id, posicion, cantidad, unidad, descripcion,
+               precio_unitario, descuento, importe_concepto)
+            values (%s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            [
+                (
+                    expense_id,
+                    position,
+                    line.quantity,
+                    line.unit,
+                    line.description,
+                    line.unit_price,
+                    line.discount,
+                    amount,
+                )
+                for position, (line, amount) in enumerate(
+                    zip(payload.lines, totals.line_amounts, strict=True), start=1
+                )
+            ],
+        )
+
+
+def _expense_detail(
+    connection: psycopg.Connection[dict[str, Any]], expense_id: UUID
+) -> dict[str, Any]:
+    """Header + lines + receipts, shaped as models.ExpenseResponse."""
+    row = connection.execute(
+        """
+        select g.id, g.folio, g.folio_proveedor as supplier_folio, g.obra_id as work_id,
+               g.fecha as spent_on, g.concepto as concept, g.subtotal, g.iva,
+               g.importe as amount, g.iva_desglosado as iva_breakdown,
+               g.estado::text as state,
+               coalesce((
+                 select jsonb_agg(jsonb_build_object(
+                   -- numeric as text: JSON numbers would come back as float.
+                   'position', c.posicion, 'quantity', c.cantidad::text, 'unit', c.unidad,
+                   'description', c.descripcion, 'unit_price', c.precio_unitario::text,
+                   'discount', c.descuento::text, 'amount', c.importe_concepto::text)
+                   order by c.posicion)
+                 from public.gasto_concepto c where c.gasto_id = g.id), '[]'::jsonb) as lines,
+               coalesce((
+                 select jsonb_agg(jsonb_build_object(
+                   'id', k.id, 'path', k.ruta, 'kind', k.tipo, 'created_at', k.creado_en)
+                   order by k.creado_en, k.id)
+                 from public.gasto_comprobante k where k.gasto_id = g.id), '[]'::jsonb)
+                 as receipts
+        from public.gasto g where g.id = %s
+        """,
+        (expense_id,),
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Gasto inexistente")
+    return row
+
+
+RECEIPT_KINDS = {"pdf": "pdf", "xml": "xml", "jpg": "imagen", "jpeg": "imagen",
+                 "png": "imagen", "webp": "imagen"}
+
+
+def _receipt_kind(path: str) -> str:
+    extension = path.rsplit(".", 1)[-1].lower() if "." in path else ""
+    kind = RECEIPT_KINDS.get(extension)
+    if kind is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "El comprobante debe ser PDF, XML (CFDI) o imagen JPEG, PNG o WebP",
+        )
+    return kind
+
+
+def get_expense(settings: Settings, user: UserContext, expense_id: UUID) -> dict[str, Any]:
+    with transaction(settings) as connection:
+        target = connection.execute(
+            "select obra_id from public.gasto where id = %s and eliminado_en is null",
+            (expense_id,),
+        ).fetchone()
+        if target is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Gasto inexistente")
+        require_work_access(connection, user, target["obra_id"])
+        return _expense_detail(connection, expense_id)
+
+
 def create_expense(settings: Settings, user: UserContext, payload: ExpenseCreate) -> dict[str, Any]:
+    totals = _totals_or_422(payload)
     with transaction(settings) as connection:
         require_work_access(connection, user, payload.work_id)
         if _expense_locked(connection, payload.work_id, payload.spent_on):
@@ -446,11 +548,12 @@ def create_expense(settings: Settings, user: UserContext, payload: ExpenseCreate
             insert into public.gasto (
               obra_id, area_id, clase_id, categoria_id, partida_id,
               partida_gasto_id, subpartida_gasto_id, categoria_gasto_id, proveedor_id,
-              fecha, concepto, folio, importe, estado, origen, creado_por
-            ) values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'web', %s)
-            returning id, obra_id, area_id, partida_gasto_id, subpartida_gasto_id,
-                      categoria_gasto_id, partida_id, proveedor_id, fecha, concepto, folio,
-                      importe, estado::text as estado, creado_en
+              fecha, concepto, folio_proveedor, importe, subtotal, iva, iva_desglosado,
+              estado, origen, creado_por
+            ) values (
+              %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, true, %s, 'web', %s
+            )
+            returning id, folio
             """,
             (
                 payload.work_id,
@@ -464,13 +567,16 @@ def create_expense(settings: Settings, user: UserContext, payload: ExpenseCreate
                 supplier_id,
                 payload.spent_on,
                 payload.concept,
-                payload.folio,
-                payload.amount,
+                payload.supplier_folio,
+                totals.amount,
+                totals.subtotal,
+                totals.iva,
                 "pendiente",  # Never trust the client to perform administrative validation.
                 user.id,
             ),
         ).fetchone()
         assert row is not None
+        _insert_lines(connection, row["id"], payload, totals)
         connection.execute(
             """
             insert into public.audit_log_negocio
@@ -482,7 +588,11 @@ def create_expense(settings: Settings, user: UserContext, payload: ExpenseCreate
                 user.id,
                 Jsonb(
                     {
-                        "importe": str(payload.amount),
+                        "folio": row["folio"],
+                        "importe": str(totals.amount),
+                        "subtotal": str(totals.subtotal),
+                        "iva": str(totals.iva),
+                        "conceptos": len(payload.lines),
                         "partida_gasto_id": str(payload.expense_item_id),
                         "subpartida_gasto_id": str(payload.expense_subitem_id),
                         "categoria_gasto_id": str(payload.expense_category_id),
@@ -491,7 +601,7 @@ def create_expense(settings: Settings, user: UserContext, payload: ExpenseCreate
                 ),
             ),
         )
-        return row
+        return _expense_detail(connection, row["id"])
 
 
 def list_expenses(settings: Settings, user: UserContext, work_id: UUID) -> list[dict[str, Any]]:
@@ -500,7 +610,8 @@ def list_expenses(settings: Settings, user: UserContext, work_id: UUID) -> list[
         return list(
             connection.execute(
                 """
-                select g.id, g.fecha, g.concepto, g.folio, g.importe,
+                select g.id, g.fecha, g.concepto, g.folio, g.folio_proveedor,
+                       g.subtotal, g.iva, g.importe, g.iva_desglosado,
                        g.estado::text as estado, a.nombre as area,
                        coalesce(cpg.nombre, cc.nombre, '') as partida,
                        coalesce(csg.nombre, '') as subpartida,
@@ -542,6 +653,7 @@ def attach_receipt(
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_ENTITY, "Ruta de comprobante inválida"
             )
+        kind = _receipt_kind(path)
         if user.role is not Role.ADMIN and expense["creado_por"] != user.id:
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Solo el autor adjunta el comprobante")
         if expense["estado"] == "validado":
@@ -557,15 +669,25 @@ def attach_receipt(
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_ENTITY, "El comprobante no existe en Storage"
             )
-        row = connection.execute(
+        # Appends one more file (PDF, XML CFDI or image); the same path is idempotent.
+        added = connection.execute(
             """
-            update public.gasto set comprobante_path = %s, editado_por = %s, editado_en = now()
-            where id = %s returning id, comprobante_path
+            insert into public.gasto_comprobante (gasto_id, ruta, tipo, creado_por)
+            values (%s, %s, %s, %s)
+            on conflict (ruta) do nothing
+            returning id
             """,
-            (path, user.id, expense_id),
+            (expense_id, path, kind, user.id),
         ).fetchone()
-        assert row is not None
-        return row
+        if added is not None:
+            connection.execute(
+                "update public.gasto set editado_por = %s, editado_en = now() where id = %s",
+                (user.id, expense_id),
+            )
+            _audit_expense(
+                connection, expense_id, user, "adjuntar_comprobante", {"tipo": kind, "ruta": path}
+            )
+        return _expense_detail(connection, expense_id)
 
 
 def _lock_work_expenses(connection: psycopg.Connection, work_id: UUID) -> None:
@@ -641,11 +763,12 @@ def list_work_expenses(
             params.append(area_id)
         if query:
             clauses.append(
-                "(g.concepto ilike %s or coalesce(g.folio, '') ilike %s "
+                "(g.concepto ilike %s or g.folio ilike %s "
+                "or coalesce(g.folio_proveedor, '') ilike %s "
                 "or coalesce(prov.nombre, '') ilike %s)"
             )
             wildcard = f"%{query.strip()}%"
-            params.extend([wildcard, wildcard, wildcard])
+            params.extend([wildcard, wildcard, wildcard, wildcard])
         where = " and ".join(clauses)
         total = connection.execute(
             f"""select count(*) as total from public.gasto g
@@ -655,8 +778,19 @@ def list_work_expenses(
         ).fetchone()
         rows = connection.execute(
             f"""
-            select g.id, g.fecha, g.concepto, g.folio, g.importe,
-                   g.estado::text as estado, g.comprobante_path,
+            select g.id, g.fecha, g.concepto, g.folio, g.folio_proveedor,
+                   g.subtotal, g.iva, g.importe, g.iva_desglosado,
+                   g.estado::text as estado,
+                   (select count(*) from public.gasto_concepto c where c.gasto_id = g.id)
+                     as line_count,
+                   coalesce((
+                     select jsonb_agg(jsonb_build_object('id', k.id, 'path', k.ruta, 'kind', k.tipo)
+                       order by k.creado_en, k.id)
+                     from public.gasto_comprobante k where k.gasto_id = g.id), '[]'::jsonb)
+                     as comprobantes,
+                   -- Compatibility for the current UI: first receipt of the expense.
+                   (select k.ruta from public.gasto_comprobante k where k.gasto_id = g.id
+                    order by k.creado_en, k.id limit 1) as comprobante_path,
                    g.motivo_revision, g.creado_por, g.creado_en,
                    exists (
                      select 1 from public.cierre_semanal c
@@ -721,6 +855,7 @@ def update_expense(
     expense_id: UUID,
     payload: ExpenseUpdate,
 ) -> dict[str, Any]:
+    totals = _totals_or_422(payload)
     with transaction(settings) as connection:
         expense = connection.execute(
             "select * from public.gasto where id = %s and eliminado_en is null for update",
@@ -796,9 +931,10 @@ def update_expense(
             update public.gasto set area_id = %s, clase_id = %s, categoria_id = %s,
               partida_id = %s, partida_gasto_id = %s, subpartida_gasto_id = %s,
               categoria_gasto_id = %s, proveedor_id = %s, fecha = %s, concepto = %s,
-              folio = %s, importe = %s, editado_por = %s, editado_en = now()
+              folio_proveedor = %s, importe = %s, subtotal = %s, iva = %s,
+              iva_desglosado = true, editado_por = %s, editado_en = now()
             where id = %s
-            returning id, obra_id, fecha, concepto, folio, importe, estado::text as estado
+            returning id
             """,
             (
                 payload.area_id,
@@ -811,15 +947,31 @@ def update_expense(
                 supplier["id"],
                 payload.spent_on,
                 payload.concept,
-                payload.folio,
-                payload.amount,
+                payload.supplier_folio,
+                totals.amount,
+                totals.subtotal,
+                totals.iva,
                 user.id,
                 expense_id,
             ),
         ).fetchone()
         assert row is not None
-        _audit_expense(connection, expense_id, user, "editar", {"importe": str(payload.amount)})
-        return row
+        connection.execute("delete from public.gasto_concepto where gasto_id = %s", (expense_id,))
+        _insert_lines(connection, expense_id, payload, totals)
+        _audit_expense(
+            connection,
+            expense_id,
+            user,
+            "editar",
+            {
+                "importe_anterior": str(expense["importe"]),
+                "importe": str(totals.amount),
+                "subtotal": str(totals.subtotal),
+                "iva": str(totals.iva),
+                "conceptos": len(payload.lines),
+            },
+        )
+        return _expense_detail(connection, expense_id)
 
 
 def review_expense(
@@ -831,10 +983,11 @@ def review_expense(
 ) -> dict[str, Any]:
     with transaction(settings) as connection:
         expense = connection.execute(
-            """select g.*, exists(select 1 from storage.objects so
-                 where so.bucket_id = 'comprobantes'
-                   and so.name = g.comprobante_path) as receipt_exists
-                 from public.gasto g where g.id = %s and g.eliminado_en is null for update""",
+            """select g.*, exists(select 1 from public.gasto_comprobante k
+                 join storage.objects so on so.bucket_id = 'comprobantes' and so.name = k.ruta
+                 where k.gasto_id = g.id) as receipt_exists
+                 from public.gasto g where g.id = %s and g.eliminado_en is null
+                 for update of g""",
             (expense_id,),
         ).fetchone()
         if expense is None:
@@ -893,11 +1046,11 @@ def validate_expenses_batch(
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Solo administración valida gastos")
         unique_ids = list(dict.fromkeys(expense_ids))
         rows = connection.execute(
-            """select g.*, exists(select 1 from storage.objects so
-                 where so.bucket_id = 'comprobantes'
-                   and so.name = g.comprobante_path) as receipt_exists
+            """select g.*, exists(select 1 from public.gasto_comprobante k
+                 join storage.objects so on so.bucket_id = 'comprobantes' and so.name = k.ruta
+                 where k.gasto_id = g.id) as receipt_exists
                  from public.gasto g where g.obra_id = %s and g.id = any(%s)
-                   and g.eliminado_en is null for update""",
+                   and g.eliminado_en is null for update of g""",
             (work_id, unique_ids),
         ).fetchall()
         if len(rows) != len(unique_ids):
@@ -1163,7 +1316,9 @@ def work_overview(
               count(*) filter (where g.estado = 'pendiente') as pending_count,
               coalesce(sum(g.importe) filter (where g.estado = 'rechazado'), 0) as rejected,
               count(*) filter (where g.estado = 'rechazado') as rejected_count,
-              count(*) filter (where g.estado = 'pendiente' and g.comprobante_path is null)
+              count(*) filter (
+                where g.estado = 'pendiente' and not exists (
+                  select 1 from public.gasto_comprobante k where k.gasto_id = g.id))
                 as missing_receipts
             from public.gasto g
             where g.obra_id = %(work)s and g.eliminado_en is null
@@ -1367,7 +1522,8 @@ def report_expenses(
                    coalesce(csg.nombre, '') as "Subpartida",
                    coalesce(cag.nombre, cat.nombre, '') as "Categoría",
                    coalesce(prov.nombre, '') as "Proveedor", g.concepto as "Concepto",
-                   coalesce(g.folio, '') as "Folio", g.importe as "Importe",
+                   g.folio as "Folio", coalesce(g.folio_proveedor, '') as "Folio proveedor",
+                   g.subtotal as "Subtotal", g.iva as "IVA", g.importe as "Importe",
                    g.estado::text as "Estado"
             from public.gasto g
             join public.area a on a.id = g.area_id

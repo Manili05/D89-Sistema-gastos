@@ -86,6 +86,26 @@ alcance de monolito simple sin importación automática de Excel ni agente de IA
     reintentar el comprobante.
   - Vincular un comprobante exige que el archivo exista en Supabase Storage.
 
+## Cambio 7 — Gasto cabecera-detalle, folio automático y comprobantes múltiples (2026-09-28)
+- **Naturaleza:** cambio de alcance **funcional**, **acordado con el cliente** (nuevos
+  requerimientos de captura).
+- **Qué cambia:**
+  - Un gasto pasa de un solo concepto a **cabecera + N conceptos** (`gasto_concepto`:
+    cantidad, unidad, descripción, precio unitario, descuento e importe).
+  - Se agregan **N comprobantes por gasto** (`gasto_comprobante`: PDF, XML CFDI e imagen).
+  - **Folio automático** `G-00001` (secuencia global). El folio capturado del proveedor
+    pasa a `folio_proveedor`.
+- **Regla de IVA acordada:** los precios se capturan **con IVA incluido**.
+  - `importe` (total) = Σ conceptos.
+  - Sin IVA explícito: `subtotal = importe / 1.16`.
+  - Un IVA explícito (exento, frontera 8 %) se acepta entre 0 y el 16 % contenido en el total.
+  - El servidor calcula todos los totales; no acepta los del cliente.
+- **Migración de datos:** los gastos previos quedan con **IVA no desglosado**
+  (`subtotal = importe`, `iva = 0`, `iva_desglosado = false`), 1 concepto y folio asignado
+  por fecha de captura. `gasto.importe` sigue siendo el total, así que cierres, presupuesto
+  y reportes no cambian.
+- **Pendiente (fase 2):** adaptar el frontend al nuevo contrato de la API.
+
 ---
 *Cualquier desviación nueva de alcance detectada durante el desarrollo debe agregarse aquí,
 siguiendo el mismo formato: naturaleza del cambio, si fue acordado con el cliente o es decisión

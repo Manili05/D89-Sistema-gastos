@@ -328,7 +328,7 @@ def get_supplier(settings: Settings, user: UserContext, supplier_id: UUID) -> di
                 connection.execute(
                     """
                 select g.id, g.obra_id, o.nombre as obra, g.fecha, g.concepto,
-                       g.folio, g.importe, g.estado::text as estado
+                       g.folio, g.folio_proveedor, g.importe, g.estado::text as estado
                 from public.gasto g join public.obra o on o.id = g.obra_id
                 where g.proveedor_id = %s and g.eliminado_en is null
                 order by g.fecha desc limit 100

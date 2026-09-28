@@ -59,7 +59,9 @@ RECEIPT_SYSTEM_PROMPT = """\
 Eres un extractor de datos de tickets de compra y notas de remisión de obra en México (MXN).
 Devuelve únicamente el JSON solicitado:
 - total_detectado: el total impreso o escrito en el documento, como número.
-- conceptos: una entrada por renglón con cantidad, precio_unitario y descripcion.
+- conceptos: una entrada por renglón con cantidad, unidad (pieza, kg, m, m2, m3, bulto,
+  litro, servicio…; null si no aparece), precio_unitario, importe (el importe del renglón
+  tal como aparece, con IVA si el ticket lo incluye) y descripcion.
 - requiere_validacion_humana y motivos_revision.
 Reglas:
 - Transcribe sólo lo visible. No calcules ni deduzcas valores faltantes: si un dato no se lee,
@@ -78,6 +80,9 @@ Recibirás el JSON actual del comprobante y una corrección escrita por el usuar
 Devuelve el comprobante completo y actualizado con el mismo esquema, más `respuesta`.
 Reglas:
 - Aplica sólo lo que el usuario pide; todo lo demás queda exactamente igual.
+- Cada concepto tiene cantidad, unidad, precio_unitario, importe y descripcion. Si la
+  corrección cambia la cantidad o el precio de un renglón, actualiza su importe
+  (cantidad × precio_unitario).
 - Los conceptos se numeran desde 1 en el orden del JSON ("el segundo concepto" = posición 2).
 - No inventes cantidades, precios ni totales que el usuario no haya dado. No recalcules
   el total salvo que el usuario lo pida; el sistema verifica la aritmética por su cuenta.
@@ -166,26 +171,35 @@ def _decimal(value: float | None) -> Decimal | None:
 
 
 def review_receipt(output: ReceiptModelOutput) -> ReceiptExtraction:
-    """Recompute the arithmetic; the server can only raise the human-review flag."""
+    """Recompute the arithmetic; the server can only raise the human-review flag.
+
+    Line amounts and the ticket total both include IVA, matching how expenses are
+    captured, so Σ importe is compared directly with the detected total.
+    """
     reasons = [reason for reason in output.motivos_revision if reason.strip()]
     concepts = [
         ReceiptConcept(
             cantidad=_decimal(item.cantidad),
+            unidad=(item.unidad or "").strip()[:40] or None,
             precio_unitario=_decimal(item.precio_unitario),
+            importe=_decimal(item.importe),
             descripcion=(item.descripcion or "").strip() or None,
         )
         for item in output.conceptos
     ]
     total = _decimal(output.total_detectado)
+    # Unit is optional (many tickets omit it); the other four fields are required.
     complete = [
         item
         for item in concepts
-        if item.cantidad is not None and item.precio_unitario is not None and item.descripcion
+        if item.cantidad is not None
+        and item.precio_unitario is not None
+        and item.importe is not None
+        and item.descripcion
     ]
     computed = (
-        sum((item.cantidad * item.precio_unitario for item in complete), Decimal(0)).quantize(
-            Decimal("0.01")
-        )
+        sum((item.importe for item in complete if item.importe is not None), Decimal(0))
+        .quantize(Decimal("0.01"))
         if complete
         else None
     )
@@ -202,10 +216,19 @@ def review_receipt(output: ReceiptModelOutput) -> ReceiptExtraction:
     if any(
         value is not None and value < 0
         for item in concepts
-        for value in (item.cantidad, item.precio_unitario)
+        for value in (item.cantidad, item.precio_unitario, item.importe)
     ) or (total is not None and total < 0):
         flagged = True
         reasons.append("Hay importes o cantidades negativos.")
+    for position, item in enumerate(concepts, start=1):
+        if item in complete and item.cantidad is not None and item.precio_unitario is not None:
+            expected = (item.cantidad * item.precio_unitario).quantize(Decimal("0.01"))
+            if item.importe is not None and abs(expected - item.importe) > RECEIPT_TOLERANCE:
+                flagged = True
+                reasons.append(
+                    f"Renglón {position}: cantidad × precio ({expected}) no coincide con "
+                    f"el importe ({item.importe})."
+                )
     if total is not None and computed is not None and abs(computed - total) > RECEIPT_TOLERANCE:
         flagged = True
         reasons.append(f"La suma de conceptos ({computed}) no coincide con el total ({total}).")

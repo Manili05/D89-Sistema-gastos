@@ -141,12 +141,18 @@ CSF_OK = {
 }
 
 
+def line(q, p, d, importe="auto", unidad="pieza") -> dict:
+    """Receipt line as the model returns it; importe defaults to q × p (IVA incluido)."""
+    if importe == "auto":
+        importe = round(q * p, 2) if q is not None and p is not None else None
+    return {"cantidad": q, "unidad": unidad, "precio_unitario": p, "importe": importe,
+            "descripcion": d}
+
+
 def receipt(total, concepts, flagged=False, reasons=None) -> dict:
     return {
         "total_detectado": total,
-        "conceptos": [
-            {"cantidad": q, "precio_unitario": p, "descripcion": d} for q, p, d in concepts
-        ],
+        "conceptos": [line(*item) for item in concepts],
         "requiere_validacion_humana": flagged,
         "motivos_revision": reasons or [],
     }
@@ -268,6 +274,48 @@ def test_receipt_server_forces_human_review_even_if_model_does_not(
     assert logs[0]["parametros"]["requiere_validacion_humana"] is True
 
 
+def test_receipt_line_whose_amount_disagrees_with_quantity_times_price_is_flagged(
+    client, settings, proxy, logs
+):
+    # 3 × 100 = 300 but the ticket line says 280 (e.g. an unlabeled discount).
+    proxy.answer(receipt(280, [(3, 100, "Varilla 3/8", 280)]))
+    data = client.post(
+        RECEIPT_URL, files=upload(PNG, "image/png"), headers=auth(settings)
+    ).json()["extraction"]
+    assert data["requiere_validacion_humana"] is True
+    assert any("Renglón 1" in reason and "280" in reason for reason in data["motivos_revision"])
+    # Σ importe (280) matches the total, so only the line check fires.
+    assert not any("no coincide con el total" in r for r in data["motivos_revision"])
+
+
+def test_receipt_returns_unit_and_line_amount_and_unit_is_optional(
+    client, settings, proxy, logs
+):
+    lines = [(2, 100, "Cemento", "auto", "bulto"), (1, 150, "Flete", "auto", None)]
+    proxy.answer(receipt(350, lines))
+    data = client.post(
+        RECEIPT_URL, files=upload(PNG, "image/png"), headers=auth(settings)
+    ).json()["extraction"]
+    assert data["requiere_validacion_humana"] is False
+    assert [(c["unidad"], Decimal(c["importe"])) for c in data["conceptos"]] == [
+        ("bulto", Decimal("200")),
+        (None, Decimal("150")),
+    ]
+    assert Decimal(data["suma_conceptos"]) == Decimal("350.00")
+    schema = proxy.requests[0]["body"]["response_format"]["json_schema"]["schema"]
+    line_schema = schema["properties"]["conceptos"]["items"]
+    assert {"unidad", "importe"} <= set(line_schema["required"])
+
+
+def test_receipt_line_without_amount_is_incomplete(client, settings, proxy, logs):
+    proxy.answer(receipt(100, [(1, 100, "Arena", None)]))
+    data = client.post(
+        RECEIPT_URL, files=upload(PNG, "image/png"), headers=auth(settings)
+    ).json()["extraction"]
+    assert data["requiere_validacion_humana"] is True
+    assert "Hay conceptos incompletos o ilegibles." in data["motivos_revision"]
+
+
 def test_receipt_model_flag_and_reasons_are_preserved(client, settings, proxy, logs):
     proxy.answer(receipt(100, [(1, 100, "Varilla")], True, ["Caligrafía dudosa en el total"]))
     data = client.post(
@@ -371,8 +419,10 @@ JEV_URL = "/api/v1/expenses/jev-chat"
 CURRENT = {
     "total_detectado": "1250.50",
     "conceptos": [
-        {"cantidad": "10", "precio_unitario": "100", "descripcion": "Cemento gris 50 kg"},
-        {"cantidad": "1", "precio_unitario": "250.50", "descripcion": "Cemento blanco"},
+        {"cantidad": "10", "unidad": "bulto", "precio_unitario": "100", "importe": "1000",
+         "descripcion": "Cemento gris 50 kg"},
+        {"cantidad": "1", "unidad": "bulto", "precio_unitario": "250.50", "importe": "250.50",
+         "descripcion": "Cemento blanco"},
     ],
     "suma_conceptos": "1250.50",
     "requiere_validacion_humana": False,

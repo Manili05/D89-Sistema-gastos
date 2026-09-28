@@ -24,6 +24,7 @@ from app.models import (
     ExpenseBatchReview,
     ExpenseCancel,
     ExpenseCreate,
+    ExpenseResponse,
     ExpenseReview,
     ExpenseUpdate,
     HealthResponse,
@@ -67,6 +68,7 @@ from app.services.repository import (
     create_work,
     dashboard,
     delete_work,
+    get_expense,
     get_work,
     list_expenses,
     list_incomes,
@@ -407,7 +409,12 @@ def get_expenses(
     return list_expenses(settings, user, work_id)
 
 
-@router.post("/expenses", status_code=status.HTTP_201_CREATED, tags=["expenses"])
+@router.post(
+    "/expenses",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ExpenseResponse,
+    tags=["expenses"],
+)
 def post_expense(
     payload: ExpenseCreate,
     user: CurrentUser,
@@ -416,7 +423,9 @@ def post_expense(
     return create_expense(settings, user, payload)
 
 
-@router.patch("/expenses/{expense_id}/receipt", tags=["expenses"])
+@router.patch(
+    "/expenses/{expense_id}/receipt", response_model=ExpenseResponse, tags=["expenses"]
+)
 def patch_expense_receipt(
     expense_id: UUID,
     payload: ReceiptUpdate,
@@ -426,7 +435,17 @@ def patch_expense_receipt(
     return attach_receipt(settings, user, expense_id, payload.path)
 
 
-@router.patch("/expenses/{expense_id}", tags=["expenses"])
+@router.get("/expenses/{expense_id}", response_model=ExpenseResponse, tags=["expenses"])
+def get_expense_detail(
+    expense_id: UUID,
+    user: CurrentUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    """Header, lines and receipts of one expense (edit form)."""
+    return get_expense(settings, user, expense_id)
+
+
+@router.patch("/expenses/{expense_id}", response_model=ExpenseResponse, tags=["expenses"])
 def patch_expense(
     expense_id: UUID,
     payload: ExpenseUpdate,

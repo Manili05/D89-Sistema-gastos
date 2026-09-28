@@ -56,7 +56,9 @@ def expense_payload() -> dict[str, object]:
         "expense_category_id": uuid4(),
         "spent_on": date(2026, 9, 3),
         "concept": "Material para firme",
-        "amount": "1250.00",
+        "lines": [
+            {"quantity": "10", "unit": "bulto", "description": "Cemento", "unit_price": "125"}
+        ],
     }
 
 
@@ -68,6 +70,44 @@ def test_expense_requires_a_directory_supplier() -> None:
     supplier_id = uuid4()
     expense = ExpenseCreate.model_validate({**payload, "supplier_id": supplier_id})
     assert expense.supplier_id == supplier_id
+
+
+def test_expense_lines_are_validated_and_client_totals_are_not_accepted() -> None:
+    payload = {**expense_payload(), "supplier_id": uuid4()}
+    expense = ExpenseCreate.model_validate(
+        {
+            **payload,
+            "supplier_folio": "A-1",
+            "amount": "999999",  # ignored: the server derives the total from the lines
+            "lines": [
+                {"quantity": "2", "unit": "  m3 ", "description": " Grava ", "unit_price": "10"}
+            ],
+        }
+    )
+    assert not hasattr(expense, "amount")
+    assert expense.supplier_folio == "A-1"
+    assert (expense.lines[0].unit, expense.lines[0].description) == ("m3", "Grava")
+    assert expense.lines[0].discount == 0
+
+    with pytest.raises(ValidationError, match="lines"):
+        ExpenseCreate.model_validate({**payload, "lines": []})
+    with pytest.raises(ValidationError, match="descuento"):
+        ExpenseCreate.model_validate(
+            {
+                **payload,
+                "lines": [
+                    {"quantity": "1", "unit": "pza", "description": "Tubo",
+                     "unit_price": "10", "discount": "10.01"}
+                ],
+            }
+        )
+    for bad_line in (
+        {"quantity": "0", "unit": "pza", "description": "Tubo", "unit_price": "10"},
+        {"quantity": "1", "unit": "", "description": "Tubo", "unit_price": "10"},
+        {"quantity": "1", "unit": "pza", "description": "Tubo", "unit_price": "-1"},
+    ):
+        with pytest.raises(ValidationError):
+            ExpenseCreate.model_validate({**payload, "lines": [bad_line]})
 
 
 def test_supplier_normalizes_rfc_and_specialties() -> None:

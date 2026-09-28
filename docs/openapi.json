@@ -250,19 +250,6 @@
       },
       "ExpenseCreate": {
         "properties": {
-          "amount": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "type": "number"
-              },
-              {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d{0,4}0*$",
-                "type": "string"
-              }
-            ],
-            "title": "Amount"
-          },
           "area_id": {
             "format": "uuid",
             "title": "Area Id",
@@ -301,17 +288,30 @@
             "title": "Expense Subitem Id",
             "type": "string"
           },
-          "folio": {
+          "iva": {
             "anyOf": [
               {
-                "maxLength": 120,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,10}|(?=[\\d.]{1,15}0*$)\\d{0,10}\\.\\d{0,4}0*$)",
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Folio"
+            "title": "Iva"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/ExpenseLineInput"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Lines",
+            "type": "array"
           },
           "spent_on": {
             "format": "date",
@@ -321,6 +321,18 @@
           "state": {
             "$ref": "#/components/schemas/ExpenseState",
             "default": "pendiente"
+          },
+          "supplier_folio": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supplier Folio"
           },
           "supplier_id": {
             "format": "uuid",
@@ -334,6 +346,7 @@
           }
         },
         "required": [
+          "lines",
           "work_id",
           "area_id",
           "expense_item_id",
@@ -341,10 +354,243 @@
           "expense_category_id",
           "supplier_id",
           "spent_on",
-          "concept",
-          "amount"
+          "concept"
         ],
         "title": "ExpenseCreate",
+        "type": "object"
+      },
+      "ExpenseLine": {
+        "properties": {
+          "amount": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Amount",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "discount": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Discount",
+            "type": "string"
+          },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
+          "quantity": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Quantity",
+            "type": "string"
+          },
+          "unit": {
+            "title": "Unit",
+            "type": "string"
+          },
+          "unit_price": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Unit Price",
+            "type": "string"
+          }
+        },
+        "required": [
+          "position",
+          "quantity",
+          "unit",
+          "description",
+          "unit_price",
+          "discount",
+          "amount"
+        ],
+        "title": "ExpenseLine",
+        "type": "object"
+      },
+      "ExpenseLineInput": {
+        "description": "One concept of an expense. Prices include IVA; the server computes the amount.",
+        "properties": {
+          "description": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "discount": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,10}|(?=[\\d.]{1,15}0*$)\\d{0,10}\\.\\d{0,4}0*$)",
+                "type": "string"
+              }
+            ],
+            "default": "0",
+            "title": "Discount"
+          },
+          "quantity": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,10}|(?=[\\d.]{1,15}0*$)\\d{0,10}\\.\\d{0,4}0*$)",
+                "type": "string"
+              }
+            ],
+            "title": "Quantity"
+          },
+          "unit": {
+            "maxLength": 40,
+            "minLength": 1,
+            "title": "Unit",
+            "type": "string"
+          },
+          "unit_price": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,10}|(?=[\\d.]{1,15}0*$)\\d{0,10}\\.\\d{0,4}0*$)",
+                "type": "string"
+              }
+            ],
+            "title": "Unit Price"
+          }
+        },
+        "required": [
+          "quantity",
+          "unit",
+          "description",
+          "unit_price"
+        ],
+        "title": "ExpenseLineInput",
+        "type": "object"
+      },
+      "ExpenseReceipt": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "path",
+          "kind",
+          "created_at"
+        ],
+        "title": "ExpenseReceipt",
+        "type": "object"
+      },
+      "ExpenseResponse": {
+        "properties": {
+          "amount": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Amount",
+            "type": "string"
+          },
+          "concept": {
+            "title": "Concept",
+            "type": "string"
+          },
+          "folio": {
+            "title": "Folio",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "iva": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Iva",
+            "type": "string"
+          },
+          "iva_breakdown": {
+            "title": "Iva Breakdown",
+            "type": "boolean"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/ExpenseLine"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "receipts": {
+            "items": {
+              "$ref": "#/components/schemas/ExpenseReceipt"
+            },
+            "title": "Receipts",
+            "type": "array"
+          },
+          "spent_on": {
+            "format": "date",
+            "title": "Spent On",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "subtotal": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Subtotal",
+            "type": "string"
+          },
+          "supplier_folio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supplier Folio"
+          },
+          "work_id": {
+            "format": "uuid",
+            "title": "Work Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "folio",
+          "supplier_folio",
+          "work_id",
+          "spent_on",
+          "concept",
+          "subtotal",
+          "iva",
+          "amount",
+          "iva_breakdown",
+          "state",
+          "lines",
+          "receipts"
+        ],
+        "title": "ExpenseResponse",
         "type": "object"
       },
       "ExpenseReview": {
@@ -384,19 +630,6 @@
       },
       "ExpenseUpdate": {
         "properties": {
-          "amount": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "type": "number"
-              },
-              {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d{0,4}0*$",
-                "type": "string"
-              }
-            ],
-            "title": "Amount"
-          },
           "area_id": {
             "format": "uuid",
             "title": "Area Id",
@@ -435,7 +668,37 @@
             "title": "Expense Subitem Id",
             "type": "string"
           },
-          "folio": {
+          "iva": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,10}|(?=[\\d.]{1,15}0*$)\\d{0,10}\\.\\d{0,4}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Iva"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/ExpenseLineInput"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Lines",
+            "type": "array"
+          },
+          "spent_on": {
+            "format": "date",
+            "title": "Spent On",
+            "type": "string"
+          },
+          "supplier_folio": {
             "anyOf": [
               {
                 "maxLength": 120,
@@ -445,12 +708,7 @@
                 "type": "null"
               }
             ],
-            "title": "Folio"
-          },
-          "spent_on": {
-            "format": "date",
-            "title": "Spent On",
-            "type": "string"
+            "title": "Supplier Folio"
           },
           "supplier_id": {
             "format": "uuid",
@@ -459,14 +717,14 @@
           }
         },
         "required": [
+          "lines",
           "area_id",
           "expense_item_id",
           "expense_subitem_id",
           "expense_category_id",
           "supplier_id",
           "spent_on",
-          "concept",
-          "amount"
+          "concept"
         ],
         "title": "ExpenseUpdate",
         "type": "object"
@@ -753,6 +1011,21 @@
             ],
             "title": "Descripcion"
           },
+          "importe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Importe"
+          },
           "precio_unitario": {
             "anyOf": [
               {
@@ -767,6 +1040,17 @@
               }
             ],
             "title": "Precio Unitario"
+          },
+          "unidad": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unidad"
           }
         },
         "required": [
@@ -802,6 +1086,18 @@
             ],
             "title": "Descripcion"
           },
+          "importe": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Importe"
+          },
           "precio_unitario": {
             "anyOf": [
               {
@@ -813,6 +1109,17 @@
               }
             ],
             "title": "Precio Unitario"
+          },
+          "unidad": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unidad"
           }
         },
         "required": [
@@ -2046,9 +2353,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Post Expense Api V1 Expenses Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ExpenseResponse"
                 }
               }
             },
@@ -2253,6 +2558,64 @@
       }
     },
     "/api/v1/expenses/{expense_id}": {
+      "get": {
+        "description": "Header, lines and receipts of one expense (edit form).",
+        "operationId": "get_expense_detail_api_v1_expenses__expense_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "expense_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Expense Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExpenseResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Expense Detail",
+        "tags": [
+          "expenses"
+        ]
+      },
       "patch": {
         "operationId": "patch_expense_api_v1_expenses__expense_id__patch",
         "parameters": [
@@ -2298,9 +2661,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Patch Expense Api V1 Expenses  Expense Id  Patch",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ExpenseResponse"
                 }
               }
             },
@@ -2440,9 +2801,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Patch Expense Receipt Api V1 Expenses  Expense Id  Receipt Patch",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ExpenseResponse"
                 }
               }
             },

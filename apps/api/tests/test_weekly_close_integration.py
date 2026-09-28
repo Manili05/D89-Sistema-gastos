@@ -17,6 +17,7 @@ from test_financial_security_integration import (
     BOOTSTRAP,
     MIGRATIONS,
     isolated_services,  # noqa: F401 -- shared pytest fixture
+    one_line,
     seed,
 )
 
@@ -87,7 +88,7 @@ def test_weekly_close_lifecycle_and_locking(isolated_services, installation):  #
             "supplier_id": str(ids["supplier"]),
             "spent_on": "2021-01-01",
             "concept": "ISO year boundary",
-            "amount": "100.00",
+            "lines": one_line("100.00"),
         }
         close_payload = {"work_id": str(ids["work"]), "iso_year": 2020, "iso_week": 53}
         preview_url = f"/api/v1/works/{ids['work']}/weekly-closes/preview"
@@ -148,7 +149,7 @@ def test_weekly_close_lifecycle_and_locking(isolated_services, installation):  #
                     == 200
                 )
                 assert review(expense_id, "validate").status_code == 200
-                rejected_id = create({"amount": "777"}).json()["id"]
+                rejected_id = create({"lines": one_line("777")}).json()["id"]
                 assert (
                     api.post(
                         f"/api/v1/expenses/{rejected_id}/review",
@@ -225,7 +226,7 @@ def test_weekly_close_lifecycle_and_locking(isolated_services, installation):  #
                 assert review(expense_id, "return_to_review", "Corregir importe").status_code == 200
                 updated = api.patch(
                     f"/api/v1/expenses/{expense_id}",
-                    json={**edit, "amount": "250"},
+                    json={**edit, "lines": one_line("250")},
                     headers=headers("operativo"),
                 )
                 assert updated.status_code == 200, updated.text

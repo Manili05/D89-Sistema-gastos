@@ -178,7 +178,36 @@ class WeeklyReopen(BaseModel):
     reason: str = Field(min_length=10, max_length=500)
 
 
-class ExpenseCreate(BaseModel):
+class ExpenseLineInput(BaseModel):
+    """One concept of an expense. Prices include IVA; the server computes the amount."""
+
+    quantity: Decimal = Field(gt=0, max_digits=14, decimal_places=4)
+    unit: str = Field(min_length=1, max_length=40)
+    description: str = Field(min_length=1, max_length=500)
+    unit_price: Decimal = Field(ge=0, max_digits=14, decimal_places=4)
+    discount: Decimal = Field(default=Decimal(0), ge=0, max_digits=14, decimal_places=4)
+
+    @field_validator("unit", "description", mode="before")
+    @classmethod
+    def strip_text(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
+
+    @model_validator(mode="after")
+    def discount_within_gross(self) -> "ExpenseLineInput":
+        if self.discount > self.quantity * self.unit_price:
+            raise ValueError("El descuento no puede superar cantidad × precio unitario")
+        return self
+
+
+class ExpenseLinesPayload(BaseModel):
+    """Shared by create and update: the edit replaces every line."""
+
+    supplier_folio: str | None = Field(default=None, max_length=120)
+    lines: list[ExpenseLineInput] = Field(min_length=1, max_length=200)
+    iva: Decimal | None = Field(default=None, ge=0, max_digits=14, decimal_places=4)
+
+
+class ExpenseCreate(ExpenseLinesPayload):
     work_id: UUID
     area_id: UUID
     expense_item_id: UUID
@@ -188,12 +217,11 @@ class ExpenseCreate(BaseModel):
     supplier_id: UUID
     spent_on: date
     concept: str = Field(min_length=3, max_length=500)
-    folio: str | None = Field(default=None, max_length=120)
-    amount: Decimal = Field(gt=0, decimal_places=4)
+    # Accepted for backwards compatibility and ignored: new expenses are always pending.
     state: ExpenseState = ExpenseState.PENDIENTE
 
 
-class ExpenseUpdate(BaseModel):
+class ExpenseUpdate(ExpenseLinesPayload):
     area_id: UUID
     expense_item_id: UUID
     expense_subitem_id: UUID
@@ -202,8 +230,39 @@ class ExpenseUpdate(BaseModel):
     supplier_id: UUID
     spent_on: date
     concept: str = Field(min_length=3, max_length=500)
-    folio: str | None = Field(default=None, max_length=120)
-    amount: Decimal = Field(gt=0, decimal_places=4)
+
+
+class ExpenseLine(BaseModel):
+    position: int
+    quantity: Decimal
+    unit: str
+    description: str
+    unit_price: Decimal
+    discount: Decimal
+    amount: Decimal
+
+
+class ExpenseReceipt(BaseModel):
+    id: UUID
+    path: str
+    kind: str
+    created_at: datetime
+
+
+class ExpenseResponse(BaseModel):
+    id: UUID
+    folio: str
+    supplier_folio: str | None
+    work_id: UUID
+    spent_on: date
+    concept: str
+    subtotal: Decimal
+    iva: Decimal
+    amount: Decimal
+    iva_breakdown: bool
+    state: str
+    lines: list[ExpenseLine]
+    receipts: list[ExpenseReceipt]
 
 
 class ExpenseReview(BaseModel):
@@ -312,7 +371,9 @@ class ReceiptConceptOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     cantidad: float | None
+    unidad: str | None
     precio_unitario: float | None
+    importe: float | None
     descripcion: str | None
 
 
@@ -338,7 +399,9 @@ class CsfExtraction(BaseModel):
 
 class ReceiptConcept(BaseModel):
     cantidad: Decimal | None
+    unidad: str | None = None
     precio_unitario: Decimal | None
+    importe: Decimal | None = None
     descripcion: str | None
 
 

@@ -12,6 +12,7 @@ import os
 import secrets
 import subprocess
 import time
+from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
 
@@ -114,6 +115,13 @@ def isolated_services():
             docker("stop", "--time", "2", name)
 
 
+def one_line(amount: str, description: str = "Integración") -> list[dict[str, str]]:
+    """Single-concept expense whose total (IVA incluido) equals `amount`."""
+    return [
+        {"quantity": "1", "unit": "servicio", "description": description, "unit_price": amount}
+    ]
+
+
 def seed(connection):
     ids = {
         name: uuid4()
@@ -150,12 +158,34 @@ def seed(connection):
         "select id from public.catalogo_categoria_gasto limit 1"
     ).fetchone()[0]
     ids.update(item=item, subitem=subitem, category=category)
-    connection.execute(
-        """insert into public.gasto
-           (id,obra_id,area_id,fecha,concepto,importe,estado,creado_por)
-           values (%s,%s,%s,'2026-09-01','Historical validated expense',125,'validado',%s)""",
-        (ids["legacy"], ids["work"], ids["area"], ids["admin"]),
-    )
+    header_detail = connection.execute(
+        """select exists(select 1 from information_schema.columns
+           where table_schema='public' and table_name='gasto' and column_name='subtotal')"""
+    ).fetchone()[0]
+    if header_detail:
+        # Same shape the header-detail migration gives to historical expenses.
+        connection.execute(
+            """insert into public.gasto
+               (id,obra_id,area_id,fecha,concepto,importe,subtotal,iva,iva_desglosado,
+                estado,creado_por)
+               values (%s,%s,%s,'2026-09-01','Historical validated expense',125,125,0,false,
+                       'validado',%s)""",
+            (ids["legacy"], ids["work"], ids["area"], ids["admin"]),
+        )
+        connection.execute(
+            """insert into public.gasto_concepto
+               (gasto_id,posicion,cantidad,unidad,descripcion,precio_unitario,importe_concepto)
+               values (%s,1,1,'servicio','Historical validated expense',125,125)""",
+            (ids["legacy"],),
+        )
+    else:
+        # Pre header-detail schema: the migration itself must backfill this row.
+        connection.execute(
+            """insert into public.gasto
+               (id,obra_id,area_id,fecha,concepto,importe,estado,creado_por)
+               values (%s,%s,%s,'2026-09-01','Historical validated expense',125,'validado',%s)""",
+            (ids["legacy"], ids["work"], ids["area"], ids["admin"]),
+        )
     return ids
 
 
@@ -197,6 +227,18 @@ def test_financial_security_end_to_end(isolated_services, installation):
             else:
                 connection.execute(path.read_text())
         connection.execute((ROOT / "supabase/seed.sql").read_text())
+        if installation == "upgrade":
+            # The header-detail migration backfilled the pre-existing expense.
+            assert connection.execute(
+                """select g.folio, g.subtotal, g.iva, g.iva_desglosado, c.cantidad, c.unidad,
+                          c.descripcion, c.importe_concepto
+                   from public.gasto g join public.gasto_concepto c on c.gasto_id = g.id
+                   where g.id = %s""",
+                (ids["legacy"],),
+            ).fetchall() == [
+                ("G-00001", Decimal("125.0000"), Decimal("0.0000"), False, Decimal("1.0000"),
+                 "servicio", "Historical validated expense", Decimal("125.0000"))
+            ]
         assert [
             p for p in policies(connection) if p[0] != "gasto_insert_solo_backend"
         ] == before_policies
@@ -268,6 +310,7 @@ def test_financial_security_end_to_end(isolated_services, installation):
                 app.dependency_overrides[get_settings] = lambda: settings
                 try:
                     with TestClient(app) as api:
+                        folios = []
                         for role in ("admin", "operativo"):
                             for state in (None, "pendiente", "validado"):
                                 payload = {
@@ -279,7 +322,7 @@ def test_financial_security_end_to_end(isolated_services, installation):
                                     "supplier_id": str(ids["supplier"]),
                                     "spent_on": "2026-09-27",
                                     "concept": "Security integration",
-                                    "amount": "100.00",
+                                    "lines": one_line("100.00"),
                                 }
                                 if state is not None:
                                     payload["state"] = state
@@ -287,8 +330,16 @@ def test_financial_security_end_to_end(isolated_services, installation):
                                     "/api/v1/expenses", json=payload, headers=headers(role)
                                 )
                                 assert response.status_code == 201, response.text
-                                expense_id = response.json()["id"]
-                                assert response.json()["estado"] == "pendiente"
+                                created = response.json()
+                                expense_id = created["id"]
+                                assert created["state"] == "pendiente"
+                                folios.append(created["folio"])
+                                # Price 100 includes IVA: 100 / 1.16 = 86.21 + 13.79.
+                                assert (created["amount"], created["subtotal"], created["iva"]) == (
+                                    "100.0000", "86.2100", "13.7900"
+                                )
+                                assert [line["amount"] for line in created["lines"]] == ["100.0000"]
+                                assert created["receipts"] == [] and created["iva_breakdown"]
                                 assert connection.execute(
                                     "select estado,validado_por,validado_en "
                                     "from public.gasto where id=%s",
@@ -302,6 +353,12 @@ def test_financial_security_end_to_end(isolated_services, installation):
                                     ).fetchone()[0]
                                     == 1
                                 )
+                        # Folios are server-generated, unique and consecutive after the legacy one.
+                        assert folios == [f"G-{n:05d}" for n in range(2, 8)]
+                        assert connection.execute(
+                            "select count(*) from public.gasto_concepto where gasto_id = %s",
+                            (expense_id,),
+                        ).fetchone()[0] == 1
                         # The last expense belongs to operativo; receipt metadata is a fixture.
                         review_url = f"/api/v1/expenses/{expense_id}/review"
                         assert (
@@ -319,21 +376,39 @@ def test_financial_security_end_to_end(isolated_services, installation):
                         assert missing.status_code == 422, missing.text
                         assert missing.json()["detail"] == "El comprobante no existe en Storage"
                         assert connection.execute(
-                            "select comprobante_path from public.gasto where id=%s",
+                            "select count(*) from public.gasto_comprobante where gasto_id=%s",
                             (expense_id,),
-                        ).fetchone() == (None,)
+                        ).fetchone()[0] == 0
                         connection.execute(
                             "insert into storage.objects(bucket_id,name) "
                             "values ('comprobantes',%s)",
                             (receipt,),
                         )
-                        assert (
-                            api.patch(
+                        cfdi = f"{ids['work']}/{expense_id}/factura-cfdi.xml"
+                        connection.execute(
+                            "insert into storage.objects(bucket_id,name) "
+                            "values ('comprobantes',%s)",
+                            (cfdi,),
+                        )
+                        for path in (receipt, cfdi, receipt):  # the repeated path is idempotent
+                            attached = api.patch(
                                 f"/api/v1/expenses/{expense_id}/receipt",
-                                json={"path": receipt},
+                                json={"path": path},
                                 headers=headers("operativo"),
+                            )
+                            assert attached.status_code == 200, attached.text
+                        assert [
+                            (item["path"], item["kind"]) for item in attached.json()["receipts"]
+                        ] == [(receipt, "pdf"), (cfdi, "xml")]
+                        detail = api.get(
+                            f"/api/v1/expenses/{expense_id}", headers=headers("operativo")
+                        )
+                        assert detail.status_code == 200 and len(detail.json()["receipts"]) == 2
+                        assert (
+                            api.get(
+                                f"/api/v1/expenses/{expense_id}", headers=headers("outsider")
                             ).status_code
-                            == 200
+                            == 403
                         )
                         assert (
                             api.post(
@@ -349,6 +424,14 @@ def test_financial_security_end_to_end(isolated_services, installation):
                         assert (
                             reviewed.status_code == 200 and reviewed.json()["estado"] == "validado"
                         )
+                        # lpad() would truncate here; the folio function must not.
+                        connection.execute("select setval('public.gasto_folio_seq', 99999)")
+                        big = api.post(
+                            "/api/v1/expenses",
+                            json={k: v for k, v in payload.items() if k != "state"},
+                            headers=headers("admin"),
+                        )
+                        assert big.status_code == 201 and big.json()["folio"] == "G-100000"
                         assert (
                             connection.execute(
                                 "select validado_por from public.gasto where id=%s", (expense_id,)
@@ -377,7 +460,12 @@ def test_financial_security_end_to_end(isolated_services, installation):
                 # Check both privilege denial and RLS independently, including admin_all.
                 for grant_insert in (False, True):
                     if grant_insert:
-                        connection.execute("grant insert on public.gasto to anon, authenticated")
+                        # The folio default calls nextval(); grant the sequence too so this
+                        # branch isolates RLS instead of failing earlier on the sequence.
+                        connection.execute(
+                            "grant insert on public.gasto to anon, authenticated; "
+                            "grant usage on sequence public.gasto_folio_seq to anon, authenticated"
+                        )
                     try:
                         for role in ("admin", "operativo", None):
                             response = rest.post(
@@ -402,7 +490,61 @@ def test_financial_security_end_to_end(isolated_services, installation):
                             == count
                         )
                     finally:
-                        connection.execute("revoke insert on public.gasto from anon, authenticated")
+                        connection.execute(
+                            "revoke insert on public.gasto from anon, authenticated; "
+                            "revoke usage on sequence public.gasto_folio_seq "
+                            "from anon, authenticated"
+                        )
+
+                # Header-detail tables: readable per work access, never writable through REST.
+                for table in ("gasto_concepto", "gasto_comprobante"):
+                    total_rows = connection.execute(
+                        f"select count(*) from public.{table}"
+                    ).fetchone()[0]
+                    assert total_rows > 0
+                    for role in ("admin", "operativo"):
+                        seen = rest.get(f"/{table}", params={"select": "id"}, headers=headers(role))
+                        assert seen.status_code == 200 and len(seen.json()) == total_rows
+                    hidden = rest.get(
+                        f"/{table}", params={"select": "id"}, headers=headers("outsider")
+                    )
+                    assert hidden.status_code == 200 and hidden.json() == []
+                    for grant in (False, True):
+                        if grant:
+                            connection.execute(
+                                f"grant insert, update, delete on public.{table} "
+                                "to anon, authenticated"
+                            )
+                        try:
+                            for role in ("admin", "operativo"):
+                                forged = rest.post(
+                                    f"/{table}",
+                                    json={"gasto_id": str(ids["legacy"]), "posicion": 9,
+                                          "cantidad": 1, "unidad": "x", "descripcion": "x",
+                                          "precio_unitario": 1, "importe_concepto": 1}
+                                    if table == "gasto_concepto"
+                                    else {"gasto_id": str(ids["legacy"]),
+                                          "ruta": "forged.pdf", "tipo": "pdf"},
+                                    headers=headers(role),
+                                )
+                                assert forged.status_code in (401, 403), forged.text
+                                assert forged.json()["code"] == "42501"
+                                removed = rest.delete(
+                                    f"/{table}",
+                                    params={"gasto_id": f"eq.{ids['legacy']}"},
+                                    headers={**headers(role), "Prefer": "return=representation"},
+                                )
+                                # Without the grant: 42501; with it, the restrictive policy
+                                # leaves nothing deletable.
+                                assert removed.status_code in (401, 403) or removed.json() == []
+                            assert connection.execute(
+                                f"select count(*) from public.{table}"
+                            ).fetchone()[0] == total_rows
+                        finally:
+                            connection.execute(
+                                f"revoke insert, update, delete on public.{table} "
+                                "from anon, authenticated"
+                            )
 
                 # Existing UPDATE permission/policy still works on the author's pending row.
                 own_pending = connection.execute(
