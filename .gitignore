@@ -24,3 +24,5 @@ secrets/
 docs/evidence/*.png
 docs/evidence/*.webm
 docs/evidence/*.zip
+test-results-live/
+playwright-report-live/
