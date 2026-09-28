@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { UploadIcon } from '@/components/icons';
 import { AI_MANUAL_FALLBACK, aiErrorMessage, aiRequest, isAbort } from '@/lib/ai';
 import type { components } from '@/lib/api.generated';
+import { type LineDraft, formatCents, lineAmountCents, newLine, toUnits, trimDecimal } from '@/lib/money';
 
 type Extraction = components['schemas']['ReceiptExtraction-Output'];
 type ReceiptResponse = components['schemas']['ReceiptExtractionResponse'];
@@ -27,14 +28,33 @@ function amount(value: string | null | undefined): string {
   return value === null || value === undefined ? '—' : money.format(Number(value));
 }
 
-/** Text and amount that "Usar en el formulario" writes into the regular expense fields. */
-export function receiptToFormValues(extraction: Extraction): { amount: string; concept: string } {
-  const total = extraction.total_detectado ?? extraction.suma_conceptos;
-  const concept = extraction.conceptos
+/**
+ * Ticket lines → expense lines (ticket prices include IVA, so every line is taxable).
+ * When the printed line amount is lower than quantity × price (an unlabeled discount),
+ * the exact difference becomes the line discount so the line matches the ticket.
+ */
+export function receiptToLines(extraction: Extraction): LineDraft[] {
+  return extraction.conceptos.filter((item) => item.descripcion).map((item) => {
+    const quantity = trimDecimal(item.cantidad) || '1';
+    const unitPrice = trimDecimal(item.precio_unitario ?? item.importe) || '';
+    let discount = '';
+    const gross = lineAmountCents({ quantity, unitPrice, discount: '' });
+    const printed = item.importe === null || item.importe === undefined ? null : toUnits(trimDecimal(item.importe), 2n);
+    if (gross !== null && printed !== null && printed < gross) discount = formatCents(gross - printed);
+    return newLine({
+      quantity, unit: item.unidad || 'pieza', description: (item.descripcion || '').slice(0, 500),
+      unitPrice, discount, taxable: true,
+    });
+  });
+}
+
+/** General concept text for the expense header, from the ticket lines. */
+export function receiptConcept(extraction: Extraction): string {
+  return extraction.conceptos
     .filter((item) => item.descripcion)
     .map((item) => (item.cantidad ? `${Number(item.cantidad)} × ${item.descripcion}` : item.descripcion))
-    .join('; ');
-  return { amount: total ? Number(total).toFixed(2) : '', concept: concept.slice(0, 500) };
+    .join('; ')
+    .slice(0, 500);
 }
 
 /**
@@ -46,7 +66,7 @@ export function ReceiptAssistant({ disabled, onBusyChange, onFile, onApply }: {
   disabled: boolean;
   onBusyChange: (busy: boolean) => void;
   onFile: (file: File | null) => void;
-  onApply: (values: { amount: string; concept: string }) => void;
+  onApply: (values: { lines: LineDraft[]; concept: string }) => void;
 }) {
   const [fileName, setFileName] = useState('');
   const [extraction, setExtraction] = useState<Extraction | null>(null);
@@ -140,7 +160,7 @@ export function ReceiptAssistant({ disabled, onBusyChange, onFile, onApply }: {
 
   function apply() {
     if (!extraction) return;
-    onApply(receiptToFormValues(extraction));
+    onApply({ lines: receiptToLines(extraction), concept: receiptConcept(extraction) });
     setApplied(true);
   }
 
@@ -155,7 +175,7 @@ export function ReceiptAssistant({ disabled, onBusyChange, onFile, onApply }: {
       {extraction.requiere_validacion_humana
         ? <div className="notice" role="status"><strong>Revisa antes de guardar.</strong>{extraction.motivos_revision.length > 0 && <ul>{extraction.motivos_revision.map((reason) => <li key={reason}>{reason}</li>)}</ul>}</div>
         : <p className="notice success" role="status">La suma de conceptos coincide con el total.</p>}
-      <div className="header-actions"><button type="button" className="btn secondary" disabled={busy || disabled} onClick={apply}>Usar en el formulario</button>{applied && <span className="field-hint" role="status">Importe y concepto copiados. Puedes editarlos abajo.</span>}</div>
+      <div className="header-actions"><button type="button" className="btn secondary" disabled={busy || disabled} onClick={apply}>Usar en el formulario</button>{applied && <span className="field-hint" role="status">Conceptos copiados al formulario. Puedes editarlos abajo.</span>}</div>
       <div className="jev-chat">
         <h3>Corregir con Jev</h3>
         {messages.length > 0 && <ol className="jev-messages" aria-live="polite">{messages.map((message, index) => <li key={index} className={message.from}><span>{message.from === 'jev' ? 'Jev' : 'Tú'}</span>{message.text}</li>)}</ol>}

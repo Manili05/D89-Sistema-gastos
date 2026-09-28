@@ -59,6 +59,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/expenses/extract-xml": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post Extract Cfdi
+         * @description Read a CFDI 3.3/4.0 without AI: issuer, concepts, taxes and a ready expense draft.
+         */
+        post: operations["post_extract_cfdi_api_v1_expenses_extract_xml_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/expenses/jev-chat": {
         parameters: {
             query?: never;
@@ -713,6 +733,17 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** Body_post_extract_cfdi_api_v1_expenses_extract_xml_post */
+        Body_post_extract_cfdi_api_v1_expenses_extract_xml_post: {
+            /**
+             * File
+             * Format: binary
+             * @description XML del CFDI (factura electrónica)
+             */
+            file: string;
+            /** Work Id */
+            work_id?: string | null;
+        };
         /** Body_post_extract_csf_api_v1_suppliers_extract_csf_post */
         Body_post_extract_csf_api_v1_suppliers_extract_csf_post: {
             /**
@@ -751,6 +782,104 @@ export interface components {
             work_name?: string | null;
             /** Work Start Date */
             work_start_date?: string | null;
+        };
+        /** CfdiConceptOut */
+        CfdiConceptOut: {
+            /** Amount */
+            amount: string;
+            /** Description */
+            description: string;
+            /** Discount */
+            discount: string;
+            /** Iva */
+            iva: string;
+            /** Product Code */
+            product_code: string | null;
+            /** Quantity */
+            quantity: string;
+            /** Unit */
+            unit: string | null;
+            /** Unit Code */
+            unit_code: string | null;
+            /** Unit Value */
+            unit_value: string;
+        };
+        /**
+         * CfdiExpenseDraft
+         * @description Ready-to-submit expense lines (prices WITH taxes) whose sum equals the CFDI.
+         */
+        CfdiExpenseDraft: {
+            /** Amount */
+            amount: string;
+            /** Concept */
+            concept: string;
+            /** Iva */
+            iva: string;
+            /** Lines */
+            lines: components["schemas"]["ExpenseLineInput-Output"][];
+            /** Supplier Folio */
+            supplier_folio: string | null;
+        };
+        /** CfdiExtractionResponse */
+        CfdiExtractionResponse: {
+            /** Concepts */
+            concepts: components["schemas"]["CfdiConceptOut"][];
+            /** Currency */
+            currency: string | null;
+            /** Discount */
+            discount: string;
+            expense: components["schemas"]["CfdiExpenseDraft"];
+            /** Folio */
+            folio: string | null;
+            /** Issued At */
+            issued_at: string | null;
+            issuer: components["schemas"]["CfdiIssuer"];
+            /** Iva */
+            iva: string;
+            /** Receiver Rfc */
+            receiver_rfc: string | null;
+            /** Requires Review */
+            requires_review: boolean;
+            /** Series */
+            series: string | null;
+            /** Subtotal */
+            subtotal: string;
+            supplier: components["schemas"]["CfdiSupplierMatch"] | null;
+            /** Total */
+            total: string;
+            /** Uuid */
+            uuid: string | null;
+            /** Version */
+            version: string;
+            /** Voucher Type */
+            voucher_type: string | null;
+            /** Warnings */
+            warnings: string[];
+            /** Withholdings */
+            withholdings: string;
+        };
+        /** CfdiIssuer */
+        CfdiIssuer: {
+            /** Name */
+            name: string | null;
+            /** Rfc */
+            rfc: string;
+            /** Tax Regime */
+            tax_regime: string | null;
+        };
+        /** CfdiSupplierMatch */
+        CfdiSupplierMatch: {
+            /** Active */
+            active: boolean;
+            /** Assigned To Work */
+            assigned_to_work: boolean | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
         };
         /** CsfExtraction */
         CsfExtraction: {
@@ -822,7 +951,7 @@ export interface components {
             /** Iva */
             iva?: number | string | null;
             /** Lines */
-            lines: components["schemas"]["ExpenseLineInput"][];
+            lines: components["schemas"]["ExpenseLineInput-Input"][];
             /**
              * Spent On
              * Format: date
@@ -864,7 +993,7 @@ export interface components {
          * ExpenseLineInput
          * @description One concept of an expense. Prices include IVA; the server computes the amount.
          */
-        ExpenseLineInput: {
+        "ExpenseLineInput-Input": {
             /** Description */
             description: string;
             /**
@@ -878,6 +1007,25 @@ export interface components {
             unit: string;
             /** Unit Price */
             unit_price: number | string;
+        };
+        /**
+         * ExpenseLineInput
+         * @description One concept of an expense. Prices include IVA; the server computes the amount.
+         */
+        "ExpenseLineInput-Output": {
+            /** Description */
+            description: string;
+            /**
+             * Discount
+             * @default 0
+             */
+            discount: string;
+            /** Quantity */
+            quantity: string;
+            /** Unit */
+            unit: string;
+            /** Unit Price */
+            unit_price: string;
         };
         /** ExpenseReceipt */
         ExpenseReceipt: {
@@ -975,7 +1123,7 @@ export interface components {
             /** Iva */
             iva?: number | string | null;
             /** Lines */
-            lines: components["schemas"]["ExpenseLineInput"][];
+            lines: components["schemas"]["ExpenseLineInput-Input"][];
             /**
              * Spent On
              * Format: date
@@ -1211,6 +1359,8 @@ export interface components {
             tax_regime?: string | null;
             /** Whatsapp */
             whatsapp?: string | null;
+            /** Work Id */
+            work_id?: string | null;
         };
         /** SupplierEvaluationCreate */
         SupplierEvaluationCreate: {
@@ -1529,6 +1679,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReceiptExtractionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_extract_cfdi_api_v1_expenses_extract_xml_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_post_extract_cfdi_api_v1_expenses_extract_xml_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CfdiExtractionResponse"];
                 };
             };
             /** @description Validation Error */

@@ -104,7 +104,15 @@ alcance de monolito simple sin importación automática de Excel ni agente de IA
   (`subtotal = importe`, `iva = 0`, `iva_desglosado = false`), 1 concepto y folio asignado
   por fecha de captura. `gasto.importe` sigue siendo el total, así que cierres, presupuesto
   y reportes no cambian.
-- **Pendiente (fase 2):** adaptar el frontend al nuevo contrato de la API.
+- **Fase 2 (2026-09-28):**
+  - El formulario de gasto captura N conceptos con cálculo en vivo idéntico al servidor,
+    marca los conceptos exentos y adjunta varios comprobantes.
+  - Lector de **CFDI XML** sin IA (`POST /api/v1/expenses/extract-xml`): emisor, conceptos
+    e impuestos; propone los renglones del gasto y cruza el RFC con el directorio.
+  - **Alta rápida de proveedor** desde el gasto (sólo admin), asignado a la obra en la misma
+    transacción.
+  - PostgREST queda de **sólo lectura** para `gasto`, `gasto_concepto` y
+    `gasto_comprobante`: toda mutación pasa por FastAPI.
 
 ---
 *Cualquier desviación nueva de alcance detectada durante el desarrollo debe agregarse aquí,

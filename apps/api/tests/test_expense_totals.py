@@ -70,3 +70,14 @@ def test_subtotal_plus_iva_always_equals_total_across_many_amounts():
         totals = compute_totals([L("1", str(amount))])
         assert totals.subtotal + totals.iva == totals.amount
         assert Decimal(0) <= totals.iva <= max_included_iva(totals.amount)
+
+
+def test_explicit_iva_tolerance_grows_one_cent_per_line_for_cfdi_rounding():
+    # Three lines of $1.16: the 16 % contained in $3.48 is 0.48, but a CFDI that rounds
+    # IVA per concept can report 3 × 0.16 = 0.48… plus up to a cent per line.
+    lines = [L("1", "1.16")] * 3
+    assert compute_totals(lines, iva=Decimal("0.51")).iva == Decimal("0.51")  # +3 cents
+    with pytest.raises(ExpenseTotalsError):
+        compute_totals(lines, iva=Decimal("0.52"))  # beyond one cent per line
+    with pytest.raises(ExpenseTotalsError):
+        compute_totals([L("1", "1.16")], iva=Decimal("0.18"))  # single line: ±1 cent only

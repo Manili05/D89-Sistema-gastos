@@ -239,17 +239,20 @@ def test_financial_security_end_to_end(isolated_services, installation):
                 ("G-00001", Decimal("125.0000"), Decimal("0.0000"), False, Decimal("1.0000"),
                  "servicio", "Historical validated expense", Decimal("125.0000"))
             ]
+        # Later hardening only adds restrictive *_solo_backend policies; the rest are unchanged.
         assert [
-            p for p in policies(connection) if p[0] != "gasto_insert_solo_backend"
+            p for p in policies(connection) if not p[0].endswith("_solo_backend")
         ] == before_policies
         restriction = next(p for p in policies(connection) if p[0] == "gasto_insert_solo_backend")
         assert restriction[1] == "RESTRICTIVE" and restriction[3] == "INSERT"
         assert set(restriction[2]) == {"anon", "authenticated"} and restriction[5] == "false"
         for role in ("anon", "authenticated"):
-            assert not connection.execute(
-                "select has_table_privilege(%s,'public.gasto','INSERT')",
-                (role,),
-            ).fetchone()[0]
+            for table in ("gasto", "gasto_concepto", "gasto_comprobante"):
+                for privilege in ("INSERT", "UPDATE", "DELETE"):
+                    assert not connection.execute(
+                        "select has_table_privilege(%s,%s,%s)",
+                        (role, f"public.{table}", privilege),
+                    ).fetchone()[0], (role, table, privilege)
         if installation == "fresh":
             ids = seed(connection)
 
@@ -353,13 +356,43 @@ def test_financial_security_end_to_end(isolated_services, installation):
                                     ).fetchone()[0]
                                     == 1
                                 )
+                        # Quick supplier creation from the expense form (admin only): created and
+                        # assigned to the work in one transaction, then usable right away.
+                        catalog_url = f"/api/v1/works/{ids['work']}/catalog"
+                        assert api.get(catalog_url, headers=headers("operativo")).json()[
+                            "permissions"
+                        ] == {"can_manage_suppliers": False}
+                        assert api.get(catalog_url, headers=headers("admin")).json()[
+                            "permissions"
+                        ] == {"can_manage_suppliers": True}
+                        quick = {"name": "Proveedor imprevisto", "work_id": str(ids["work"])}
+                        assert (
+                            api.post("/api/v1/suppliers", json=quick, headers=headers("operativo"))
+                            .status_code == 403
+                        )
+                        new_supplier = api.post(
+                            "/api/v1/suppliers", json=quick, headers=headers("admin")
+                        )
+                        assert new_supplier.status_code == 201, new_supplier.text
+                        catalog = api.get(catalog_url, headers=headers("operativo")).json()
+                        assert new_supplier.json()["id"] in [s["id"] for s in catalog["suppliers"]]
+                        with_new_supplier = api.post(
+                            "/api/v1/expenses",
+                            json={
+                                **{k: v for k, v in payload.items() if k != "state"},
+                                "supplier_id": new_supplier.json()["id"],
+                            },
+                            headers=headers("operativo"),
+                        )
+                        assert with_new_supplier.status_code == 201, with_new_supplier.text
+                        folios.append(with_new_supplier.json()["folio"])
                         # Folios are server-generated, unique and consecutive after the legacy one.
-                        assert folios == [f"G-{n:05d}" for n in range(2, 8)]
+                        assert folios == [f"G-{n:05d}" for n in range(2, 9)]
                         assert connection.execute(
                             "select count(*) from public.gasto_concepto where gasto_id = %s",
                             (expense_id,),
                         ).fetchone()[0] == 1
-                        # The last expense belongs to operativo; receipt metadata is a fixture.
+                        # The last loop expense belongs to operativo; receipt metadata is a fixture.
                         review_url = f"/api/v1/expenses/{expense_id}/review"
                         assert (
                             api.post(
@@ -546,20 +579,47 @@ def test_financial_security_end_to_end(isolated_services, installation):
                                 "from anon, authenticated"
                             )
 
-                # Existing UPDATE permission/policy still works on the author's pending row.
+                # Direct REST mutations of expenses are closed: not even the author of a
+                # pending row (old gasto_propio_pendiente_update) nor admin (gasto_admin_all).
                 own_pending = connection.execute(
                     "select id from public.gasto "
                     "where creado_por=%s and estado='pendiente' limit 1",
                     (ids["operativo"],),
                 ).fetchone()[0]
-                edited = rest.patch(
-                    "/gasto",
-                    params={"id": f"eq.{own_pending}"},
-                    json={"concepto": "Existing update preserved"},
-                    headers={**headers("operativo"), "Prefer": "return=representation"},
-                )
-                assert edited.status_code == 200 and len(edited.json()) == 1
-                assert edited.json()[0]["concepto"] == "Existing update preserved"
+                before = connection.execute(
+                    "select concepto, importe, eliminado_en from public.gasto where id=%s",
+                    (own_pending,),
+                ).fetchone()
+                for grant in (False, True):
+                    if grant:
+                        # Privileges back on: the restrictive policies must still refuse.
+                        connection.execute(
+                            "grant update, delete on public.gasto to anon, authenticated"
+                        )
+                    try:
+                        for role in ("operativo", "admin"):
+                            auth = {**headers(role), "Prefer": "return=representation"}
+                            target = {"id": f"eq.{own_pending}"}
+                            edited = rest.patch(
+                                "/gasto", params=target, json={"importe": 1}, headers=auth
+                            )
+                            removed = rest.delete("/gasto", params=target, headers=auth)
+                            for response in (edited, removed):
+                                if grant:
+                                    # RLS filters the row out: nothing is changed.
+                                    assert response.status_code == 200, response.text
+                                    assert response.json() == []
+                                else:
+                                    assert response.status_code in (401, 403), response.text
+                                    assert response.json()["code"] == "42501"
+                    finally:
+                        connection.execute(
+                            "revoke update, delete on public.gasto from anon, authenticated"
+                        )
+                assert connection.execute(
+                    "select concepto, importe, eliminado_en from public.gasto where id=%s",
+                    (own_pending,),
+                ).fetchone() == before
                 assert (
                     connection.execute(
                         "select estado from public.gasto where id=%s", (ids["legacy"],)

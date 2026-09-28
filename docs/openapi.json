@@ -1,6 +1,33 @@
 {
   "components": {
     "schemas": {
+      "Body_post_extract_cfdi_api_v1_expenses_extract_xml_post": {
+        "properties": {
+          "file": {
+            "description": "XML del CFDI (factura electrónica)",
+            "format": "binary",
+            "title": "File",
+            "type": "string"
+          },
+          "work_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Work Id"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_post_extract_cfdi_api_v1_expenses_extract_xml_post",
+        "type": "object"
+      },
       "Body_post_extract_csf_api_v1_suppliers_extract_csf_post": {
         "properties": {
           "file": {
@@ -107,6 +134,371 @@
           "file"
         ],
         "title": "Body_preview_neodata_api_v1_neodata_preview_post",
+        "type": "object"
+      },
+      "CfdiConceptOut": {
+        "properties": {
+          "amount": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Amount",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "discount": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Discount",
+            "type": "string"
+          },
+          "iva": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Iva",
+            "type": "string"
+          },
+          "product_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Code"
+          },
+          "quantity": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Quantity",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "unit_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit Code"
+          },
+          "unit_value": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Unit Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "product_code",
+          "quantity",
+          "unit_code",
+          "unit",
+          "description",
+          "unit_value",
+          "discount",
+          "amount",
+          "iva"
+        ],
+        "title": "CfdiConceptOut",
+        "type": "object"
+      },
+      "CfdiExpenseDraft": {
+        "description": "Ready-to-submit expense lines (prices WITH taxes) whose sum equals the CFDI.",
+        "properties": {
+          "amount": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Amount",
+            "type": "string"
+          },
+          "concept": {
+            "title": "Concept",
+            "type": "string"
+          },
+          "iva": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Iva",
+            "type": "string"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/ExpenseLineInput-Output"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "supplier_folio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supplier Folio"
+          }
+        },
+        "required": [
+          "supplier_folio",
+          "concept",
+          "lines",
+          "iva",
+          "amount"
+        ],
+        "title": "CfdiExpenseDraft",
+        "type": "object"
+      },
+      "CfdiExtractionResponse": {
+        "properties": {
+          "concepts": {
+            "items": {
+              "$ref": "#/components/schemas/CfdiConceptOut"
+            },
+            "title": "Concepts",
+            "type": "array"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "discount": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Discount",
+            "type": "string"
+          },
+          "expense": {
+            "$ref": "#/components/schemas/CfdiExpenseDraft"
+          },
+          "folio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Folio"
+          },
+          "issued_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issued At"
+          },
+          "issuer": {
+            "$ref": "#/components/schemas/CfdiIssuer"
+          },
+          "iva": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Iva",
+            "type": "string"
+          },
+          "receiver_rfc": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Receiver Rfc"
+          },
+          "requires_review": {
+            "title": "Requires Review",
+            "type": "boolean"
+          },
+          "series": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Series"
+          },
+          "subtotal": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Subtotal",
+            "type": "string"
+          },
+          "supplier": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CfdiSupplierMatch"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "total": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Total",
+            "type": "string"
+          },
+          "uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uuid"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          },
+          "voucher_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Voucher Type"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          },
+          "withholdings": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Withholdings",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "uuid",
+          "series",
+          "folio",
+          "issued_at",
+          "currency",
+          "voucher_type",
+          "issuer",
+          "receiver_rfc",
+          "concepts",
+          "subtotal",
+          "discount",
+          "iva",
+          "withholdings",
+          "total",
+          "supplier",
+          "expense",
+          "requires_review",
+          "warnings"
+        ],
+        "title": "CfdiExtractionResponse",
+        "type": "object"
+      },
+      "CfdiIssuer": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "rfc": {
+            "title": "Rfc",
+            "type": "string"
+          },
+          "tax_regime": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tax Regime"
+          }
+        },
+        "required": [
+          "rfc",
+          "name",
+          "tax_regime"
+        ],
+        "title": "CfdiIssuer",
+        "type": "object"
+      },
+      "CfdiSupplierMatch": {
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "assigned_to_work": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assigned To Work"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "active",
+          "assigned_to_work"
+        ],
+        "title": "CfdiSupplierMatch",
         "type": "object"
       },
       "CsfExtraction": {
@@ -306,7 +698,7 @@
           },
           "lines": {
             "items": {
-              "$ref": "#/components/schemas/ExpenseLineInput"
+              "$ref": "#/components/schemas/ExpenseLineInput-Input"
             },
             "maxItems": 200,
             "minItems": 1,
@@ -406,7 +798,7 @@
         "title": "ExpenseLine",
         "type": "object"
       },
-      "ExpenseLineInput": {
+      "ExpenseLineInput-Input": {
         "description": "One concept of an expense. Prices include IVA; the server computes the amount.",
         "properties": {
           "description": {
@@ -460,6 +852,47 @@
               }
             ],
             "title": "Unit Price"
+          }
+        },
+        "required": [
+          "quantity",
+          "unit",
+          "description",
+          "unit_price"
+        ],
+        "title": "ExpenseLineInput",
+        "type": "object"
+      },
+      "ExpenseLineInput-Output": {
+        "description": "One concept of an expense. Prices include IVA; the server computes the amount.",
+        "properties": {
+          "description": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "discount": {
+            "default": "0",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,10}|(?=[\\d.]{1,15}0*$)\\d{0,10}\\.\\d{0,4}0*$)",
+            "title": "Discount",
+            "type": "string"
+          },
+          "quantity": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,10}|(?=[\\d.]{1,15}0*$)\\d{0,10}\\.\\d{0,4}0*$)",
+            "title": "Quantity",
+            "type": "string"
+          },
+          "unit": {
+            "maxLength": 40,
+            "minLength": 1,
+            "title": "Unit",
+            "type": "string"
+          },
+          "unit_price": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,10}|(?=[\\d.]{1,15}0*$)\\d{0,10}\\.\\d{0,4}0*$)",
+            "title": "Unit Price",
+            "type": "string"
           }
         },
         "required": [
@@ -686,7 +1119,7 @@
           },
           "lines": {
             "items": {
-              "$ref": "#/components/schemas/ExpenseLineInput"
+              "$ref": "#/components/schemas/ExpenseLineInput-Input"
             },
             "maxItems": 200,
             "minItems": 1,
@@ -1556,6 +1989,18 @@
               }
             ],
             "title": "Whatsapp"
+          },
+          "work_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Work Id"
           }
         },
         "required": [
@@ -2431,6 +2876,66 @@
           }
         },
         "summary": "Post Extract Receipt",
+        "tags": [
+          "expenses"
+        ]
+      }
+    },
+    "/api/v1/expenses/extract-xml": {
+      "post": {
+        "description": "Read a CFDI 3.3/4.0 without AI: issuer, concepts, taxes and a ready expense draft.",
+        "operationId": "post_extract_cfdi_api_v1_expenses_extract_xml_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_post_extract_cfdi_api_v1_expenses_extract_xml_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CfdiExtractionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Extract Cfdi",
         "tags": [
           "expenses"
         ]

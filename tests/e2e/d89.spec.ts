@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { type Locator, expect, test } from '@playwright/test';
 
 const workId = '11111111-1111-4111-8111-111111111111';
 const areaId = '22222222-2222-4222-8222-222222222222';
@@ -110,10 +110,20 @@ test.beforeEach(async ({ page }) => {
     } });
   });
   await page.route(`**/api/v1/works/${workId}/expenses**`, async (route) => {
-    await route.fulfill({ json: { items: [{ id: '44444444-4444-4444-8444-444444444444', area_id: areaId, expense_item_id: expensePartidaId, expense_subitem_id: expenseSubpartidaId, expense_category_id: expenseCategoryId, supplier_id: 'abababab-abab-4bab-8bab-abababababab', proveedor: 'Concretos Toluca', budget_item_id: budgetItemId, fecha: '2026-08-28', concepto: 'Cemento y adhesivo', folio: 'A-1', importe: '4150', comprobante_path: 'receipt.pdf', estado: 'pendiente', area: 'Oficina', area_ruta: ['OFICINA'], partida: 'PRELIMINARES', subpartida: 'LIMPIEZA', categoria: 'MATERIAL', autor: 'Sergio Gómez', motivo_revision: null, creado_por: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', expense_locked: false, can_edit: true, can_cancel: true, can_resubmit: false }], total: 1, page: 1, page_size: 50 } });
+    await route.fulfill({ json: { items: [{ id: '44444444-4444-4444-8444-444444444444', area_id: areaId, expense_item_id: expensePartidaId, expense_subitem_id: expenseSubpartidaId, expense_category_id: expenseCategoryId, supplier_id: 'abababab-abab-4bab-8bab-abababababab', proveedor: 'Concretos Toluca', budget_item_id: budgetItemId, fecha: '2026-08-28', concepto: 'Cemento y adhesivo', folio: 'G-00001', folio_proveedor: 'A-1', importe: '4150', comprobante_path: 'receipt.pdf', estado: 'pendiente', area: 'Oficina', area_ruta: ['OFICINA'], partida: 'PRELIMINARES', subpartida: 'LIMPIEZA', categoria: 'MATERIAL', autor: 'Sergio Gómez', motivo_revision: null, creado_por: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', expense_locked: false, can_edit: true, can_cancel: true, can_resubmit: false }], total: 1, page: 1, page_size: 50 } });
   });
   await page.route(`**/api/v1/works/${workId}/weekly-closes`, async (route) => {
     await route.fulfill({ json: [] });
+  });
+  await page.route('**/api/v1/expenses/44444444-4444-4444-8444-444444444444', async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback();
+    await route.fulfill({ json: {
+      id: '44444444-4444-4444-8444-444444444444', folio: 'G-00001', supplier_folio: 'A-1', work_id: workId,
+      spent_on: '2026-08-28', concept: 'Cemento y adhesivo', subtotal: '3577.5900', iva: '572.4100',
+      amount: '4150.0000', iva_breakdown: true, state: 'pendiente',
+      lines: [{ position: 1, quantity: '10.0000', unit: 'bulto', description: 'Cemento', unit_price: '415.0000', discount: '0.0000', amount: '4150.0000' }],
+      receipts: [{ id: 'aaaa0000-0000-4000-8000-000000000001', path: `${workId}/44444444-4444-4444-8444-444444444444/receipt.pdf`, kind: 'pdf', created_at: '2026-08-28T12:00:00Z' }],
+    } });
   });
   await page.route('**/api/v1/works/*/catalog', async (route) => {
     await route.fulfill({
@@ -124,6 +134,7 @@ test.beforeEach(async ({ page }) => {
         expense_subitems: [{ id: expenseSubpartidaId, partida_id: expensePartidaId, nombre: 'LIMPIEZA' }, { id: secondExpenseSubpartidaId, partida_id: secondExpensePartidaId, nombre: 'FIRMES Y HORMIGONES' }],
         expense_categories: [{ id: expenseCategoryId, nombre: 'MATERIAL' }],
         suppliers: [{ id: supplierId, nombre: 'Concretos Toluca' }],
+        permissions: { can_manage_suppliers: true },
       },
     });
   });
@@ -159,7 +170,7 @@ test.beforeEach(async ({ page }) => {
       safety: '5', work_count: 1, expense_count: 1, validated_spend: '18450',
       assignments: [{ id: 'edededed-eded-4ded-8ded-edededededed', obra_id: workId, obra: 'Infra Toluca', notas: null, activo: true }],
       evaluations: [{ id: 'efefefef-efef-4fef-8fef-efefefefefef', obra_id: workId, obra_nombre: 'Infra Toluca', gasto_id: null, gasto_concepto: null, trabajo: 'Suministro de concreto', fecha_servicio: '2026-08-28', calidad: 5, cumplimiento: 4, costo_valor: 4, comunicacion: 5, seguridad_orden: 5, calificacion: '4.60', comentario: 'Entrega puntual', vigente: true, autor: 'Administrador', motivo_anulacion: null }],
-      expenses: [{ id: '44444444-4444-4444-8444-444444444444', obra_id: workId, obra: 'Infra Toluca', fecha: '2026-08-28', concepto: 'Cemento y adhesivo', folio: 'A-1', importe: '18450', estado: 'validado' }],
+      expenses: [{ id: '44444444-4444-4444-8444-444444444444', obra_id: workId, obra: 'Infra Toluca', fecha: '2026-08-28', concepto: 'Cemento y adhesivo', folio: 'G-00001', folio_proveedor: 'A-1', importe: '18450', estado: 'validado' }],
       permissions: { can_manage: true },
     } });
   });
@@ -248,19 +259,40 @@ test('portal admin prepara preview NEODATA sin confirmar', async ({ page }) => {
   await expect(page.getByRole('status')).toContainText('1 corrección');
 });
 
-test('/gastos usa el formulario unificado y no duplica el gasto al reintentar la subida', async ({ page }) => {
+/** MIME of the file part inside storage-js' multipart body (what Storage validates). */
+function uploadedPartType(body: Buffer | null): string | undefined {
+  return /content-type:\s*([^\r\n;]+)/i.exec(body?.toString('latin1') || '')?.[1];
+}
+
+type LineInput = { quantity?: string; unit?: string; description: string; price: string; discount?: string; taxable?: boolean };
+
+/** Fill the multi-concept editor; adds rows as needed. */
+async function fillLines(form: Locator, lines: LineInput[]) {
+  for (const [index, line] of lines.entries()) {
+    const n = index + 1;
+    if (index > 0) await form.getByRole('button', { name: '+ Agregar concepto' }).click();
+    await form.getByLabel(`Cantidad concepto ${n}`).fill(line.quantity ?? '1');
+    await form.getByLabel(`Unidad concepto ${n}`).fill(line.unit ?? 'pieza');
+    await form.getByLabel(`Descripción concepto ${n}`).fill(line.description);
+    await form.getByLabel(`Precio unitario concepto ${n}`).fill(line.price);
+    if (line.discount) await form.getByLabel(`Descuento concepto ${n}`).fill(line.discount);
+    if (line.taxable === false) await form.getByLabel(`IVA concepto ${n}`).uncheck();
+  }
+}
+
+test('/gastos: multi-concepto con totales en vivo, exentos y varios comprobantes sin duplicar el gasto', async ({ page }) => {
   const expenseId = '44444444-4444-4444-8444-444444444444';
   const payloads: Record<string, unknown>[] = [];
-  let uploads = 0;
+  const uploads: { path: string; type: string | undefined }[] = [];
   let links = 0;
   await page.route('**/api/v1/expenses', async (route) => {
     payloads.push(route.request().postDataJSON());
     await route.fulfill({ status: 201, json: { id: expenseId } });
   });
   await page.route('**/storage/v1/object/comprobantes/**', async (route) => {
-    uploads += 1;
-    if (uploads === 1) await route.fulfill({ status: 500, json: { message: 'Fallo simulado de subida' } });
-    else await route.fulfill({ json: { Key: 'comprobantes/receipt.png' } });
+    uploads.push({ path: decodeURIComponent(new URL(route.request().url()).pathname), type: uploadedPartType(route.request().postDataBuffer()) });
+    if (uploads.length === 1) await route.fulfill({ status: 500, json: { message: 'Fallo simulado de subida' } });
+    else await route.fulfill({ json: { Key: 'ok' } });
   });
   await page.route(`**/api/v1/expenses/${expenseId}/receipt`, async (route) => {
     links += 1;
@@ -271,27 +303,50 @@ test('/gastos usa el formulario unificado y no duplica el gasto al reintentar la
   await page.goto('/gastos');
   const form = page.locator('form.work-expense-form');
   await expect(form.getByLabel('Buscar área NEODATA')).toBeVisible();
-  await expect(form.getByLabel('Partida NEODATA')).toBeVisible();
-  const partida = form.getByLabel('Partida', { exact: true });
-  const subpartida = form.getByLabel('Subpartida', { exact: true });
-  await expect(partida).toHaveValue(expensePartidaId);
-  await partida.selectOption(secondExpensePartidaId);
-  await expect(subpartida).toHaveValue(secondExpenseSubpartidaId);
-  await form.getByLabel('Importe').fill('18450');
-  await form.getByLabel('Concepto').fill('Cemento y adhesivo para firme de oficina');
-  await form.getByLabel('Comprobante').setInputFiles({
-    name: 'receipt.png', mimeType: 'image/png', buffer: Buffer.from('test-image'),
-  });
+  await form.getByLabel('Partida', { exact: true }).selectOption(secondExpensePartidaId);
+  await expect(form.getByLabel('Subpartida', { exact: true })).toHaveValue(secondExpenseSubpartidaId);
+  await fillLines(form, [
+    { quantity: '10', unit: 'bulto', description: 'Cemento gris 50 kg', price: '100' },
+    { unit: 'servicio', description: 'Flete', price: '250.50', discount: '0.50' },
+    { description: 'Concepto que se quitará', price: '999' },
+    { description: 'Libro técnico', price: '100', taxable: false },
+  ]);
+  await form.getByLabel('Quitar concepto 3').click();
+  await expect(form.getByLabel('Descripción concepto 3')).toHaveValue('Libro técnico');
+  // 1000 + 250 + 100 = 1350; IVA only on the taxable 1250 (16 % incluido) = 172.41.
+  await expect(form.getByTestId('line-amount-2')).toContainText('$250.00');
+  await expect(form.getByTestId('expense-total')).toHaveText('$1,350.00');
+  await expect(form.getByTestId('expense-iva')).toHaveText('$172.41');
+  await expect(form.getByTestId('expense-subtotal')).toHaveText('$1,177.59');
+  await form.getByLabel('Folio del proveedor').fill('F-889');
+  await form.getByLabel('Concepto general').fill('Material y flete para firme de oficina');
+  await form.getByLabel('Comprobantes', { exact: true }).setInputFiles([
+    { name: 'factura.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.7') },
+    { name: 'foto.png', mimeType: 'image/png', buffer: Buffer.from('png') },
+  ]);
   await form.getByRole('button', { name: /Guardar pendiente/ }).click();
-  await expect(form.getByRole('alert')).toContainText('Reintenta sólo el comprobante');
-  await form.getByRole('button', { name: 'Reintentar comprobante' }).click();
-  await expect(page.getByRole('status')).toContainText('Gasto guardado como pendiente');
+  await expect(form.getByRole('alert')).toContainText('Reintenta sólo los comprobantes pendientes');
+  await form.getByRole('button', { name: 'Reintentar comprobantes (1)' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Gasto guardado como pendiente' })).toBeVisible();
   expect(payloads).toHaveLength(1);
-  expect(payloads[0]).toMatchObject({ work_id: workId, expense_item_id: secondExpensePartidaId });
+  expect(payloads[0]).toMatchObject({
+    work_id: workId, expense_item_id: secondExpensePartidaId, supplier_folio: 'F-889', iva: '172.41',
+    concept: 'Material y flete para firme de oficina',
+    lines: [
+      { quantity: '10', unit: 'bulto', description: 'Cemento gris 50 kg', unit_price: '100', discount: '0' },
+      { quantity: '1', unit: 'servicio', description: 'Flete', unit_price: '250.50', discount: '0.50' },
+      { quantity: '1', unit: 'pieza', description: 'Libro técnico', unit_price: '100', discount: '0' },
+    ],
+  });
+  expect(payloads[0]).not.toHaveProperty('amount');
   expect(payloads[0]).not.toHaveProperty('state');
-  expect(uploads).toBe(2);
-  expect(links).toBe(1);
-  await expect(form.getByLabel('Importe')).toBeEmpty();
+  // 2 files; the PDF upload failed once. A failed file does not block the others (the
+  // image still uploads), and the retry re-uploads only the PDF: 3 uploads, 2 links.
+  expect(uploads).toHaveLength(3);
+  expect(uploads.map((upload) => upload.type)).toEqual(['application/pdf', 'image/png', 'application/pdf']);
+  expect(links).toBe(2);
+  await expect(form.getByLabel('Descripción concepto 1')).toBeEmpty();
+  await expect(form.getByTestId('expense-total')).toHaveText('$0.00');
 });
 
 for (const failure of ['upload', 'link'] as const) {
@@ -331,9 +386,9 @@ for (const failure of ['upload', 'link'] as const) {
     await page.goto(`/obras/${workId}/gastos`);
     await page.getByRole('button', { name: 'Nuevo gasto', exact: true }).click();
     const form = page.locator('form.work-expense-form');
-    await form.getByLabel('Importe').fill('321.00');
-    await form.getByLabel('Concepto').fill('Gasto que sólo debe crearse una vez');
-    await form.getByLabel('Comprobante').setInputFiles({
+    await fillLines(form, [{ description: 'Material único', price: '321.00' }]);
+    await form.getByLabel('Concepto general').fill('Gasto que sólo debe crearse una vez');
+    await form.getByLabel('Comprobantes', { exact: true }).setInputFiles({
       name: 'receipt.png', mimeType: 'image/png', buffer: Buffer.from('test-image'),
     });
     try {
@@ -345,43 +400,32 @@ for (const failure of ['upload', 'link'] as const) {
       await expect.poll(() => creations).toBe(1);
       await expect(form.getByRole('button', { name: 'Guardando…' })).toBeDisabled();
       await expect(form.getByRole('button', { name: 'Cancelar', exact: true })).toBeDisabled();
-      await expect(form.getByLabel('Importe')).toBeDisabled();
-      await expect(form.getByLabel('Comprobante')).toBeDisabled();
+      await expect(form.getByLabel('Precio unitario concepto 1')).toBeDisabled();
+      await expect(form.getByLabel('Comprobantes', { exact: true })).toBeDisabled();
     } finally {
       releaseCreation();
     }
     await expect(form.getByRole('alert')).toContainText('El gasto ya está guardado');
-    await expect(form.getByRole('alert')).toContainText('Reintenta sólo el comprobante');
-    await expect(form.getByLabel('Importe')).toHaveValue('321.00');
-    await expect(form.getByLabel('Concepto')).toHaveValue('Gasto que sólo debe crearse una vez');
-    await expect(form.getByLabel('Importe')).toBeDisabled();
+    await expect(form.getByRole('alert')).toContainText('Reintenta sólo los comprobantes pendientes');
+    // Header and concepts are frozen (already saved) but keep their values.
+    await expect(form.getByLabel('Precio unitario concepto 1')).toHaveValue('321.00');
+    await expect(form.getByLabel('Precio unitario concepto 1')).toBeDisabled();
+    await expect(form.getByLabel('Concepto general')).toHaveValue('Gasto que sólo debe crearse una vez');
+    await expect(form.getByText(failure === 'link' ? 'Error: Fallo simulado de vinculación' : 'Error: Fallo simulado de subida')).toBeVisible();
     expect(creations).toBe(1);
-    if (failure === 'link') {
-      await expect(form.getByLabel('Comprobante')).toBeDisabled();
-    } else {
-      await expect(form.getByLabel('Comprobante')).toBeEnabled();
-      // Clearing the file cannot silently finish a partially saved operation.
-      await form.getByLabel('Comprobante').setInputFiles([]);
-      await form.getByRole('button', { name: 'Reintentar comprobante' }).click();
-      await expect(form).toBeVisible();
-      expect(uploads).toBe(1);
-      await form.getByLabel('Comprobante').setInputFiles({
-        name: 'receipt.png', mimeType: 'image/png', buffer: Buffer.from('test-image'),
-      });
-    }
-    await form.getByRole('button', { name: 'Reintentar comprobante' }).click();
+    await form.getByRole('button', { name: 'Reintentar comprobantes (1)' }).click();
     await expect(form).toHaveCount(0);
-    await expect(page.getByRole('status')).toContainText('Gasto guardado como pendiente');
+    await expect(page.getByRole('status').filter({ hasText: 'Gasto guardado como pendiente' })).toBeVisible();
     expect(creations).toBe(1);
     expect(uploads).toBe(failure === 'upload' ? 2 : 1);
     expect(links).toBe(failure === 'link' ? 2 : 1);
     expect(new Set(linkedPaths).size).toBe(1);
     expect(linkedPaths[0]).toContain(`/${expenseId}/`);
     await page.getByRole('button', { name: 'Nuevo gasto', exact: true }).click();
-    await expect(form.getByLabel('Importe')).toBeEmpty();
-    await expect(form.getByLabel('Concepto')).toBeEmpty();
-    await form.getByLabel('Importe').fill('99');
-    await form.getByLabel('Concepto').fill('Otro gasto intencional');
+    await expect(form.getByLabel('Descripción concepto 1')).toBeEmpty();
+    await expect(form.getByLabel('Concepto general')).toBeEmpty();
+    await fillLines(form, [{ description: 'Otro', price: '99' }]);
+    await form.getByLabel('Concepto general').fill('Otro gasto intencional');
     await form.getByRole('button', { name: 'Guardar pendiente' }).click();
     await expect(form).toHaveCount(0);
     expect(creations).toBe(2);
@@ -400,20 +444,40 @@ test('gasto: error al crear conserva datos editables para reintentar', async ({ 
   await page.goto(`/obras/${workId}/gastos`);
   await page.getByRole('button', { name: 'Nuevo gasto', exact: true }).click();
   const form = page.locator('form.work-expense-form');
-  await form.getByLabel('Importe').fill('100');
-  await form.getByLabel('Concepto').fill('Intento no guardado');
+  await fillLines(form, [{ description: 'Arena', price: '100' }]);
+  await form.getByLabel('Concepto general').fill('Intento no guardado');
   await form.getByRole('button', { name: 'Guardar pendiente' }).click();
   await expect(form.getByRole('alert')).toHaveText('Alta no disponible');
-  await expect(form.getByLabel('Importe')).toBeEnabled();
-  await expect(form.getByLabel('Importe')).toHaveValue('100');
+  await expect(form.getByLabel('Precio unitario concepto 1')).toBeEnabled();
+  await expect(form.getByLabel('Precio unitario concepto 1')).toHaveValue('100');
   await form.getByRole('button', { name: 'Guardar pendiente' }).click();
   await expect(form).toHaveCount(0);
   expect(creations).toBe(2);
 });
 
-test('gasto: corregir y reintentar comprobante no repite la edición ni crea otro gasto', async ({ page }) => {
+test('gasto: renglón inválido no se envía y se explica', async ({ page }) => {
+  let creations = 0;
+  await page.route('**/api/v1/expenses', async (route) => {
+    creations += 1;
+    await route.fulfill({ status: 201, json: { id: '44444444-4444-4444-8444-444444444444' } });
+  });
+  await login(page);
+  await page.goto('/gastos');
+  const form = page.locator('form.work-expense-form');
+  await fillLines(form, [{ quantity: '2', description: 'Tubo', price: '10', discount: '25' }]);
+  await form.getByLabel('Concepto general').fill('Descuento imposible');
+  await expect(form.getByRole('alert')).toContainText('un descuento que no supere cantidad × precio');
+  await expect(form.getByTestId('line-amount-1')).toContainText('—');
+  await expect(form.getByRole('button', { name: 'Guardar pendiente' })).toBeDisabled();
+  await form.getByLabel('Descuento concepto 1').fill('5');
+  await expect(form.getByTestId('line-amount-1')).toContainText('$15.00');
+  await expect(form.getByRole('button', { name: 'Guardar pendiente' })).toBeEnabled();
+  expect(creations).toBe(0);
+});
+
+test('gasto: corregir carga los conceptos, conserva comprobantes y reintenta sin repetir la edición', async ({ page }) => {
   const expenseId = '44444444-4444-4444-8444-444444444444';
-  let updates = 0;
+  const updates: Record<string, unknown>[] = [];
   let creations = 0;
   let uploads = 0;
   await page.route('**/api/v1/expenses', async (route) => {
@@ -421,8 +485,9 @@ test('gasto: corregir y reintentar comprobante no repite la edición ni crea otr
     await route.fulfill({ status: 500, json: { detail: 'No debe crear al editar' } });
   });
   await page.route(`**/api/v1/expenses/${expenseId}`, async (route) => {
+    if (route.request().method() === 'GET') return route.fallback();
     expect(route.request().method()).toBe('PATCH');
-    updates += 1;
+    updates.push(route.request().postDataJSON());
     await route.fulfill({ json: { id: expenseId } });
   });
   await page.route('**/storage/v1/object/comprobantes/**', async (route) => {
@@ -438,19 +503,200 @@ test('gasto: corregir y reintentar comprobante no repite la edición ni crea otr
   await page.goto(`/obras/${workId}/gastos`);
   await page.getByRole('button', { name: 'Editar', exact: true }).click();
   const form = page.locator('form.work-expense-form');
-  await form.getByLabel('Concepto').fill('Concepto corregido');
-  await form.getByLabel('Comprobante').setInputFiles({
-    name: 'receipt.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-test'),
+  await expect(form.getByRole('heading', { name: 'Corregir gasto G-00001' })).toBeVisible();
+  await expect(form.getByLabel('Cantidad concepto 1')).toHaveValue('10');
+  await expect(form.getByLabel('Precio unitario concepto 1')).toHaveValue('415');
+  await expect(form.getByLabel('IVA concepto 1')).toBeChecked();
+  await expect(form.getByLabel('Folio del proveedor')).toHaveValue('A-1');
+  await expect(form.getByTestId('expense-total')).toHaveText('$4,150.00');
+  await expect(form.getByText('Ya vinculado')).toBeVisible();
+  await form.getByLabel('Concepto general').fill('Concepto corregido');
+  await form.getByLabel('Comprobantes', { exact: true }).setInputFiles({
+    name: 'cfdi-complemento.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-test'),
   });
   await form.getByRole('button', { name: 'Guardar corrección' }).click();
   await expect(form.getByRole('alert')).toContainText('El gasto ya está guardado');
-  await expect(form.getByLabel('Concepto')).toHaveValue('Concepto corregido');
-  await form.getByRole('button', { name: 'Reintentar comprobante' }).click();
+  await expect(form.getByLabel('Concepto general')).toHaveValue('Concepto corregido');
+  await form.getByRole('button', { name: 'Reintentar comprobantes (1)' }).click();
   await expect(form).toHaveCount(0);
-  await expect(page.getByRole('status')).toContainText('Gasto corregido correctamente');
-  expect(updates).toBe(1);
+  await expect(page.getByRole('status').filter({ hasText: 'Gasto corregido correctamente' })).toBeVisible();
+  expect(updates).toHaveLength(1);
+  expect(updates[0]).toMatchObject({
+    concept: 'Concepto corregido', supplier_folio: 'A-1', iva: null,
+    lines: [{ quantity: '10', unit: 'bulto', description: 'Cemento', unit_price: '415', discount: '0' }],
+  });
   expect(uploads).toBe(2);
   expect(creations).toBe(0);
+});
+
+const cfdiResult = {
+  version: '4.0', uuid: '6F1A2B3C-4D5E-4F60-8A9B-0C1D2E3F4A5B', series: 'A', folio: '123',
+  issued_at: '2026-09-20T10:00:00', currency: 'MXN', voucher_type: 'I',
+  issuer: { rfc: 'NPR990101AB1', name: 'NUEVO PROVEEDOR SA DE CV', tax_regime: '601' },
+  receiver_rfc: 'GOVS800101AB1',
+  concepts: [
+    { product_code: '30111601', quantity: '10', unit_code: 'H87', unit: null, description: 'Cemento gris', unit_value: '100', discount: '0', amount: '1000', iva: '160' },
+    { product_code: '78101802', quantity: '1', unit_code: 'E48', unit: null, description: 'Flete', unit_value: '250.50', discount: '0', amount: '250.50', iva: '40.08' },
+  ],
+  subtotal: '1250.50', discount: '0', iva: '200.08', withholdings: '0', total: '1450.58',
+  supplier: null,
+  expense: {
+    supplier_folio: 'A-123', concept: 'CFDI A-123 · NUEVO PROVEEDOR SA DE CV', iva: '200.08', amount: '1450.58',
+    lines: [
+      { quantity: '10.0000', unit: 'pieza', description: 'Cemento gris', unit_price: '116.0000', discount: '0.00' },
+      { quantity: '1.0000', unit: 'servicio', description: 'Flete', unit_price: '290.5800', discount: '0.00' },
+    ],
+  },
+  requires_review: true, warnings: ['Advertencia de ejemplo para revisión humana.'],
+};
+
+test('CFDI: el XML se lee sin IA, llena conceptos e IVA, y el emisor se da de alta sin enviar el gasto', async ({ page }) => {
+  const newSupplierId = 'cfcfcfcf-cfcf-4fcf-8fcf-cfcfcfcfcfcf';
+  const xmlBodies: string[] = [];
+  const supplierPayloads: Record<string, unknown>[] = [];
+  const created: Record<string, unknown>[] = [];
+  const uploads: { path: string; type: string | undefined }[] = [];
+  await page.route('**/api/v1/expenses/extract-xml', async (route) => {
+    xmlBodies.push(route.request().postDataBuffer()?.toString('latin1') || '');
+    await route.fulfill({ json: cfdiResult });
+  });
+  await page.route('**/api/v1/suppliers', async (route) => {
+    supplierPayloads.push(route.request().postDataJSON());
+    await route.fulfill({ status: 201, json: { id: newSupplierId, nombre: 'Nuevo Proveedor', activo: true } });
+  });
+  await page.route('**/api/v1/expenses', async (route) => {
+    created.push(route.request().postDataJSON());
+    await route.fulfill({ status: 201, json: { id: '44444444-4444-4444-8444-444444444444' } });
+  });
+  await page.route('**/storage/v1/object/comprobantes/**', async (route) => {
+    uploads.push({ path: decodeURIComponent(new URL(route.request().url()).pathname), type: uploadedPartType(route.request().postDataBuffer()) });
+    await route.fulfill({ json: { Key: 'ok' } });
+  });
+  await page.route('**/api/v1/expenses/44444444-4444-4444-8444-444444444444/receipt', async (route) => {
+    await route.fulfill({ json: { id: '44444444-4444-4444-8444-444444444444' } });
+  });
+
+  await login(page);
+  await page.goto('/gastos');
+  const form = page.locator('form.work-expense-form');
+  await form.getByLabel('Comprobantes', { exact: true }).setInputFiles([
+    { name: 'factura.xml', mimeType: '', buffer: Buffer.from('<cfdi:Comprobante/>') },
+    { name: 'factura.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.7') },
+  ]);
+  const summary = form.getByRole('region', { name: 'Datos del CFDI' });
+  await expect(summary).toContainText('NUEVO PROVEEDOR SA DE CV');
+  await expect(summary).toContainText('$1,450.58');
+  await expect(summary).toContainText('Advertencia de ejemplo');
+  expect(xmlBodies[0]).toContain('name="work_id"');
+  await expect(summary).toContainText('no está en el directorio');
+
+  await summary.getByRole('button', { name: 'Usar datos del CFDI' }).click();
+  await expect(form.getByLabel('Descripción concepto 2')).toHaveValue('Flete');
+  await expect(form.getByLabel('Precio unitario concepto 1')).toHaveValue('116');
+  await expect(form.getByTestId('expense-total')).toHaveText('$1,450.58');
+  await expect(form.getByTestId('expense-iva')).toHaveText('$200.08');
+  await expect(form.getByText('IVA (CFDI)')).toBeVisible();
+  await expect(form.getByLabel('Folio del proveedor')).toHaveValue('A-123');
+  await expect(form.getByLabel('Concepto general')).toHaveValue('CFDI A-123 · NUEVO PROVEEDOR SA DE CV');
+  await expect(form.getByLabel('Fecha')).toHaveValue('2026-09-20');
+
+  // Quick supplier creation prefilled from the CFDI issuer, in a portaled modal.
+  await summary.getByRole('button', { name: 'Dar de alta con los datos del CFDI' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Alta de proveedor' });
+  await expect(dialog.getByLabel('RFC')).toHaveValue('NPR990101AB1');
+  await expect(dialog.getByLabel('Nombre comercial')).toHaveValue('NUEVO PROVEEDOR SA DE CV');
+  await dialog.getByLabel('Nombre comercial').fill('Nuevo Proveedor');
+  // Enter inside the modal submits the modal only, never the enclosing expense form.
+  await dialog.getByLabel('Nombre comercial').press('Enter');
+  await expect(dialog).toHaveCount(0);
+  expect(created).toHaveLength(0);
+  expect(supplierPayloads).toHaveLength(1);
+  expect(supplierPayloads[0]).toMatchObject({ name: 'Nuevo Proveedor', tax_id: 'NPR990101AB1', work_id: workId });
+  await expect(form.getByLabel('Proveedor', { exact: true })).toHaveValue(newSupplierId);
+
+  await form.getByRole('button', { name: /Guardar pendiente/ }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Gasto guardado como pendiente' })).toBeVisible();
+  expect(created).toHaveLength(1);
+  expect(created[0]).toMatchObject({
+    supplier_id: newSupplierId, supplier_folio: 'A-123', iva: '200.08',
+    lines: [
+      { quantity: '10', unit: 'pieza', description: 'Cemento gris', unit_price: '116', discount: '0' },
+      { quantity: '1', unit: 'servicio', description: 'Flete', unit_price: '290.58', discount: '0' },
+    ],
+  });
+  // The XML is stored with an allowed MIME even if the browser reported none.
+  expect(uploads.map((upload) => [upload.path.split('-').pop(), upload.type])).toEqual([
+    ['factura.xml', 'application/xml'], ['factura.pdf', 'application/pdf'],
+  ]);
+});
+
+test('CFDI: editar un concepto recalcula el IVA con la regla del 16 %', async ({ page }) => {
+  await page.route('**/api/v1/expenses/extract-xml', async (route) => {
+    await route.fulfill({ json: { ...cfdiResult, supplier: { id: supplierId, name: 'Concretos Toluca', active: true, assigned_to_work: true }, warnings: [], requires_review: false } });
+  });
+  await login(page);
+  await page.goto('/gastos');
+  const form = page.locator('form.work-expense-form');
+  await form.getByLabel('Comprobantes', { exact: true }).setInputFiles({ name: 'f.xml', mimeType: 'text/xml', buffer: Buffer.from('<x/>') });
+  const summary = form.getByRole('region', { name: 'Datos del CFDI' });
+  await expect(summary).toContainText('Proveedor encontrado: Concretos Toluca');
+  await summary.getByRole('button', { name: 'Usar datos del CFDI' }).click();
+  await expect(form.getByLabel('Proveedor', { exact: true })).toHaveValue(supplierId);
+  await expect(form.getByTestId('expense-iva')).toHaveText('$200.08');
+  await form.getByLabel('Cantidad concepto 2').fill('2');
+  await expect(form.getByText('IVA (CFDI)')).toHaveCount(0);
+  // 1160 + 581.16 = 1741.16 → IVA incluido 16 % = 240.16.
+  await expect(form.getByTestId('expense-total')).toHaveText('$1,741.16');
+  await expect(form.getByTestId('expense-iva')).toHaveText('$240.16');
+});
+
+test('alta rápida de proveedor desde el selector y permisos de operativo', async ({ page }) => {
+  const newSupplierId = 'dededede-dede-4ede-8ede-dededededede';
+  let expenseCreations = 0;
+  await page.route('**/api/v1/suppliers', async (route) => {
+    expect(route.request().postDataJSON()).toMatchObject({ name: 'Herrería Rápida', work_id: workId });
+    await route.fulfill({ status: 201, json: { id: newSupplierId, nombre: 'Herrería Rápida', activo: true } });
+  });
+  await page.route('**/api/v1/expenses', async (route) => {
+    expenseCreations += 1;
+    await route.fulfill({ status: 201, json: { id: '44444444-4444-4444-8444-444444444444' } });
+  });
+  await login(page);
+  await page.goto('/gastos');
+  const form = page.locator('form.work-expense-form');
+  const supplier = form.getByLabel('Proveedor', { exact: true });
+  await supplier.selectOption({ label: '+ Nuevo proveedor' });
+  await expect(supplier).toHaveValue(supplierId); // selection kept while the modal is open
+  const dialog = page.getByRole('dialog', { name: 'Alta de proveedor' });
+  await expect(dialog.getByLabel('Auto-rellenar desde Constancia (PDF)')).toBeVisible();
+  await dialog.getByLabel('Nombre comercial').fill('Herrería Rápida');
+  await dialog.getByRole('button', { name: 'Crear proveedor' }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(supplier).toHaveValue(newSupplierId);
+  await expect(supplier.locator('option', { hasText: 'Herrería Rápida' })).toHaveCount(1);
+  expect(expenseCreations).toBe(0);
+
+  // Operativo: the catalog says no supplier management, so the option is not offered.
+  await page.route('**/api/v1/works/*/catalog', async (route) => {
+    const response = await route.fetch();
+    const json = await response.json();
+    await route.fulfill({ json: { ...json, permissions: { can_manage_suppliers: false } } });
+  });
+  await page.reload();
+  await expect(form.getByLabel('Proveedor', { exact: true }).locator('option', { hasText: '+ Nuevo proveedor' })).toHaveCount(0);
+});
+
+test('comprobantes: formatos no permitidos se rechazan sin agregarse', async ({ page }) => {
+  await login(page);
+  await page.goto('/gastos');
+  const form = page.locator('form.work-expense-form');
+  await form.getByLabel('Comprobantes', { exact: true }).setInputFiles([
+    { name: 'virus.exe', mimeType: 'application/octet-stream', buffer: Buffer.from('MZ') },
+    { name: 'ok.jpg', mimeType: 'image/jpeg', buffer: Buffer.from('jpg') },
+  ]);
+  await expect(form.getByRole('alert')).toContainText('virus.exe: formato no permitido');
+  await expect(form.locator('.receipt-list li')).toHaveCount(1);
+  await expect(form.locator('.receipt-list')).toContainText('ok.jpg');
 });
 
 test('cierre semanal navega el historial, cierra y reabre con evidencia', async ({ page }) => {
@@ -749,7 +995,7 @@ test('Jev: foto del ticket, corrección conversacional y guardado con el ticket 
   await expect(assistant.getByRole('cell', { name: 'Cemento blanco' })).toBeVisible();
   await expect(assistant.getByText('Revisa antes de guardar.')).toBeVisible();
   await expect(assistant.getByText(/no coincide con el total/)).toBeVisible();
-  await expect(form.getByText('Se adjuntará la foto del ticket (ticket.jpg)')).toBeVisible();
+  await expect(form.locator('.receipt-list')).toContainText('ticket.jpg · foto del ticket');
 
   const chat = assistant.getByLabel('Corrección para Jev');
   await chat.fill('El segundo concepto es pintura, no cemento, y cuesta 250.50');
@@ -767,13 +1013,19 @@ test('Jev: foto del ticket, corrección conversacional y guardado con el ticket 
   await expect(assistant.getByText('Cambié el segundo concepto a pintura vinílica de $250.50.')).toBeVisible();
   expect(jevBodies[0].instruction).toBe('El segundo concepto es pintura, no cemento, y cuesta 250.50');
   expect(jevBodies[0].extraction.conceptos[1].descripcion).toBe('Cemento blanco');
-  await expect(save).toBeEnabled();
+  await expect(chat).toBeEnabled();
+  // No concepts yet: saving waits until the user applies (or types) valid lines.
+  await expect(save).toBeDisabled();
 
   await assistant.getByRole('button', { name: 'Usar en el formulario' }).click();
-  await expect(form.getByLabel('Importe')).toHaveValue('1250.50');
-  await expect(form.getByLabel('Concepto')).toHaveValue('10 × Cemento gris 50 kg; 1 × Pintura vinílica');
+  await expect(form.getByLabel('Cantidad concepto 1')).toHaveValue('10');
+  await expect(form.getByLabel('Descripción concepto 2')).toHaveValue('Pintura vinílica');
+  await expect(form.getByLabel('Precio unitario concepto 2')).toHaveValue('250.5');
+  await expect(form.getByTestId('expense-total')).toHaveText('$1,250.50');
+  await expect(form.getByLabel('Concepto general')).toHaveValue('10 × Cemento gris 50 kg; 1 × Pintura vinílica');
+  await expect(save).toBeEnabled();
   // Manual fallback: the regular fields stay editable after applying Jev's result.
-  await form.getByLabel('Concepto').fill('Cemento y pintura para oficina');
+  await form.getByLabel('Concepto general').fill('Cemento y pintura para oficina');
   // With a complete, valid form, Enter in the chat must never submit the expense: neither
   // when the text is too short to reach Jev (nothing gets disabled) nor when it is sent.
   await chat.fill('x');
@@ -788,21 +1040,27 @@ test('Jev: foto del ticket, corrección conversacional y guardado con el ticket 
   await expect(assistant.getByText('Cambié el segundo concepto', { exact: false })).toHaveCount(2);
   expect(created).toHaveLength(0);
   // A new Jev answer does not overwrite what the user typed in the form.
-  await expect(form.getByLabel('Concepto')).toHaveValue('Cemento y pintura para oficina');
+  await expect(form.getByLabel('Concepto general')).toHaveValue('Cemento y pintura para oficina');
   await save.click();
   await expect(form).toHaveCount(0);
-  await expect(page.getByRole('status')).toContainText('Gasto guardado como pendiente');
+  await expect(page.getByRole('status').filter({ hasText: 'Gasto guardado como pendiente' })).toBeVisible();
   expect(created).toHaveLength(1);
-  expect(created[0]).toMatchObject({ work_id: workId, amount: '1250.50', concept: 'Cemento y pintura para oficina' });
+  expect(created[0]).toMatchObject({
+    work_id: workId, concept: 'Cemento y pintura para oficina', iva: null,
+    lines: [
+      { quantity: '10', unit: 'pieza', description: 'Cemento gris 50 kg', unit_price: '100', discount: '0' },
+      { quantity: '1', unit: 'pieza', description: 'Pintura vinílica', unit_price: '250.5', discount: '0' },
+    ],
+  });
   expect(created[0]).not.toHaveProperty('state');
   expect(uploads).toHaveLength(1);
   expect(uploads[0]).toContain(`/${workId}/${expenseId}/`);
   expect(uploads[0]).toMatch(/ticket\.jpg$/);
   expect(links).toHaveLength(1);
-  expect(links[0]).toMatch(new RegExp(`^${workId}/${expenseId}/\\d+-ticket\\.jpg$`));
+  expect(links[0]).toMatch(new RegExp(`^${workId}/${expenseId}/\\d+-receipt-\\d+-ticket\\.jpg$`));
 });
 
-test('Jev: si la IA está caída se captura a mano y un comprobante elegido reemplaza la foto', async ({ page }) => {
+test('Jev: si la IA está caída se captura a mano; la foto se puede quitar y se suben los comprobantes elegidos', async ({ page }) => {
   const expenseId = '46464646-4646-4646-8646-464646464646';
   const uploads: string[] = [];
   let created = 0;
@@ -830,13 +1088,16 @@ test('Jev: si la IA está caída se captura a mano y un comprobante elegido reem
   await expect(alert).toContainText('El servicio de IA no está disponible');
   await expect(alert).toContainText('Puedes capturar los datos manualmente');
   await expect(form.getByLabel('Corrección para Jev')).toHaveCount(0);
-  await form.getByLabel('Importe').fill('80');
-  await form.getByLabel('Concepto').fill('Clavos, capturado a mano');
-  await form.getByLabel('Comprobante').setInputFiles({
+  await fillLines(form, [{ quantity: '2', unit: 'kg', description: 'Clavos', price: '40' }]);
+  await form.getByLabel('Concepto general').fill('Clavos, capturado a mano');
+  // The photo stays as a receipt even if the AI failed; the user may remove it.
+  await expect(form.locator('.receipt-list')).toContainText('ticket.png · foto del ticket');
+  await form.getByRole('button', { name: 'Quitar ticket.png' }).click();
+  await form.getByLabel('Comprobantes', { exact: true }).setInputFiles({
     name: 'factura.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.7'),
   });
   await form.getByRole('button', { name: /Guardar pendiente/ }).click();
-  await expect(page.getByRole('status')).toContainText('Gasto guardado como pendiente');
+  await expect(page.getByRole('status').filter({ hasText: 'Gasto guardado como pendiente' })).toBeVisible();
   expect(created).toBe(1);
   expect(uploads).toHaveLength(1);
   expect(uploads[0]).toMatch(/factura\.pdf$/);
@@ -855,7 +1116,7 @@ test('Jev: un archivo que no es imagen se rechaza sin llamar a la IA', async ({ 
     name: 'ticket.gif', mimeType: 'image/gif', buffer: Buffer.from('GIF89a'),
   });
   await expect(form.getByRole('alert')).toContainText('JPEG, PNG o WebP');
-  await expect(form.getByText(/Se adjuntará la foto del ticket/)).toHaveCount(0);
+  await expect(form.locator('.receipt-list')).toHaveCount(0);
   expect(calls).toBe(0);
 });
 

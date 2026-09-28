@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { AppShell } from './app-shell';
 import { ArrowIcon, PlusIcon, SuppliersIcon, UploadIcon } from './icons';
 import { PageHeader } from './page-header';
@@ -91,7 +92,6 @@ export function SupplierDirectory() {
   const [statusFilter, setStatusFilter] = useState('active');
   const [sort, setSort] = useState('name');
   const [showCreate, setShowCreate] = useState(false);
-  const [analyzing, setAnalyzing] = useState(false);
   const [busy, setBusy] = useState(true);
   const [message, setMessage] = useState('');
 
@@ -124,24 +124,6 @@ export function SupplierDirectory() {
     const timeout = window.setTimeout(() => void loadDirectory(), 180);
     return () => window.clearTimeout(timeout);
   }, [loadDirectory]);
-
-  async function createSupplier(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (analyzing) return;
-    const form = new FormData(event.currentTarget);
-    setBusy(true);
-    setMessage('');
-    try {
-      await apiJson('/suppliers', { method: 'POST', body: JSON.stringify(supplierPayload(form)) });
-      setShowCreate(false);
-      setMessage('Proveedor agregado al directorio.');
-      await loadDirectory();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'No fue posible crear el proveedor.');
-    } finally {
-      setBusy(false);
-    }
-  }
 
   async function createSpecialty() {
     const name = window.prompt('Nombre de la nueva especialidad:')?.trim();
@@ -193,17 +175,75 @@ export function SupplierDirectory() {
       </Link>)}
       {!busy && suppliers.items.length === 0 ? <div className="panel supplier-empty"><SuppliersIcon size={30} /><h2>No encontramos proveedores</h2><p>Ajusta los filtros o agrega el primer registro al directorio.</p></div> : null}
     </div>
-    {showCreate ? <div className="dialog-backdrop" role="presentation" onMouseDown={() => setShowCreate(false)}><form className="confirm-dialog supplier-dialog" onSubmit={createSupplier} onMouseDown={(event) => event.stopPropagation()} aria-busy={analyzing || busy}><span className="eyebrow">Alta de proveedor</span><h2>Nuevo contacto comercial</h2><p>Los datos bancarios no forman parte de este directorio.</p><SupplierFields specialties={specialties} autofill onAnalyzingChange={setAnalyzing} /><div className="dialog-actions"><button type="button" className="btn secondary" onClick={() => setShowCreate(false)}>Cancelar</button><button className="btn" disabled={busy || analyzing}>{analyzing ? 'Analizando documento con IA…' : busy ? 'Guardando…' : 'Crear proveedor'}</button></div></form></div> : null}
+    {showCreate ? <SupplierCreateDialog specialties={specialties} onClose={() => setShowCreate(false)} onCreated={() => { setShowCreate(false); setMessage('Proveedor agregado al directorio.'); void loadDirectory(); }} /> : null}
   </AppShell>;
+}
+
+export type CreatedSupplier = { id: string; nombre: string };
+/** Prefill for a quick creation, e.g. with the issuer data of a CFDI. */
+export type SupplierInitial = { name?: string; legal_name?: string; tax_id?: string };
+
+/**
+ * Supplier creation dialog with CSF autofill, shared by the directory and the expense
+ * form. It is portaled to <body>, and because React events still bubble through portals
+ * to React ancestors, its submit stops propagation: saving the supplier must never also
+ * submit an enclosing expense form.
+ */
+export function SupplierCreateDialog({ specialties: given, workId, initial, onCreated, onClose }: {
+  specialties?: Specialty[];
+  /** When set, the supplier is also assigned to this work in the same transaction. */
+  workId?: string;
+  initial?: SupplierInitial;
+  onCreated: (supplier: CreatedSupplier) => void;
+  onClose: () => void;
+}) {
+  const [specialties, setSpecialties] = useState<Specialty[]>(given || []);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (given) return;
+    let cancelled = false;
+    apiJson<Specialty[]>('/supplier-specialties')
+      .then((value) => { if (!cancelled) setSpecialties(value); })
+      .catch(() => { /* specialties are optional for a quick creation */ });
+    return () => { cancelled = true; };
+  }, [given]);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (analyzing || busy) return;
+    const form = new FormData(event.currentTarget);
+    setBusy(true);
+    setError('');
+    try {
+      const created = await apiJson<{ id: string; nombre: string }>('/suppliers', {
+        method: 'POST',
+        body: JSON.stringify({ ...supplierPayload(form), ...(workId ? { work_id: workId } : {}) }),
+      });
+      onCreated({ id: created.id, nombre: created.nombre });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'No fue posible crear el proveedor.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (typeof document === 'undefined') return null;
+  return createPortal(<div className="dialog-backdrop" role="presentation" onMouseDown={() => { if (!busy) onClose(); }}><form className="confirm-dialog supplier-dialog" role="dialog" aria-modal="true" aria-label="Alta de proveedor" onSubmit={(event) => void submit(event)} onMouseDown={(event) => event.stopPropagation()} aria-busy={analyzing || busy}><span className="eyebrow">Alta de proveedor</span><h2>Nuevo contacto comercial</h2><p>{workId ? 'Quedará asignado a esta obra y seleccionado en el gasto.' : 'Los datos bancarios no forman parte de este directorio.'}</p>{error && <p className="notice error" role="alert">{error}</p>}<SupplierFields specialties={specialties} initial={initial} autofill onAnalyzingChange={setAnalyzing} /><div className="dialog-actions"><button type="button" className="btn secondary" disabled={busy} onClick={onClose}>Cancelar</button><button className="btn" disabled={busy || analyzing}>{analyzing ? 'Analizando documento con IA…' : busy ? 'Guardando…' : 'Crear proveedor'}</button></div></form></div>, document.body);
 }
 
 export function SupplierFields({
   specialties,
   supplier,
+  initial,
   autofill = false,
   onAnalyzingChange,
 }: {
   specialties: Specialty[];
+  initial?: SupplierInitial;
   supplier?: Supplier & {
     rfc?: string | null; regimen_fiscal?: string | null; codigo_postal?: string | null;
     direccion?: string | null; notas?: string | null;
@@ -215,7 +255,8 @@ export function SupplierFields({
   // Fiscal fields are controlled so a CSF extraction can fill them in place
   // without resetting whatever else the user already typed.
   const [fiscal, setFiscal] = useState<FiscalFields>({
-    legal_name: supplier?.razon_social || '', tax_id: supplier?.rfc || '',
+    legal_name: supplier?.razon_social || initial?.legal_name || '',
+    tax_id: supplier?.rfc || initial?.tax_id || '',
     tax_regime: supplier?.regimen_fiscal || '', postal_code: supplier?.codigo_postal || '',
   });
   const [analyzing, setAnalyzing] = useState(false);
@@ -276,7 +317,7 @@ export function SupplierFields({
       {notice && <div className={`notice ${notice.tone === 'warning' ? '' : notice.tone}`} role={notice.tone === 'error' ? 'alert' : 'status'}>{notice.text}{notice.reasons?.length ? <ul>{notice.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul> : null}</div>}
     </div>}
     <fieldset className="form-grid two supplier-form-grid" disabled={analyzing} style={{ border: 0, padding: 0, minWidth: 0 }}>
-    <label className="field">Nombre comercial<input name="name" defaultValue={supplier?.nombre || ''} required minLength={2} /></label>
+    <label className="field">Nombre comercial<input name="name" defaultValue={supplier?.nombre || initial?.name || ''} required minLength={2} /></label>
     <label className="field">Razón social<input name="legal_name" value={fiscal.legal_name} onChange={(event) => setField('legal_name', event.target.value)} /></label>
     <label className="field">RFC<input name="tax_id" value={fiscal.tax_id} onChange={(event) => setField('tax_id', event.target.value)} minLength={12} maxLength={13} /></label>
     <label className="field">Régimen fiscal<input name="tax_regime" value={fiscal.tax_regime} onChange={(event) => setField('tax_regime', event.target.value)} maxLength={250} /></label>

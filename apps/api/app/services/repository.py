@@ -368,6 +368,8 @@ def work_catalog(settings: Settings, user: UserContext, work_id: UUID) -> dict[s
             "expense_subitems": list(expense_subitems),
             "expense_categories": list(expense_categories),
             "suppliers": list(suppliers),
+            # Quick supplier creation from the expense form is an admin action.
+            "permissions": {"can_manage_suppliers": user.role is Role.ADMIN},
         }
 
 

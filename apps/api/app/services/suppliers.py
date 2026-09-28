@@ -401,6 +401,17 @@ def create_supplier(
         ).fetchone()
         assert row is not None
         _set_specialties(connection, row["id"], payload.specialty_ids, user)
+        if payload.work_id is not None:
+            require_work_access(connection, user, payload.work_id)
+            connection.execute(
+                """insert into public.obra_proveedor (obra_id, proveedor_id, asignado_por)
+                   values (%s, %s, %s)""",
+                (payload.work_id, row["id"], user.id),
+            )
+            _audit(
+                connection, user, "proveedor", row["id"], "asignar_obra",
+                {"obra_id": str(payload.work_id), "origen": "alta_rapida_gasto"},
+            )
         _audit(
             connection,
             user,

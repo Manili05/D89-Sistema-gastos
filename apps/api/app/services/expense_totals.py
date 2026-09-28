@@ -51,7 +51,8 @@ def compute_totals(lines: list[LineInput], iva: Decimal | None = None) -> Expens
     """Prices include IVA: total = Σ lines. Without explicit IVA, 16 % is assumed.
 
     An explicit IVA (exempt items, 8 % border zone, mixed tickets) must lie between 0
-    and the IVA a 16 % rate would contain, with one cent of rounding tolerance.
+    and the IVA a 16 % rate would contain. Tolerance is one cent per line because CFDI
+    invoices round IVA per concept, which can exceed the global 16 % by a few cents.
     """
     if not lines:
         raise ExpenseTotalsError("El gasto debe tener al menos un concepto")
@@ -63,7 +64,8 @@ def compute_totals(lines: list[LineInput], iva: Decimal | None = None) -> Expens
         subtotal = money(amount / (1 + IVA_TASA_GENERAL))
         return ExpenseTotals(amounts, amount, subtotal, amount - subtotal)
     iva = money(iva)
-    if iva < 0 or iva > max_included_iva(amount) + CENT:
+    tolerance = CENT * len(lines)
+    if iva < 0 or iva > max_included_iva(amount) + tolerance or iva > amount:
         raise ExpenseTotalsError(
             f"El IVA debe estar entre 0 y {max_included_iva(amount)} "
             "(16 % incluido en el total)"

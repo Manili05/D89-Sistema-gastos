@@ -111,7 +111,8 @@ class SupplierProfile(BaseModel):
 
 
 class SupplierCreate(SupplierProfile):
-    pass
+    # Quick creation from an expense: also assign the supplier to this work atomically.
+    work_id: UUID | None = None
 
 
 class SupplierUpdate(SupplierProfile):
@@ -460,3 +461,60 @@ class JevChatResponse(BaseModel):
     respuesta: str
     model: str | None
     tool_call_log_id: UUID
+
+
+class CfdiIssuer(BaseModel):
+    rfc: str
+    name: str | None
+    tax_regime: str | None
+
+
+class CfdiConceptOut(BaseModel):
+    product_code: str | None
+    quantity: Decimal
+    unit_code: str | None
+    unit: str | None
+    description: str
+    unit_value: Decimal  # ValorUnitario: sin impuestos
+    discount: Decimal
+    amount: Decimal  # Importe: cantidad × valor unitario, sin impuestos
+    iva: Decimal
+
+
+class CfdiSupplierMatch(BaseModel):
+    id: UUID
+    name: str
+    active: bool
+    assigned_to_work: bool | None
+
+
+class CfdiExpenseDraft(BaseModel):
+    """Ready-to-submit expense lines (prices WITH taxes) whose sum equals the CFDI."""
+
+    supplier_folio: str | None
+    concept: str
+    lines: list[ExpenseLineInput]
+    iva: Decimal
+    amount: Decimal
+
+
+class CfdiExtractionResponse(BaseModel):
+    version: str
+    uuid: str | None
+    series: str | None
+    folio: str | None
+    issued_at: str | None
+    currency: str | None
+    voucher_type: str | None
+    issuer: CfdiIssuer
+    receiver_rfc: str | None
+    concepts: list[CfdiConceptOut]
+    subtotal: Decimal
+    discount: Decimal
+    iva: Decimal
+    withholdings: Decimal
+    total: Decimal
+    supplier: CfdiSupplierMatch | None
+    expense: CfdiExpenseDraft
+    requires_review: bool
+    warnings: list[str]

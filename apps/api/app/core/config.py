@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     # Covers the LiteLLM fallback chain (up to 3 models × 30 s); Nginx allows 120 s.
     ai_timeout_seconds: float = 100
     ai_max_upload_bytes: int = 10 * 1024 * 1024
+    # A CFDI is a few KB; the cap bounds parsing work on untrusted XML.
+    cfdi_max_bytes: int = 2 * 1024 * 1024
 
 
 @lru_cache

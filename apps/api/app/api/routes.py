@@ -20,6 +20,7 @@ from fastapi.responses import Response
 from app.core.config import Settings, get_settings
 from app.core.security import AdminUser, CurrentUser, HermesSignature
 from app.models import (
+    CfdiExtractionResponse,
     CsfExtractionResponse,
     ExpenseBatchReview,
     ExpenseCancel,
@@ -54,6 +55,7 @@ from app.models import (
     WorkUpdate,
 )
 from app.services.ai_extraction import extract_csf, extract_receipt, jev_chat
+from app.services.cfdi import extract_cfdi
 from app.services.neodata import NeodataError, parse_neodata_workbook
 from app.services.reports import build_excel_report, build_pdf_report
 from app.services.repository import (
@@ -466,6 +468,20 @@ async def post_extract_receipt(
     """Propose receipt lines from an image; the server recomputes totals before answering."""
     content = await file.read(settings.ai_max_upload_bytes + 1)
     return await extract_receipt(settings, user, content, file.content_type)
+
+
+@router.post(
+    "/expenses/extract-xml", response_model=CfdiExtractionResponse, tags=["expenses"]
+)
+async def post_extract_cfdi(
+    user: CurrentUser,
+    file: Annotated[UploadFile, File(description="XML del CFDI (factura electrónica)")],
+    settings: Annotated[Settings, Depends(get_settings)],
+    work_id: Annotated[UUID | None, Form()] = None,
+) -> dict[str, Any]:
+    """Read a CFDI 3.3/4.0 without AI: issuer, concepts, taxes and a ready expense draft."""
+    content = await file.read(settings.cfdi_max_bytes + 1)
+    return extract_cfdi(settings, user, content, file.content_type, file.filename, work_id)
 
 
 @router.post("/expenses/jev-chat", response_model=JevChatResponse, tags=["expenses"])
