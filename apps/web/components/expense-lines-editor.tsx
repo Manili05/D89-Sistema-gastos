@@ -37,15 +37,16 @@ export function ExpenseLinesEditor({ lines, totals, explicitIvaLabel, disabled, 
         const cents = totals.lineCents[index];
         const invalid = cents === null && touched(line);
         return <div className={`expense-line${invalid ? ' invalid' : ''}`} key={line.key}>
-          <input aria-label={`Cantidad concepto ${position}`} inputMode="decimal" value={line.quantity} onChange={(event) => update(line.key, { quantity: event.target.value })} required />
-          <input aria-label={`Unidad concepto ${position}`} value={line.unit} maxLength={40} onChange={(event) => update(line.key, { unit: event.target.value })} required />
-          <input aria-label={`Descripción concepto ${position}`} value={line.description} maxLength={500} onChange={(event) => update(line.key, { description: event.target.value })} required />
-          <input aria-label={`Precio unitario concepto ${position}`} inputMode="decimal" placeholder="0.00" value={line.unitPrice} onChange={(event) => update(line.key, { unitPrice: event.target.value })} required />
-          <input aria-label={`Descuento concepto ${position}`} inputMode="decimal" placeholder="0.00" value={line.discount} onChange={(event) => update(line.key, { discount: event.target.value })} />
+          {/* The small visible caption only shows on mobile, where column headers are hidden. */}
+          <label className="line-cell"><span className="line-caption" aria-hidden="true">Cantidad</span><input aria-label={`Cantidad concepto ${position}`} inputMode="decimal" value={line.quantity} onChange={(event) => update(line.key, { quantity: event.target.value })} required /></label>
+          <label className="line-cell"><span className="line-caption" aria-hidden="true">Unidad</span><input aria-label={`Unidad concepto ${position}`} value={line.unit} maxLength={40} onChange={(event) => update(line.key, { unit: event.target.value })} required /></label>
+          <label className="line-cell line-description"><span className="line-caption" aria-hidden="true">Descripción</span><input aria-label={`Descripción concepto ${position}`} value={line.description} maxLength={500} onChange={(event) => update(line.key, { description: event.target.value })} required /></label>
+          <label className="line-cell"><span className="line-caption" aria-hidden="true">Precio unitario (IVA incl.)</span><input aria-label={`Precio unitario concepto ${position}`} inputMode="decimal" placeholder="0.00" value={line.unitPrice} onChange={(event) => update(line.key, { unitPrice: event.target.value })} required /></label>
+          <label className="line-cell"><span className="line-caption" aria-hidden="true">Descuento</span><input aria-label={`Descuento concepto ${position}`} inputMode="decimal" placeholder="0.00" value={line.discount} onChange={(event) => update(line.key, { discount: event.target.value })} /></label>
           <label className="line-taxable"><input type="checkbox" aria-label={`IVA concepto ${position}`} checked={line.taxable} onChange={(event) => update(line.key, { taxable: event.target.checked })} /><span aria-hidden="true">16 %</span></label>
           {/* Plain text, not <output>: an implicit live region per line would announce every keystroke. */}
           <span className="line-amount" data-testid={`line-amount-${position}`}><span className="sr-only">Importe concepto {position}: </span>{displayCents(cents ?? null)}</span>
-          <button type="button" className="text-action danger" aria-label={`Quitar concepto ${position}`} disabled={lines.length === 1} onClick={() => onChange(lines.filter((item) => item.key !== line.key))}>✕</button>
+          <button type="button" className="text-action danger line-remove" aria-label={`Quitar concepto ${position}`} disabled={lines.length === 1} onClick={() => onChange(lines.filter((item) => item.key !== line.key))}>✕</button>
         </div>;
       })}
     </div>
