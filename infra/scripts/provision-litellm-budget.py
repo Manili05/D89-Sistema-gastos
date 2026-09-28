@@ -21,12 +21,21 @@ ENV_FILE = ROOT / ".env"
 PLACEHOLDERS = ("replace-", "provision-")
 
 
+def _unquote(value: str) -> str:
+    # Match Docker Compose: KEY="value" and KEY='value' mean the bare value.
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+        return value[1:-1]
+    return value
+
+
 def load_env() -> dict[str, str]:
-    return dict(
-        line.split("=", 1)
-        for line in ENV_FILE.read_text(encoding="utf-8").splitlines()
-        if line and not line.startswith("#") and "=" in line
-    )
+    values: dict[str, str] = {}
+    for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
+        if line and not line.startswith("#") and "=" in line:
+            key, value = line.split("=", 1)
+            values[key.strip()] = _unquote(value)
+    return values
 
 
 def require_value(values: dict[str, str], key: str) -> str:
