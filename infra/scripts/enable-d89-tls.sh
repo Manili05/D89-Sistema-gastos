@@ -123,7 +123,14 @@ check_acme_path() {
   install -d -m 0755 -- "${WEBROOT}" "${WEBROOT}/.well-known" "${WEBROOT}/.well-known/acme-challenge"
   printf '%s' "${token}" > "${WEBROOT}/.well-known/acme-challenge/${token}"
   chmod 0644 -- "${WEBROOT}/.well-known/acme-challenge/${token}"
-  body="$(curl -fsS --max-time 15 "http://${DOMAIN}/.well-known/acme-challenge/${token}" || true)"
+  # `systemctl reload` returns before the new workers serve traffic: poll instead of
+  # trusting a single request (it may still hit the previous config).
+
+  for _ in $(seq 1 15); do
+    body="$(curl -fsS --max-time 10 "http://${DOMAIN}/.well-known/acme-challenge/${token}" 2>/dev/null || true)"
+    [[ "${body}" == "${token}" ]] && break
+    sleep 1
+  done
   rm -f -- "${WEBROOT}/.well-known/acme-challenge/${token}"
   [[ "${body}" == "${token}" ]] || die "El reto ACME no es accesible por http://${DOMAIN}; revisa DNS y el puerto 80"
   log "Reto ACME accesible desde http://${DOMAIN}"
@@ -160,8 +167,12 @@ issue_certificate() {
 
 verify_public() {
   local redirect health
-  redirect="$(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' --max-time 15 "http://${DOMAIN}/" || true)"
-  health="$(curl -fsS -o /dev/null -w '%{http_code}' --max-time 15 "https://${DOMAIN}/api/health" || true)"
+  for _ in $(seq 1 15); do
+    redirect="$(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' --max-time 15 "http://${DOMAIN}/" || true)"
+    health="$(curl -fsS -o /dev/null -w '%{http_code}' --max-time 15 "https://${DOMAIN}/api/health" || true)"
+    [[ "${redirect}" == "301 https://${DOMAIN}/" && "${health}" == "200" ]] && break
+    sleep 1
+  done
   log "HTTP  → ${redirect}"
   log "HTTPS → /api/health ${health}"
   [[ "${redirect}" == "301 https://${DOMAIN}/" && "${health}" == "200" ]] \
