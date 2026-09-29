@@ -18,6 +18,8 @@ from app.models import (
     ExpenseUpdate,
     ImportPreviewUpdate,
     IncomeCreate,
+    IncomeState,
+    LegacyIncomeCreate,
     Role,
     SubcontractCreate,
     SubcontractPaymentCreate,
@@ -243,8 +245,12 @@ def delete_work(
             select k.ruta as comprobante_path
             from public.gasto_comprobante k join public.gasto g on g.id = k.gasto_id
             where g.obra_id = %s
+            union all
+            select k.ruta as comprobante_path
+            from public.ingreso_comprobante k join public.ingreso i on i.id = k.ingreso_id
+            where i.obra_id = %s
             """,
-            (work_id,),
+            (work_id, work_id),
         ).fetchall()
 
         # These relationships intentionally do not cascade in the original schema,
@@ -1128,46 +1134,140 @@ def cancel_expense(
         return row
 
 
+INCOME_SELECT = """
+    select i.id, i.obra_id as work_id, i.folio, i.fecha as received_on,
+           i.concepto as concept, i.importe as amount, i.estado::text as state,
+           i.creado_por as created_by, i.creado_en as created_at,
+           coalesce((select jsonb_agg(jsonb_build_object(
+               'id', k.id, 'path', k.ruta, 'kind', k.tipo, 'created_at', k.creado_en)
+               order by k.creado_en, k.id)
+               from public.ingreso_comprobante k where k.ingreso_id = i.id), '[]'::jsonb)
+               as receipts
+    from public.ingreso i
+"""
+
+
+def _income_detail(connection: psycopg.Connection, income_id: UUID) -> dict[str, Any]:
+    row = connection.execute(INCOME_SELECT + " where i.id = %s", (income_id,)).fetchone()
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Ingreso inexistente")
+    return row
+
+
+def _audit_income(connection, income_id: UUID, user: UserContext, action: str, detail: dict):
+    connection.execute(
+        """insert into public.audit_log_negocio
+           (entidad, entidad_id, accion, usuario_id, canal, detalle_json)
+           values ('ingreso', %s, %s, %s, 'web', %s)""",
+        (income_id, action, user.id, Jsonb(detail)),
+    )
+
+
 def list_incomes(settings: Settings, user: UserContext, work_id: UUID) -> list[dict[str, Any]]:
     with transaction(settings) as connection:
         require_work_access(connection, user, work_id)
-        return list(
-            connection.execute(
-                """
-                select id, concepto, fecha_estimada, fecha_real, monto,
-                       estado::text as estado, creado_en
-                from public.ingreso where obra_id = %s order by fecha_estimada, creado_en
-                """,
-                (work_id,),
-            ).fetchall()
-        )
+        return list(connection.execute(
+            INCOME_SELECT + " where i.obra_id = %s order by i.fecha desc, i.creado_en desc, i.id",
+            (work_id,),
+        ).fetchall())
 
 
-def create_income(settings: Settings, user: UserContext, payload: IncomeCreate) -> dict[str, Any]:
+def get_income(settings: Settings, user: UserContext, income_id: UUID) -> dict[str, Any]:
     with transaction(settings) as connection:
-        require_work_access(connection, user, payload.work_id)
+        row = _income_detail(connection, income_id)
+        require_work_access(connection, user, row["work_id"])
+        return row
+
+
+def create_income(
+    settings: Settings, user: UserContext, work_id: UUID, payload: IncomeCreate,
+    *, actual_date: date | None = None,
+) -> dict[str, Any]:
+    with transaction(settings) as connection:
+        require_work_access(connection, user, work_id)
         if user.role is not Role.ADMIN:
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Solo administración registra ingresos")
+        # No float conversion or implicit rounding: Pydantic bounds NUMERIC(18,4).
+        amount = payload.amount.quantize(Decimal("0.0001"))
         row = connection.execute(
-            """
-            insert into public.ingreso
-              (obra_id, concepto, fecha_estimada, fecha_real, monto, estado, creado_por)
-            values (%s, %s, %s, %s, %s, %s, %s)
-            returning id, obra_id, concepto, fecha_estimada, fecha_real, monto,
-                      estado::text as estado, creado_en
-            """,
-            (
-                payload.work_id,
-                payload.concept,
-                payload.estimated_date,
-                payload.actual_date,
-                payload.amount,
-                payload.state,
-                user.id,
-            ),
+            """insert into public.ingreso
+               (obra_id, concepto, fecha, fecha_real, importe, estado, creado_por)
+               values (%s, %s, %s, %s, %s, %s, %s) returning id""",
+            (work_id, payload.concept, payload.received_on, actual_date,
+             amount, payload.state.value, user.id),
         ).fetchone()
         assert row is not None
-        return row
+        _audit_income(connection, row["id"], user, "crear", {
+            "importe": str(amount), "estado": payload.state.value,
+        })
+        return _income_detail(connection, row["id"])
+
+
+def attach_income_receipt(
+    settings: Settings, user: UserContext, income_id: UUID, path: str,
+) -> dict[str, Any]:
+    with transaction(settings) as connection:
+        income = connection.execute(
+            "select obra_id from public.ingreso where id = %s for update", (income_id,),
+        ).fetchone()
+        if income is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Ingreso inexistente")
+        require_work_access(connection, user, income["obra_id"])
+        if user.role is not Role.ADMIN:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN, "Solo administración adjunta comprobantes",
+            )
+        expected = f"{income['obra_id']}/{income_id}/"
+        if not path.startswith(expected) or ".." in path or "\\" in path:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY, "Ruta de comprobante inválida",
+            )
+        kind = _receipt_kind(path)
+        stored = connection.execute(
+            """select exists(select 1 from storage.objects
+               where bucket_id = 'comprobantes' and name = %s) as receipt_exists""", (path,),
+        ).fetchone()
+        if not stored or not stored["receipt_exists"]:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY, "El comprobante no existe en Storage",
+            )
+        added = connection.execute(
+            """insert into public.ingreso_comprobante (ingreso_id, ruta, tipo, creado_por)
+               values (%s, %s, %s, %s) on conflict (ruta) do nothing returning id""",
+            (income_id, path, kind, user.id),
+        ).fetchone()
+        if added is not None:
+            _audit_income(connection, income_id, user, "adjuntar_comprobante", {
+                "tipo": kind, "ruta": path,
+            })
+        return _income_detail(connection, income_id)
+
+
+def list_legacy_incomes(
+    settings: Settings, user: UserContext, work_id: UUID,
+) -> list[dict[str, Any]]:
+    with transaction(settings) as connection:
+        require_work_access(connection, user, work_id)
+        return list(connection.execute(
+            """select id, concepto, fecha as fecha_estimada, fecha_real, importe as monto,
+               case when estado = 'conciliado' then 'cobrado' else 'por_cobrar' end as estado,
+               creado_en from public.ingreso where obra_id = %s order by fecha, creado_en""",
+            (work_id,),
+        ).fetchall())
+
+
+def create_legacy_income(
+    settings: Settings, user: UserContext, payload: LegacyIncomeCreate,
+) -> dict[str, Any]:
+    result = create_income(settings, user, payload.work_id, IncomeCreate(
+        received_on=payload.estimated_date, concept=payload.concept, amount=payload.amount,
+        state=IncomeState.CONCILIADO if payload.state == "cobrado" else IncomeState.PENDIENTE,
+    ), actual_date=payload.actual_date)
+    return {
+        "id": result["id"], "obra_id": result["work_id"], "concepto": result["concept"],
+        "fecha_estimada": result["received_on"], "fecha_real": payload.actual_date,
+        "monto": result["amount"], "estado": payload.state, "creado_en": result["created_at"],
+    }
 
 
 def list_subcontracts(settings: Settings, user: UserContext, work_id: UUID) -> list[dict[str, Any]]:
@@ -1270,10 +1370,10 @@ def dashboard(settings: Settings, user: UserContext) -> dict[str, Any]:
                    coalesce((select sum(g.importe) from public.gasto g
                      where g.obra_id = o.id and g.eliminado_en is null
                        and g.estado = 'pendiente'), 0) as pendiente
-                   ,coalesce((select sum(i.monto) from public.ingreso i
-                     where i.obra_id = o.id and i.estado = 'cobrado'), 0) as cobrado
-                   ,coalesce((select sum(i.monto) from public.ingreso i
-                     where i.obra_id = o.id and i.estado = 'por_cobrar'), 0) as por_cobrar
+                   ,coalesce((select sum(i.importe) from public.ingreso i
+                     where i.obra_id = o.id and i.estado = 'conciliado'), 0) as cobrado
+                   ,coalesce((select sum(i.importe) from public.ingreso i
+                     where i.obra_id = o.id and i.estado = 'pendiente'), 0) as por_cobrar
                    ,coalesce((select sum(s.monto_contratado) from public.subcontrato s
                      where s.obra_id = o.id), 0) as subcontratado
                    ,coalesce((select sum(sp.monto) from public.subcontrato_pago sp

@@ -321,13 +321,55 @@ class ReceiptUpdate(BaseModel):
     path: str = Field(min_length=10, max_length=500)
 
 
-class IncomeCreate(BaseModel):
+class LegacyIncomeCreate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     work_id: UUID
     concept: str = Field(min_length=3, max_length=500)
     estimated_date: date
     actual_date: date | None = None
-    amount: Decimal = Field(gt=0, decimal_places=4)
+    amount: Decimal = Field(gt=0, max_digits=18, decimal_places=4)
     state: str = Field(pattern="^(cobrado|por_cobrar)$")
+
+
+class IncomeState(StrEnum):
+    PENDIENTE = "pendiente"
+    CONCILIADO = "conciliado"
+
+
+class IncomeCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    received_on: date
+    concept: str = Field(min_length=3, max_length=500)
+    amount: Decimal = Field(gt=0, max_digits=18, decimal_places=4)
+    state: IncomeState = IncomeState.PENDIENTE
+
+
+class IncomeReceiptCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    path: str = Field(min_length=10, max_length=500)
+
+
+class IncomeReceipt(BaseModel):
+    id: UUID
+    path: str
+    kind: str
+    created_at: datetime
+
+
+class IncomeResponse(BaseModel):
+    id: UUID
+    work_id: UUID
+    folio: str
+    received_on: date
+    concept: str
+    amount: Decimal
+    state: IncomeState
+    created_by: UUID
+    created_at: datetime
+    receipts: list[IncomeReceipt] = Field(default_factory=list)
 
 
 class SubcontractCreate(BaseModel):
