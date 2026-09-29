@@ -204,6 +204,25 @@ button { cursor: pointer; }
   .expense-table.detail-lines td { padding: 3px 0; border: 0; display: flex; justify-content: space-between; gap: 12px; text-align: right !important; white-space: normal !important; }
   .expense-table.detail-lines td::before { content: attr(data-label); color: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; text-align: left; }
 }
+.income-summary { margin: 0 0 14px; display: flex; flex-wrap: wrap; gap: 12px 32px; padding: 0 20px; }
+.income-summary dt { color: var(--muted); font-size: 11px; }
+.income-summary dd { margin: 2px 0 0; color: var(--navy); font: 700 17px/1.2 inherit; }
+.income-table { min-width: 760px; }
+.income-receipts { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+.income-receipts li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.income-receipt-name { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 760px) {
+  /* Incomes as labelled cards on phones (explicit ARIA roles keep the table semantics). */
+  .expense-table.income-table { min-width: 0; }
+  .expense-table.income-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+  .expense-table.income-table, .expense-table.income-table tbody, .expense-table.income-table tr, .expense-table.income-table td { display: block; width: 100%; }
+  .expense-table.income-table tr { margin-bottom: 8px; padding: 10px; border: 1px solid var(--line); background: #fff; }
+  .expense-table.income-table td { padding: 4px 0; border: 0; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 12px; }
+  .expense-table.income-table td::before { content: attr(data-label); color: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; }
+  .income-receipt-name { max-width: 150px; }
+}
+.income-form .receipt-list { margin-top: 10px; }
+.dropzone.dragging { border-style: solid; border-color: var(--terracotta); background: #fbf1eb; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .import-panel { max-width: none; }
 .target-switch { display: inline-flex; gap: 4px; margin: 0 0 18px; padding: 4px; border: 1px solid var(--line); border-radius: 5px; background: var(--paper); }

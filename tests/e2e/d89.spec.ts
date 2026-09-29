@@ -1411,3 +1411,140 @@ test('administrador adjunta un comprobante faltante desde validación', async ({
   await expect(page.getByRole('button', { name: 'Ver archivo' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Validar', exact: true })).toBeEnabled();
 });
+
+// --- Ingresos ------------------------------------------------------------------------
+
+const incomeRows = [
+  {
+    id: '71717171-7171-4171-8171-717171717171', work_id: workId, folio: 'I-00002', received_on: '2026-09-20',
+    concept: 'Estimación 1', amount: '120000.0050', state: 'conciliado', created_by: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    created_at: '2026-09-20T12:00:00Z',
+    receipts: [{ id: '72727272-7272-4272-8272-727272727272', path: `${workId}/71717171-7171-4171-8171-717171717171/1759000000000-income-receipt-1-transferencia.pdf`, kind: 'pdf', created_at: '2026-09-20T12:01:00Z' }],
+  },
+  {
+    id: '73737373-7373-4373-8373-737373737373', work_id: workId, folio: 'I-00001', received_on: '2026-09-01',
+    concept: 'Anticipo', amount: '50000.0000', state: 'pendiente', created_by: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    created_at: '2026-09-01T12:00:00Z', receipts: [],
+  },
+];
+
+test('Ingresos: pestaña con listado, totales y comprobantes para ver o descargar', async ({ page }) => {
+  const mutations: string[] = [];
+  page.on('request', (request) => {
+    if (request.url().includes('/api/v1/') && request.method() !== 'GET') mutations.push(`${request.method()} ${request.url()}`);
+  });
+  await page.route(`**/api/v1/works/${workId}/incomes`, async (route) => {
+    await route.fulfill({ json: incomeRows });
+  });
+  const signed: string[] = [];
+  await page.route('**/storage/v1/object/sign/comprobantes/**', async (route) => {
+    signed.push(decodeURIComponent(new URL(route.request().url()).pathname));
+    await route.fulfill({ json: { signedURL: '/object/sign/comprobantes/firmado.pdf?token=ingreso' } });
+  });
+  await page.route('**/storage/v1/object/sign/comprobantes/firmado.pdf**', async (route) => {
+    await route.fulfill({ body: '%PDF-1.4', contentType: 'application/pdf' });
+  });
+  await login(page);
+  await page.goto(`/obras/${workId}/gastos`);
+  await page.getByRole('navigation', { name: 'Secciones de la obra' }).getByRole('link', { name: 'Ingresos', exact: true }).click();
+  // First visit compiles the new route in `next dev`; production has no such delay.
+  await expect(page).toHaveURL(new RegExp(`/obras/${workId}/ingresos$`), { timeout: 30_000 });
+  const table = page.getByRole('table', { name: 'Ingresos de la obra' });
+  await expect(table.getByRole('row')).toHaveCount(3);
+  // The period filter does not apply to incomes, so it is not offered here.
+  await expect(page.getByLabel('Periodo')).toHaveCount(0);
+  const reconciled = table.getByRole('row').filter({ hasText: 'I-00002' });
+  // 120000.0050 rounds HALF_UP to $120,000.01 (no truncation).
+  await expect(reconciled).toContainText('$120,000.01');
+  await expect(reconciled).toContainText('Conciliado');
+  await expect(reconciled).toContainText('transferencia.pdf');
+  await expect(table.getByRole('row').filter({ hasText: 'I-00001' })).toContainText('Pendiente');
+  await expect(table.getByRole('row').filter({ hasText: 'I-00001' })).toContainText('Sin comprobantes');
+  await expect(page.getByTestId('income-total')).toHaveText('$170,000.01');
+  await expect(page.getByTestId('income-pending')).toHaveText('$50,000.00');
+  await expect(page.getByTestId('income-reconciled')).toHaveText('$120,000.01');
+  const popup = page.waitForEvent('popup');
+  await table.getByRole('button', { name: 'Ver transferencia.pdf del ingreso I-00002' }).click();
+  expect((await popup).url()).toContain('token=ingreso');
+  const download = page.waitForEvent('download');
+  await table.getByRole('button', { name: 'Descargar transferencia.pdf del ingreso I-00002' }).click();
+  await download;
+  expect(signed).toHaveLength(2);
+  expect(signed[0]).toContain(`/${workId}/71717171-7171-4171-8171-717171717171/`);
+  expect(mutations).toEqual([]);
+});
+
+test('Ingresos: registrar con arrastrar y soltar varios comprobantes; el reintento no duplica el ingreso', async ({ page }) => {
+  const incomeId = '74747474-7474-4474-8474-747474747474';
+  const created: Record<string, unknown>[] = [];
+  const uploads: { path: string; type: string | undefined }[] = [];
+  const linked: string[] = [];
+  let listed = [incomeRows[1]];
+  await page.route(`**/api/v1/works/${workId}/incomes`, async (route) => {
+    if (route.request().method() === 'POST') {
+      created.push(route.request().postDataJSON());
+      await route.fulfill({ status: 201, json: { ...incomeRows[1], id: incomeId, folio: 'I-00003', concept: 'Estimación 2', amount: '85000.5000', received_on: '2026-09-28', receipts: [] } });
+    } else {
+      await route.fulfill({ json: listed });
+    }
+  });
+  await page.route('**/storage/v1/object/comprobantes/**', async (route) => {
+    uploads.push({ path: decodeURIComponent(new URL(route.request().url()).pathname), type: uploadedPartType(route.request().postDataBuffer()) });
+    if (uploads.length === 1) await route.fulfill({ status: 500, json: { message: 'Fallo simulado de subida' } });
+    else await route.fulfill({ json: { Key: 'ok' } });
+  });
+  await page.route(`**/api/v1/incomes/${incomeId}/receipts`, async (route) => {
+    linked.push(route.request().postDataJSON().path);
+    await route.fulfill({ json: { ...incomeRows[1], id: incomeId, folio: 'I-00003', receipts: [] } });
+  });
+  await login(page);
+  await page.goto(`/obras/${workId}/ingresos`);
+  await page.getByRole('button', { name: 'Nuevo ingreso' }).click();
+  const form = page.getByRole('form', { name: 'Nuevo ingreso' });
+  await form.getByLabel('Fecha').fill('2026-09-28');
+  await form.getByLabel('Concepto').fill('Estimación 2');
+  await form.getByLabel('Importe').fill('85000.50');
+  await expect(form.getByText('$85,000.50')).toBeVisible();
+  // Real drag & drop of two files onto the drop zone.
+  const files = await page.evaluateHandle(() => {
+    const transfer = new DataTransfer();
+    transfer.items.add(new File(['%PDF-1.4'], 'transferencia.pdf', { type: 'application/pdf' }));
+    transfer.items.add(new File(['jpg'], 'factura.jpg', { type: 'image/jpeg' }));
+    return transfer;
+  });
+  const dropzone = form.locator('.dropzone');
+  await dropzone.dispatchEvent('dragover', { dataTransfer: files });
+  await expect(dropzone).toHaveClass(/dragging/);
+  await dropzone.dispatchEvent('drop', { dataTransfer: files });
+  await expect(form.locator('.receipt-list li')).toHaveCount(2);
+  // A non PDF/image file is refused without being added.
+  await form.getByLabel('Comprobantes del ingreso').setInputFiles({ name: 'datos.xml', mimeType: 'application/xml', buffer: Buffer.from('<x/>') });
+  await expect(form.getByRole('alert')).toContainText('datos.xml: sólo PDF o imagen');
+  await expect(form.locator('.receipt-list li')).toHaveCount(2);
+
+  await form.getByRole('button', { name: 'Registrar ingreso' }).click();
+  await expect(form.getByRole('alert')).toContainText('El ingreso I-00003 ya está guardado');
+  await expect(form.getByLabel('Importe')).toBeDisabled();
+  listed = [{ ...incomeRows[1], id: incomeId, folio: 'I-00003', concept: 'Estimación 2', amount: '85000.5000', received_on: '2026-09-28', receipts: [] }, incomeRows[1]];
+  await form.getByRole('button', { name: 'Reintentar comprobantes (1)' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Ingreso I-00003 registrado.' })).toBeVisible();
+  await expect(form).toHaveCount(0);
+  await expect(page.getByRole('table', { name: 'Ingresos de la obra' }).getByRole('row').filter({ hasText: 'I-00003' })).toContainText('$85,000.50');
+  expect(created).toEqual([{ received_on: '2026-09-28', concept: 'Estimación 2', amount: '85000.50', state: 'pendiente' }]);
+  // PDF failed once and was retried alone; the image uploaded; both linked once.
+  expect(uploads.map((upload) => upload.type)).toEqual(['application/pdf', 'image/jpeg', 'application/pdf']);
+  expect(uploads.every((upload) => upload.path.includes(`/${workId}/${incomeId}/`))).toBe(true);
+  expect(linked).toHaveLength(2);
+  expect(new Set(linked).size).toBe(2);
+});
+
+test('Ingresos: operativo consulta pero no registra', async ({ page }) => {
+  await page.route(new RegExp(`/api/v1/works/${workId}$`), async (route) => {
+    await route.fulfill({ json: { id: workId, nombre: 'Infra Toluca', ubicacion: 'Toluca', fecha_inicio: '2026-01-01', fecha_fin: null, estado: 'activa', areas: 1, partidas: 1, permissions: { can_manage: false, can_validate: false } } });
+  });
+  await page.route(`**/api/v1/works/${workId}/incomes`, async (route) => { await route.fulfill({ json: incomeRows }); });
+  await login(page);
+  await page.goto(`/obras/${workId}/ingresos`);
+  await expect(page.getByRole('table', { name: 'Ingresos de la obra' }).getByRole('row')).toHaveCount(3);
+  await expect(page.getByRole('button', { name: 'Nuevo ingreso' })).toHaveCount(0);
+});

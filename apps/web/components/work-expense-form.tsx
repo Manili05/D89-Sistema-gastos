@@ -8,10 +8,13 @@ import { ReceiptAssistant } from '@/components/receipt-assistant';
 import { type SupplierInitial, SupplierCreateDialog } from '@/components/supplier-directory';
 import { aiErrorMessage, aiRequest } from '@/lib/ai';
 import type { components } from '@/lib/api.generated';
-import { apiJson, getSupabaseBrowserClient } from '@/lib/auth';
+import { apiJson } from '@/lib/auth';
 import {
   type LineDraft, computeTotals, displayCents, newLine, toUnits, trimDecimal,
 } from '@/lib/money';
+import {
+  MAX_RECEIPT_BYTES, RECEIPT_EXTENSIONS, receiptExtension, receiptPath, uploadReceipt,
+} from '@/lib/receipts';
 
 export type CatalogOption = { id: string; nombre: string };
 export type WorkCatalog = {
@@ -44,23 +47,11 @@ type ReceiptItem = {
   path?: string; linked: boolean; error?: string;
 };
 
-const RECEIPT_EXTENSIONS: Record<string, string> = {
-  pdf: 'application/pdf', xml: 'application/xml', jpg: 'image/jpeg', jpeg: 'image/jpeg',
-  png: 'image/png', webp: 'image/webp',
-};
-const MAX_RECEIPT_BYTES = 10 * 1024 * 1024;
 const NEW_SUPPLIER = '__new__';
 const money = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' });
 let receiptSequence = 0;
 
-function extension(name: string): string {
-  return name.includes('.') ? name.split('.').pop()!.toLowerCase() : '';
-}
-
-/** Storage validates MIME against the bucket list; some browsers send '' for XML. */
-function receiptMime(file: File): string {
-  return RECEIPT_EXTENSIONS[extension(file.name)] || file.type;
-}
+const extension = receiptExtension;
 
 function searchable(value: string): string {
   return value.normalize('NFD').replace(/[̀-ͯ]/g, '').toLocaleLowerCase('es-MX');
@@ -275,14 +266,8 @@ export function WorkExpenseForm({
       let path = item.path;
       try {
         if (!path) {
-          const safeName = item.file.name.replace(/[^a-zA-Z0-9._-]/g, '-');
-          const candidate = `${workId}/${expenseId}/${Date.now()}-${item.id}-${safeName}`;
-          // storage-js ignores `contentType` for File/Blob bodies and uses the blob's own
-          // type; browsers often report '' for .xml, which the bucket would reject.
-          const typed = new File([item.file], item.file.name, { type: receiptMime(item.file) });
-          const { error } = await getSupabaseBrowserClient().storage.from('comprobantes')
-            .upload(candidate, typed, { contentType: receiptMime(item.file), upsert: false });
-          if (error) throw new Error(error.message);
+          const candidate = receiptPath(workId, expenseId, item.id, item.file);
+          await uploadReceipt(candidate, item.file);
           path = candidate;
           // Remember the path: if linking fails, the retry re-links without re-uploading.
           setReceipts((current) => current.map((entry) => (entry.id === item.id ? { ...entry, path } : entry)));
