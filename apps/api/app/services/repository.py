@@ -422,6 +422,15 @@ def _expense_detail(
                g.fecha as spent_on, g.concepto as concept, g.subtotal, g.iva,
                g.importe as amount, g.iva_desglosado as iva_breakdown,
                g.estado::text as state,
+               prov.nombre as supplier_name,
+               coalesce(a.ruta_normalizada, array[a.nombre]) as area_path,
+               coalesce(cpg.nombre, cc.nombre) as expense_item,
+               csg.nombre as expense_subitem,
+               coalesce(cag.nombre, cat.nombre) as expense_category,
+               case when cp.id is not null then cp.codigo || ' · ' || cp.descripcion end
+                 as budget_item,
+               pu.nombre as author, g.creado_en as created_at,
+               g.motivo_revision as review_reason,
                coalesce((
                  select jsonb_agg(jsonb_build_object(
                    -- numeric as text: JSON numbers would come back as float.
@@ -436,7 +445,17 @@ def _expense_detail(
                    order by k.creado_en, k.id)
                  from public.gasto_comprobante k where k.gasto_id = g.id), '[]'::jsonb)
                  as receipts
-        from public.gasto g where g.id = %s
+        from public.gasto g
+        join public.area a on a.id = g.area_id
+        left join public.catalogo_partida_gasto cpg on cpg.id = g.partida_gasto_id
+        left join public.catalogo_subpartida_gasto csg on csg.id = g.subpartida_gasto_id
+        left join public.catalogo_categoria_gasto cag on cag.id = g.categoria_gasto_id
+        left join public.catalogo_clase cc on cc.id = g.clase_id
+        left join public.catalogo_categoria cat on cat.id = g.categoria_id
+        left join public.catalogo_proveedor prov on prov.id = g.proveedor_id
+        left join public.catalogo_partida cp on cp.id = g.partida_id
+        left join public.perfil_usuario pu on pu.id = g.creado_por
+        where g.id = %s
         """,
         (expense_id,),
     ).fetchone()
