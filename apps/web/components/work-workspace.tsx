@@ -2,7 +2,8 @@
 
 import Link from 'next/link';
 import type { Route } from 'next';
-import { type CSSProperties, type FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { type CSSProperties, type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import * as ToggleGroup from '@radix-ui/react-toggle-group';
 import { AppShell } from '@/components/app-shell';
 import { PlusIcon } from '@/components/icons';
 import { PageHeader } from '@/components/page-header';
@@ -41,6 +42,14 @@ type Expense = EditableExpense & {
   can_edit: boolean; can_cancel: boolean; can_resubmit: boolean;
 };
 type ExpensesPage = { items: Expense[]; total: number; page: number; page_size: number };
+type ExpenseStateFilter = 'todos' | Expense['estado'];
+
+const expenseStates: { value: ExpenseStateFilter; label: string }[] = [
+  { value: 'todos', label: 'Todos' },
+  { value: 'pendiente', label: 'Pendientes' },
+  { value: 'validado', label: 'Validados' },
+  { value: 'rechazado', label: 'Rechazados' },
+];
 
 const money = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' });
 const currency = (value?: Amount) => value === undefined ? '—' : money.format(Number(value));
@@ -89,7 +98,8 @@ export function WorkWorkspace({ workId, tab }: { workId: string; tab: Tab }) {
   const [period, setPeriod] = useState('acumulado');
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
-  const [stateFilter, setStateFilter] = useState('');
+  const [stateFilter, setStateFilter] = useState<ExpenseStateFilter>('todos');
+  const refreshVersion = useRef(0);
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<string[]>([]);
   const [showForm, setShowForm] = useState(false);
@@ -101,12 +111,12 @@ export function WorkWorkspace({ workId, tab }: { workId: string; tab: Tab }) {
   const range = useMemo(() => rangeFor(period, customFrom, customTo), [period, customFrom, customTo]);
 
   const refresh = useCallback(async () => {
+    const version = ++refreshVersion.current;
     try {
       const params = new URLSearchParams();
       if (range.from) params.set('from', range.from);
       if (range.to) params.set('to', range.to);
       const expenseParams = new URLSearchParams(params);
-      if (stateFilter) expenseParams.set('state', stateFilter);
       if (search.trim()) expenseParams.set('q', search.trim());
       expenseParams.set('page_size', '50');
       const [workData, catalogData, overviewData, expenseData] = await Promise.all([
@@ -115,17 +125,31 @@ export function WorkWorkspace({ workId, tab }: { workId: string; tab: Tab }) {
         apiJson<Overview>(`/works/${workId}/overview?${params}`),
         apiJson<ExpensesPage>(`/works/${workId}/expenses?${expenseParams}`),
       ]);
+      // State filters run locally, so include matches beyond the first API page.
+      if (tab === 'gastos') {
+        const items = [...expenseData.items];
+        const pages = Math.ceil(expenseData.total / expenseData.page_size);
+        for (let page = 2; page <= pages; page += 1) {
+          if (version !== refreshVersion.current) return;
+          expenseParams.set('page', String(page));
+          const next = await apiJson<ExpensesPage>(`/works/${workId}/expenses?${expenseParams}`);
+          items.push(...next.items);
+        }
+        expenseData.items = items;
+      }
+      if (version !== refreshVersion.current) return;
       setError('');
       setWork(workData); setCatalog(catalogData); setOverview(overviewData);
       setExpenses(expenseData);
     } catch (reason) {
+      if (version !== refreshVersion.current) return;
       setError(reason instanceof Error ? reason.message : 'No fue posible cargar la obra.');
     }
-  }, [range.from, range.to, search, stateFilter, workId]);
+  }, [range.from, range.to, search, tab, workId]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void refresh(), 0);
-    return () => window.clearTimeout(timer);
+    return () => { window.clearTimeout(timer); refreshVersion.current += 1; };
   }, [refresh]);
 
   async function review(expenseId: string, action: string) {
@@ -230,6 +254,7 @@ export function WorkWorkspace({ workId, tab }: { workId: string; tab: Tab }) {
 
   const visibleTabs = tabs.filter((item) => item.id !== 'validacion' || work?.permissions.can_validate);
   const pending = expenses?.items.filter((expense) => expense.estado === 'pendiente') || [];
+  const visibleExpenses = expenses?.items.filter((expense) => stateFilter === 'todos' || expense.estado === stateFilter) || [];
   const totals = overview?.totals;
 
   return <AppShell active="/" activeWork={work ? { name: work.nombre, detail: `${work.areas} áreas · ${work.partidas} partidas` } : undefined}>
@@ -249,7 +274,12 @@ export function WorkWorkspace({ workId, tab }: { workId: string; tab: Tab }) {
       <div className="content-grid work-analysis"><section className="panel"><div className="panel-header"><div><h2>Tendencia semanal</h2><p>Validado y pendiente en el periodo</p></div></div><div className="trend-list">{overview?.weekly.map((week) => <div key={week.week}><span>{week.week}</span><strong>{currency(week.validated)}</strong><small>{currency(week.pending)} pendiente</small></div>)}{overview?.weekly.length === 0 && <p className="empty-state">Aún no hay movimientos en el periodo.</p>}</div></section><section className="panel"><div className="panel-header"><div><h2>Principales proveedores</h2><p>Gasto validado del periodo</p></div></div><div className="cash-grid">{overview?.suppliers.map((supplier) => <div key={supplier.name}><span>{supplier.name}</span><strong>{currency(supplier.amount)}</strong></div>)}{overview?.suppliers.length === 0 && <p className="empty-state">Sin gasto validado.</p>}</div></section></div>
     </>}
 
-    {tab === 'gastos' && <>{(showForm || editing) && catalog && <WorkExpenseForm key={editing?.id || 'new'} workId={workId} catalog={catalog} expense={editing} onCancel={() => { setShowForm(false); setEditing(undefined); }} onSaved={(text) => { setMessage(text); setShowForm(false); setEditing(undefined); void refresh(); }} />}<section className="panel"><div className="panel-header"><div><h2>Movimientos de la obra</h2><p>{expenses?.total || 0} gastos encontrados</p></div><div className="expense-filters"><input aria-label="Buscar gastos" placeholder="Concepto, folio o proveedor" value={search} onChange={(event) => setSearch(event.target.value)} /><select aria-label="Estado del gasto" value={stateFilter} onChange={(event) => setStateFilter(event.target.value)}><option value="">Todos</option><option value="pendiente">Pendientes</option><option value="validado">Validados</option><option value="rechazado">Rechazados</option></select></div></div><ExpenseTable items={expenses?.items || []} busy={busy} onView={setViewingId} onReceipt={openReceipt} onEdit={(expense) => { setEditing(expense); setShowForm(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }} onCancel={cancel} onReview={review} canValidate={Boolean(work?.permissions.can_validate)} /></section></>}
+    {tab === 'gastos' && <>{(showForm || editing) && catalog && <WorkExpenseForm key={editing?.id || 'new'} workId={workId} catalog={catalog} expense={editing} onCancel={() => { setShowForm(false); setEditing(undefined); }} onSaved={(text) => { setMessage(text); setShowForm(false); setEditing(undefined); void refresh(); }} />}<section className="panel"><div className="panel-header"><div><h2>Movimientos de la obra</h2><p role="status">{visibleExpenses.length} gastos encontrados</p></div><div className="expense-filters">
+        <ToggleGroup.Root className="expense-state-filters" type="single" value={stateFilter} onValueChange={(value) => { if (expenseStates.some((state) => state.value === value)) setStateFilter(value as ExpenseStateFilter); }} aria-label="Estado del gasto">
+          {expenseStates.map((state) => <ToggleGroup.Item key={state.value} value={state.value} className="expense-state-pill">{state.label}</ToggleGroup.Item>)}
+        </ToggleGroup.Root>
+        <input aria-label="Buscar gastos" placeholder="Concepto, folio o proveedor" value={search} onChange={(event) => setSearch(event.target.value)} />
+      </div></div><ExpenseTable items={visibleExpenses} busy={busy} onView={setViewingId} onReceipt={openReceipt} onEdit={(expense) => { setEditing(expense); setShowForm(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }} onCancel={cancel} onReview={review} canValidate={Boolean(work?.permissions.can_validate)} /></section></>}
 
     {tab === 'validacion' && <section className="panel"><div className="panel-header"><div><h2>Gastos pendientes de validar</h2><p>El comprobante es obligatorio para aprobar</p></div><button className="btn" disabled={!selected.length || busy} onClick={() => void batchValidate()}>Validar seleccionados ({selected.length})</button></div><div className="expense-table-wrap"><table className="expense-table"><thead><tr><th aria-label="Seleccionar" /><th>Fecha / concepto</th><th>Clasificación</th><th>Proveedor</th><th>Importe</th><th>Comprobante</th><th>Acciones</th></tr></thead><tbody>{pending.map((expense) => <tr key={expense.id}><td><input type="checkbox" aria-label={`Seleccionar ${expense.concepto}`} checked={selected.includes(expense.id)} disabled={!expense.comprobante_path || busy} onChange={(event) => setSelected((current) => event.target.checked ? [...current, expense.id] : current.filter((id) => id !== expense.id))} /></td><td><strong>{expense.concepto}</strong><small>{expense.fecha} · {expense.autor}</small></td><td>{expense.area_ruta?.join(' › ')}<small>{expense.partida} › {expense.subpartida}</small></td><td>{expense.proveedor}</td><td><strong>{currency(expense.importe)}</strong></td><td>{expense.comprobante_path ? <button className="text-action" disabled={busy} onClick={() => void openReceipt(expense)}>Ver archivo</button> : <><span className="missing-receipt">Faltante</span><label className={`text-action receipt-upload${busy ? ' disabled' : ''}`}>Adjuntar comprobante<input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" disabled={busy} onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; if (file) void attachReceipt(expense, file); }} /></label></>}</td><td><button className="text-action" disabled={!expense.comprobante_path || busy} title={!expense.comprobante_path ? 'Adjunta un comprobante para validar' : undefined} onClick={() => void review(expense.id, 'validate')}>Validar</button><button className="text-action danger" disabled={busy} onClick={() => void review(expense.id, 'reject')}>Rechazar</button></td></tr>)}</tbody></table>{pending.length === 0 && <p className="empty-state">No hay gastos pendientes.</p>}</div></section>}
 
