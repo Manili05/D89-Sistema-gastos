@@ -9,7 +9,15 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from app.core.config import Settings
-from app.models import IncomeCreate, IncomeState, LegacyIncomeCreate, Role, UserContext
+from app.models import (
+    IncomeBatchReconcile,
+    IncomeCreate,
+    IncomeState,
+    IncomeStatusUpdate,
+    LegacyIncomeCreate,
+    Role,
+    UserContext,
+)
 from app.services import repository
 
 
@@ -86,7 +94,11 @@ def test_income_repository_passes_exact_decimal_and_audits(monkeypatch, state):
         Decimal("99999999999999.9999"),
         state.value,
         user.id,
+        state.value,
+        user.id,
+        state.value,
     )
+    assert "conciliado_por, conciliado_en" in insert.args[0]
     assert result["id"] == income_id
     assert any("insert into public.audit_log_negocio" in call.args[0] for call in calls)
 
@@ -109,3 +121,90 @@ def test_operativo_cannot_create_even_calling_repository_directly(monkeypatch):
         )
     assert error.value.status_code == 403
     connection.execute.assert_not_called()
+
+
+@pytest.mark.parametrize("reason", [None, "", "   ", "abc"])
+def test_reverting_reconciliation_requires_a_reason(reason):
+    with pytest.raises(ValidationError):
+        IncomeStatusUpdate.model_validate({"state": "pendiente", "reason": reason})
+
+
+def test_status_update_accepts_reconcile_without_reason_and_trims():
+    assert IncomeStatusUpdate.model_validate({"state": "conciliado"}).reason is None
+    update = IncomeStatusUpdate.model_validate(
+        {"state": "pendiente", "reason": "  Error de captura "}
+    )
+    assert update.reason == "Error de captura"
+    with pytest.raises(ValidationError):
+        IncomeStatusUpdate.model_validate({"state": "validado"})
+    with pytest.raises(ValidationError):
+        IncomeStatusUpdate.model_validate({"state": "pendiente", "reason": "x" * 501})
+
+
+@pytest.mark.parametrize("ids", [[], [str(uuid4()) for _ in range(101)]])
+def test_batch_reconcile_bounds(ids):
+    with pytest.raises(ValidationError):
+        IncomeBatchReconcile.model_validate({"work_id": str(uuid4()), "income_ids": ids})
+
+
+def _status_repo(monkeypatch, row):
+    connection = MagicMock()
+    connection.execute.return_value.fetchone.return_value = row
+
+    @contextmanager
+    def fake_transaction(settings):
+        yield connection
+
+    monkeypatch.setattr(repository, "transaction", fake_transaction)
+    monkeypatch.setattr(repository, "require_work_access", lambda *args: None)
+    monkeypatch.setattr(repository, "_income_detail", lambda *args: {"id": "ok"})
+    return connection
+
+
+@pytest.mark.parametrize(
+    ("row", "role", "state", "expected"),
+    [
+        ({"obra_id": uuid4(), "estado": "pendiente", "receipt_exists": True},
+         Role.OPERATIVO, "conciliado", 403),
+        ({"obra_id": uuid4(), "estado": "pendiente", "receipt_exists": False},
+         Role.ADMIN, "conciliado", 422),
+        ({"obra_id": uuid4(), "estado": "conciliado", "receipt_exists": True},
+         Role.ADMIN, "conciliado", 409),
+        (None, Role.ADMIN, "conciliado", 404),
+    ],
+)
+def test_update_income_status_guards(monkeypatch, row, role, state, expected):
+    connection = _status_repo(monkeypatch, row)
+    with pytest.raises(HTTPException) as error:
+        repository.update_income_status(
+            Settings(_env_file=None), UserContext(id=uuid4(), role=role), uuid4(),
+            IncomeStatusUpdate.model_validate({"state": state}),
+        )
+    assert error.value.status_code == expected
+    assert not any("update public.ingreso" in c.args[0] for c in connection.execute.call_args_list)
+
+
+def test_update_income_status_reconciles_and_reverts(monkeypatch):
+    user = UserContext(id=uuid4(), role=Role.ADMIN)
+    connection = _status_repo(
+        monkeypatch, {"obra_id": uuid4(), "estado": "pendiente", "receipt_exists": True}
+    )
+    repository.update_income_status(
+        Settings(_env_file=None), user, uuid4(),
+        IncomeStatusUpdate.model_validate({"state": "conciliado"}),
+    )
+    sql = [c.args[0] for c in connection.execute.call_args_list]
+    assert "for update" in sql[0]
+    assert any("estado = 'conciliado', conciliado_por" in q for q in sql)
+
+    connection = _status_repo(
+        monkeypatch, {"obra_id": uuid4(), "estado": "conciliado", "receipt_exists": True}
+    )
+    repository.update_income_status(
+        Settings(_env_file=None), user, uuid4(),
+        IncomeStatusUpdate.model_validate({"state": "pendiente", "reason": "Depósito duplicado"}),
+    )
+    calls = connection.execute.call_args_list
+    [update] = [c for c in calls if "update public.ingreso" in c.args[0]]
+    assert "conciliado_por = null" in update.args[0]
+    assert update.args[1][0] == "Depósito duplicado"

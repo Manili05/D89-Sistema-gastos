@@ -17,8 +17,10 @@ from app.models import (
     ExpenseCreate,
     ExpenseUpdate,
     ImportPreviewUpdate,
+    IncomeBatchReconcile,
     IncomeCreate,
     IncomeState,
+    IncomeStatusUpdate,
     LegacyIncomeCreate,
     Role,
     SubcontractCreate,
@@ -1138,6 +1140,9 @@ INCOME_SELECT = """
     select i.id, i.obra_id as work_id, i.folio, i.fecha as received_on,
            i.concepto as concept, i.importe as amount, i.estado::text as state,
            i.creado_por as created_by, i.creado_en as created_at,
+           i.conciliado_en as reconciled_at, i.motivo_reversion as reversal_reason,
+           (select p.nombre from public.perfil_usuario p where p.id = i.conciliado_por)
+             as reconciled_by,
            coalesce((select jsonb_agg(jsonb_build_object(
                'id', k.id, 'path', k.ruta, 'kind', k.tipo, 'created_at', k.creado_en)
                order by k.creado_en, k.id)
@@ -1191,10 +1196,15 @@ def create_income(
         amount = payload.amount.quantize(Decimal("0.0001"))
         row = connection.execute(
             """insert into public.ingreso
-               (obra_id, concepto, fecha, fecha_real, importe, estado, creado_por)
-               values (%s, %s, %s, %s, %s, %s, %s) returning id""",
+               (obra_id, concepto, fecha, fecha_real, importe, estado, creado_por,
+                conciliado_por, conciliado_en)
+               values (%s, %s, %s, %s, %s, %s, %s,
+                       case when %s = 'conciliado' then %s::uuid end,
+                       case when %s = 'conciliado' then now() end)
+               returning id""",
             (work_id, payload.concept, payload.received_on, actual_date,
-             amount, payload.state.value, user.id),
+             amount, payload.state.value, user.id,
+             payload.state.value, user.id, payload.state.value),
         ).fetchone()
         assert row is not None
         _audit_income(connection, row["id"], user, "crear", {
@@ -1241,6 +1251,86 @@ def attach_income_receipt(
                 "tipo": kind, "ruta": path,
             })
         return _income_detail(connection, income_id)
+
+
+INCOME_HAS_RECEIPT = """exists(select 1 from public.ingreso_comprobante k
+    join storage.objects so on so.bucket_id = 'comprobantes' and so.name = k.ruta
+    where k.ingreso_id = i.id)"""
+
+
+def update_income_status(
+    settings: Settings, user: UserContext, income_id: UUID, payload: IncomeStatusUpdate,
+) -> dict[str, Any]:
+    """pendiente → conciliado needs a stored receipt; conciliado → pendiente needs a reason."""
+    with transaction(settings) as connection:
+        income = connection.execute(
+            f"""select i.obra_id, i.estado::text as estado, {INCOME_HAS_RECEIPT} as receipt_exists
+                from public.ingreso i where i.id = %s for update of i""",
+            (income_id,),
+        ).fetchone()
+        if income is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Ingreso inexistente")
+        require_work_access(connection, user, income["obra_id"])
+        if user.role is not Role.ADMIN:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Solo administración concilia ingresos")
+        target = payload.state.value
+        if income["estado"] == target:
+            raise HTTPException(status.HTTP_409_CONFLICT, f"El ingreso ya está {target}")
+        if target == "conciliado":
+            if not income["receipt_exists"]:
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    "Adjunta al menos un comprobante antes de conciliar",
+                )
+            connection.execute(
+                """update public.ingreso set estado = 'conciliado', conciliado_por = %s,
+                     conciliado_en = now(), motivo_reversion = null where id = %s""",
+                (user.id, income_id),
+            )
+            _audit_income(connection, income_id, user, "conciliar", {})
+        else:
+            connection.execute(
+                """update public.ingreso set estado = 'pendiente', conciliado_por = null,
+                     conciliado_en = null, motivo_reversion = %s where id = %s""",
+                (payload.reason, income_id),
+            )
+            _audit_income(
+                connection, income_id, user, "revertir_conciliacion", {"motivo": payload.reason}
+            )
+        return _income_detail(connection, income_id)
+
+
+def reconcile_incomes_batch(
+    settings: Settings, user: UserContext, payload: IncomeBatchReconcile,
+) -> dict[str, Any]:
+    """All-or-nothing: every income must belong to the work, be pending and have a receipt."""
+    with transaction(settings) as connection:
+        require_work_access(connection, user, payload.work_id)
+        if user.role is not Role.ADMIN:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Solo administración concilia ingresos")
+        ids = list(dict.fromkeys(payload.income_ids))
+        rows = connection.execute(
+            f"""select i.id, i.estado::text as estado, {INCOME_HAS_RECEIPT} as receipt_exists
+                from public.ingreso i where i.obra_id = %s and i.id = any(%s) for update of i""",
+            (payload.work_id, ids),
+        ).fetchall()
+        if len(rows) != len(ids):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY, "El lote contiene ingresos inválidos"
+            )
+        if any(row["estado"] != "pendiente" or not row["receipt_exists"] for row in rows):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "Todos los ingresos deben estar pendientes y tener comprobante",
+            )
+        connection.execute(
+            """update public.ingreso set estado = 'conciliado', conciliado_por = %s,
+                 conciliado_en = now(), motivo_reversion = null where id = any(%s)""",
+            (user.id, ids),
+        )
+        for income_id in ids:
+            _audit_income(connection, income_id, user, "conciliar_lote", {"lote": len(ids)})
+        return {"reconciled": len(ids), "income_ids": ids}
 
 
 def list_legacy_incomes(
@@ -1454,6 +1544,16 @@ def work_overview(
             Decimal("0") if not budget else totals["validated"] / budget * Decimal("100")
         )
 
+        # Cumulative to the period end, like `validated`, so both compare on the same basis.
+        incomes = connection.execute(
+            """select coalesce(sum(i.importe), 0) as total,
+                 coalesce(sum(i.importe) filter (where i.estado = 'conciliado'), 0) as reconciled,
+                 coalesce(sum(i.importe) filter (where i.estado = 'pendiente'), 0) as pending,
+                 count(*) as count
+               from public.ingreso i where i.obra_id = %s and i.fecha <= %s""",
+            (work_id, end_date),
+        ).fetchone()
+
         period_clauses = ["g.obra_id = %s", "g.eliminado_en is null"]
         period_params: list[Any] = [work_id]
         if date_from:
@@ -1534,6 +1634,7 @@ def work_overview(
             "weekly": list(weekly),
             "suppliers": list(suppliers),
             "categories": list(categories),
+            "incomes": incomes,
             "permissions": {"can_validate": user.role is Role.ADMIN},
         }
 

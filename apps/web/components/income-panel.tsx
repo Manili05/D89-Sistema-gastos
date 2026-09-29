@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { type CSSProperties, useCallback, useEffect, useState } from 'react';
+import { CASHFLOW_COLORS } from '@/components/cashflow-chart';
 import { PlusIcon } from '@/components/icons';
 import { IncomeForm } from '@/components/income-form';
 import { IncomeTable } from '@/components/income-table';
@@ -38,6 +39,11 @@ export function IncomePanel({ workId, canManage }: { workId: string; canManage: 
   return <>
     {message && <p className="notice success" role="status">{message}</p>}
     {error && <p className="notice error" role="alert">{error}</p>}
+    {items && <section className="metrics income-panel-metrics" aria-label="Resumen de ingresos">
+      <article className="metric-card" style={{ '--accent': '#17233c' } as CSSProperties}><span className="metric-label">Total cobrado</span><strong className="metric-value" data-testid="income-total">{displayCents(sum())}</strong><span className="metric-foot">{items.length} ingreso{items.length === 1 ? '' : 's'}</span></article>
+      <article className="metric-card" style={{ '--accent': CASHFLOW_COLORS.reconciled } as CSSProperties}><span className="metric-label">Conciliado</span><strong className="metric-value" data-testid="income-reconciled">{displayCents(sum('conciliado'))}</strong><span className="metric-foot">Confirmado contra comprobante</span></article>
+      <article className="metric-card" style={{ '--accent': '#b78027' } as CSSProperties}><span className="metric-label">Pendiente de conciliar</span><strong className="metric-value" data-testid="income-pending">{displayCents(sum('pendiente'))}</strong><span className="metric-foot">Se concilia en Validación</span></article>
+    </section>}
     {showForm && <IncomeForm workId={workId} onCancel={() => { setShowForm(false); void load(); }}
       onSaved={(_income, text) => { setShowForm(false); setMessage(text); void load(); }} />}
     <section className="panel" aria-label="Ingresos de la obra">
@@ -45,12 +51,7 @@ export function IncomePanel({ workId, canManage }: { workId: string; canManage: 
         <div><h2>Ingresos de la obra</h2><p>{items ? `${items.length} ingreso${items.length === 1 ? '' : 's'} registrado${items.length === 1 ? '' : 's'}` : 'Cargando…'}</p></div>
         {canManage && !showForm && <button type="button" className="btn" onClick={() => { setMessage(''); setShowForm(true); }}><PlusIcon />Nuevo ingreso</button>}
       </div>
-      {items && <dl className="income-summary">
-        <div><dt>Total cobrado</dt><dd data-testid="income-total">{displayCents(sum())}</dd></div>
-        <div><dt>Pendiente de conciliar</dt><dd data-testid="income-pending">{displayCents(sum('pendiente'))}</dd></div>
-        <div><dt>Conciliado</dt><dd data-testid="income-reconciled">{displayCents(sum('conciliado'))}</dd></div>
-      </dl>}
-      {items ? <IncomeTable items={items} /> : !error && <p role="status">Cargando ingresos…</p>}
+      {items ? <IncomeTable items={items} onCreate={canManage && !showForm ? () => { setMessage(''); setShowForm(true); } : undefined} /> : !error && <p className="empty-state" role="status">Cargando ingresos…</p>}
     </section>
   </>;
 }

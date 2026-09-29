@@ -212,6 +212,72 @@ def test_income_api_migration_and_postgrest_security(isolated_services, installa
                     == 3
                 )  # create + two distinct receipts
 
+                # Reconciliation: admin only, needs a stored receipt, revert needs a reason.
+                bare = api.post(url, json=payload, headers=headers("admin")).json()
+                status_url = f"/api/v1/incomes/{income_id}/status"
+                reconcile = {"state": "conciliado"}
+                assert api.patch(
+                    f"/api/v1/incomes/{bare['id']}/status", json=reconcile,
+                    headers=headers("admin"),
+                ).status_code == 422
+                for role, expected in ((None, 401), ("operativo", 403), ("outsider", 403)):
+                    assert api.patch(
+                        status_url, json=reconcile, headers=headers(role)
+                    ).status_code == expected
+                done = api.patch(status_url, json=reconcile, headers=headers("admin"))
+                assert done.status_code == 200, done.text
+                assert done.json()["state"] == "conciliado"
+                assert done.json()["reconciled_by"] == "Test admin"
+                assert done.json()["reconciled_at"]
+                assert api.patch(
+                    status_url, json=reconcile, headers=headers("admin")
+                ).status_code == 409
+                assert api.patch(
+                    status_url, json={"state": "pendiente"}, headers=headers("admin")
+                ).status_code == 422
+                reverted = api.patch(
+                    status_url, json={"state": "pendiente", "reason": "Depósito duplicado"},
+                    headers=headers("admin"),
+                )
+                assert reverted.status_code == 200, reverted.text
+                assert reverted.json()["state"] == "pendiente"
+                assert reverted.json()["reconciled_by"] is None
+                assert reverted.json()["reversal_reason"] == "Depósito duplicado"
+
+                batch_url = "/api/v1/incomes/reconcile-batch"
+                batch = {"work_id": str(ids["work"]), "income_ids": [income_id, bare["id"]]}
+                assert api.post(batch_url, json=batch, headers=headers("operativo")).status_code \
+                    == 403
+                assert api.post(batch_url, json=batch, headers=headers("admin")).status_code == 422
+                assert connection.execute(
+                    "select estado::text from public.ingreso where id=%s", (income_id,)
+                ).fetchone()[0] == "pendiente"  # all or nothing
+                assert api.post(
+                    batch_url, json={"work_id": str(uuid4()), "income_ids": [income_id]},
+                    headers=headers("admin"),
+                ).status_code == 403
+                batched = api.post(
+                    batch_url, json={**batch, "income_ids": [income_id]}, headers=headers("admin")
+                )
+                assert batched.status_code == 200 and batched.json()["reconciled"] == 1
+                actions = [row[0] for row in connection.execute(
+                    "select accion from public.audit_log_negocio where entidad='ingreso' "
+                    "and entidad_id=%s order by creado_en, id",
+                    (income_id,),
+                ).fetchall()]
+                assert actions[-3:] == ["conciliar", "revertir_conciliacion", "conciliar_lote"]
+
+                overview = api.get(
+                    f"/api/v1/works/{ids['work']}/overview",
+                    params={"to": "2026-09-30"}, headers=headers("operativo"),
+                )
+                assert overview.status_code == 200, overview.text
+                incomes = overview.json()["incomes"]
+                legacy_offset = Decimal("10.1234") if installation == "upgrade" else Decimal("0")
+                assert Decimal(str(incomes["reconciled"])) == Decimal("1234.5678") + legacy_offset
+                assert Decimal(str(incomes["pending"])) == Decimal("1234.5678") + legacy_offset
+                assert incomes["count"] == (4 if installation == "upgrade" else 2)
+
                 # Existing cashflow clients and dashboard still work after the rename.
                 legacy = api.post(
                     "/api/v1/incomes",
@@ -234,7 +300,8 @@ def test_income_api_migration_and_postgrest_security(isolated_services, installa
                 assert any(row["id"] == legacy.json()["id"] for row in old_list.json())
                 dashboard = api.get("/api/v1/dashboard", headers=headers("admin"))
                 assert dashboard.status_code == 200, dashboard.text
-                expected_collected = Decimal("50.1250")
+                # The legacy estimation plus the income reconciled above.
+                expected_collected = Decimal("50.1250") + Decimal("1234.5678")
                 if installation == "upgrade":
                     expected_collected += Decimal("10.1234")
                 assert Decimal(str(dashboard.json()["totals"]["collected"])) == expected_collected

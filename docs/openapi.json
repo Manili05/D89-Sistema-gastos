@@ -1331,6 +1331,32 @@
         "title": "ImportPreviewUpdate",
         "type": "object"
       },
+      "IncomeBatchReconcile": {
+        "additionalProperties": false,
+        "properties": {
+          "income_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Income Ids",
+            "type": "array"
+          },
+          "work_id": {
+            "format": "uuid",
+            "title": "Work Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "work_id",
+          "income_ids"
+        ],
+        "title": "IncomeBatchReconcile",
+        "type": "object"
+      },
       "IncomeCreate": {
         "additionalProperties": false,
         "properties": {
@@ -1459,6 +1485,40 @@
             "title": "Received On",
             "type": "string"
           },
+          "reconciled_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reconciled At"
+          },
+          "reconciled_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reconciled By"
+          },
+          "reversal_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reversal Reason"
+          },
           "state": {
             "$ref": "#/components/schemas/IncomeState"
           },
@@ -1489,6 +1549,31 @@
         ],
         "title": "IncomeState",
         "type": "string"
+      },
+      "IncomeStatusUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "state": {
+            "$ref": "#/components/schemas/IncomeState"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "IncomeStatusUpdate",
+        "type": "object"
       },
       "JevChatRequest": {
         "properties": {
@@ -4137,6 +4222,67 @@
         ]
       }
     },
+    "/api/v1/incomes/reconcile-batch": {
+      "post": {
+        "operationId": "post_incomes_reconcile_batch_api_v1_incomes_reconcile_batch_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IncomeBatchReconcile"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Post Incomes Reconcile Batch Api V1 Incomes Reconcile Batch Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Incomes Reconcile Batch",
+        "tags": [
+          "cashflow"
+        ]
+      }
+    },
     "/api/v1/incomes/{income_id}": {
       "get": {
         "operationId": "get_income_detail_api_v1_incomes__income_id__get",
@@ -4260,6 +4406,76 @@
           }
         },
         "summary": "Post Income Receipt",
+        "tags": [
+          "cashflow"
+        ]
+      }
+    },
+    "/api/v1/incomes/{income_id}/status": {
+      "patch": {
+        "description": "Reconcile (needs a stored receipt) or revert to pending (needs a reason).",
+        "operationId": "patch_income_status_api_v1_incomes__income_id__status_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "income_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Income Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IncomeStatusUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncomeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Patch Income Status",
         "tags": [
           "cashflow"
         ]

@@ -370,6 +370,29 @@ class IncomeResponse(BaseModel):
     created_by: UUID
     created_at: datetime
     receipts: list[IncomeReceipt] = Field(default_factory=list)
+    reconciled_at: datetime | None = None
+    reconciled_by: str | None = None
+    reversal_reason: str | None = None
+
+
+class IncomeStatusUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    state: IncomeState
+    reason: str | None = Field(default=None, max_length=500)
+
+    @model_validator(mode="after")
+    def reversal_needs_reason(self) -> "IncomeStatusUpdate":
+        if self.state is IncomeState.PENDIENTE and (not self.reason or len(self.reason) < 5):
+            raise ValueError("Revertir una conciliación requiere un motivo (mínimo 5 caracteres)")
+        return self
+
+
+class IncomeBatchReconcile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    work_id: UUID
+    income_ids: list[UUID] = Field(min_length=1, max_length=100)
 
 
 class SubcontractCreate(BaseModel):

@@ -31,9 +31,11 @@ from app.models import (
     HealthResponse,
     ImportConfirm,
     ImportPreviewUpdate,
+    IncomeBatchReconcile,
     IncomeCreate,
     IncomeReceiptCreate,
     IncomeResponse,
+    IncomeStatusUpdate,
     JevChatRequest,
     JevChatResponse,
     LegacyIncomeCreate,
@@ -85,12 +87,14 @@ from app.services.repository import (
     list_weekly_closes,
     list_work_expenses,
     list_works,
+    reconcile_incomes_batch,
     reopen_week,
     report_expenses,
     review_expense,
     store_import_preview,
     update_expense,
     update_import_preview,
+    update_income_status,
     update_work,
     validate_expenses_batch,
     weekly_close_preview,
@@ -577,6 +581,26 @@ def get_income_detail(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> dict[str, Any]:
     return get_income(settings, user, income_id)
+
+
+@router.patch("/incomes/{income_id}/status", response_model=IncomeResponse, tags=["cashflow"])
+def patch_income_status(
+    income_id: UUID,
+    payload: IncomeStatusUpdate,
+    user: AdminUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    """Reconcile (needs a stored receipt) or revert to pending (needs a reason)."""
+    return update_income_status(settings, user, income_id, payload)
+
+
+@router.post("/incomes/reconcile-batch", tags=["cashflow"])
+def post_incomes_reconcile_batch(
+    payload: IncomeBatchReconcile,
+    user: AdminUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    return reconcile_incomes_batch(settings, user, payload)
 
 
 @router.post("/incomes/{income_id}/receipts", response_model=IncomeResponse, tags=["cashflow"])
