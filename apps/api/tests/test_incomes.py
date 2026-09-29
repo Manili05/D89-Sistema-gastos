@@ -14,6 +14,7 @@ from app.models import (
     IncomeCreate,
     IncomeState,
     IncomeStatusUpdate,
+    IncomeUpdate,
     LegacyIncomeCreate,
     Role,
     UserContext,
@@ -208,3 +209,93 @@ def test_update_income_status_reconciles_and_reverts(monkeypatch):
     [update] = [c for c in calls if "update public.ingreso" in c.args[0]]
     assert "conciliado_por = null" in update.args[0]
     assert update.args[1][0] == "Depósito duplicado"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {},
+        {"concept": None},
+        {"amount": "0"},
+        {"amount": "-5"},
+        {"amount": "0.00001"},
+        {"amount": "100000000000000"},
+        {"concept": "ab"},
+        {"received_on": "2026-02-30"},
+        {"state": "conciliado"},
+        {"folio": "I-99999"},
+    ],
+)
+def test_income_update_rejects_invalid_or_empty_changes(body):
+    with pytest.raises(ValidationError):
+        IncomeUpdate.model_validate(body)
+
+
+def test_income_update_accepts_partial_changes():
+    update = IncomeUpdate.model_validate({"concept": "  Estimación 2 ", "amount": "10.5"})
+    assert update.concept == "Estimación 2" and update.amount == Decimal("10.5")
+    assert update.model_fields_set == {"concept", "amount"}
+
+
+def _edit_repo(monkeypatch, row):
+    connection = MagicMock()
+    connection.execute.return_value.fetchone.return_value = row
+
+    @contextmanager
+    def fake_transaction(settings):
+        yield connection
+
+    monkeypatch.setattr(repository, "transaction", fake_transaction)
+    monkeypatch.setattr(repository, "require_work_access", lambda *args: None)
+    monkeypatch.setattr(repository, "_income_detail", lambda *args: {"id": "ok"})
+    return connection
+
+
+def _current(state="conciliado"):
+    return {
+        "obra_id": uuid4(), "fecha": date(2026, 9, 1), "concepto": "Anticipo",
+        "importe": Decimal("100.0000"), "estado": state,
+    }
+
+
+@pytest.mark.parametrize(("row", "role", "expected"), [
+    (None, Role.ADMIN, 404), (_current(), Role.OPERATIVO, 403),
+])
+def test_update_income_guards(monkeypatch, row, role, expected):
+    connection = _edit_repo(monkeypatch, row)
+    with pytest.raises(HTTPException) as error:
+        repository.update_income(
+            Settings(_env_file=None), UserContext(id=uuid4(), role=role), uuid4(),
+            IncomeUpdate.model_validate({"amount": "5"}),
+        )
+    assert error.value.status_code == expected
+    assert not any("update public.ingreso" in c.args[0] for c in connection.execute.call_args_list)
+
+
+@pytest.mark.parametrize("state", ["pendiente", "conciliado"])
+def test_update_income_changes_only_what_differs_and_audits(monkeypatch, state):
+    connection = _edit_repo(monkeypatch, _current(state))
+    repository.update_income(
+        Settings(_env_file=None), UserContext(id=uuid4(), role=Role.ADMIN), uuid4(),
+        IncomeUpdate.model_validate({"concept": "Anticipo", "amount": "150.5"}),
+    )
+    calls = connection.execute.call_args_list
+    assert "for update" in calls[0].args[0]
+    [update] = [c for c in calls if "update public.ingreso" in c.args[0]]
+    assert "importe = %(importe)s" in update.args[0] and "concepto" not in update.args[0]
+    assert update.args[1]["importe"] == Decimal("150.5000")
+    [audit] = [c for c in calls if "audit_log_negocio" in c.args[0]]
+    detail = audit.args[1][3].obj
+    assert detail == {
+        "estado": state, "antes": {"importe": "100.0000"}, "despues": {"importe": "150.5000"},
+    }
+
+
+def test_update_income_without_real_changes_writes_nothing(monkeypatch):
+    connection = _edit_repo(monkeypatch, _current())
+    repository.update_income(
+        Settings(_env_file=None), UserContext(id=uuid4(), role=Role.ADMIN), uuid4(),
+        IncomeUpdate.model_validate({"concept": "Anticipo", "amount": "100"}),
+    )
+    sql = [c.args[0] for c in connection.execute.call_args_list]
+    assert not any("update public.ingreso" in q or "audit_log_negocio" in q for q in sql)

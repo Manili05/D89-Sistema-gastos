@@ -346,6 +346,24 @@ class IncomeCreate(BaseModel):
     state: IncomeState = IncomeState.PENDIENTE
 
 
+class IncomeUpdate(BaseModel):
+    """Partial edit of an income's data; state changes go through /status."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    received_on: date | None = None
+    concept: str | None = Field(default=None, min_length=3, max_length=500)
+    amount: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=4)
+
+    @model_validator(mode="after")
+    def at_least_one_field(self) -> "IncomeUpdate":
+        if not self.model_fields_set or all(
+            getattr(self, name) is None for name in self.model_fields_set
+        ):
+            raise ValueError("Indica al menos un campo a modificar")
+        return self
+
+
 class IncomeReceiptCreate(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 

@@ -4,10 +4,11 @@ import { type DragEvent, type FormEvent, useRef, useState } from 'react';
 import { PlusIcon, UploadIcon } from '@/components/icons';
 import type { components } from '@/lib/api.generated';
 import { apiJson } from '@/lib/auth';
-import { centsFromDecimal, displayCents, toUnits } from '@/lib/money';
-import { MAX_RECEIPT_BYTES, receiptExtension, receiptPath, uploadReceipt } from '@/lib/receipts';
+import { centsFromDecimal, displayCents, toUnits, trimDecimal } from '@/lib/money';
+import { MAX_RECEIPT_BYTES, receiptExtension, receiptFileName, receiptPath, uploadReceipt } from '@/lib/receipts';
 
 type IncomeCreate = components['schemas']['IncomeCreate'];
+type IncomeUpdate = components['schemas']['IncomeUpdate'];
 type IncomeResponse = components['schemas']['IncomeResponse'];
 type ReceiptItem = {
   id: string; file: File;
@@ -29,15 +30,23 @@ function localDate(): string {
  * Register one income (admin only in the API) and attach any number of transfer
  * vouchers or invoices. Mirrors the expense form's retry model: the income is created
  * once; a failed file is retried alone without creating another income.
+ *
+ * With `initialData` it edits that income instead: fields are prefilled, only the
+ * changed ones go in `PATCH /incomes/{id}`, existing receipts are kept and new ones
+ * are appended. A retry after a failed upload does not repeat an applied edit.
  */
-export function IncomeForm({ workId, onSaved, onCancel }: {
+export function IncomeForm({ workId, initialData, onSaved, onCancel }: {
   workId: string;
+  initialData?: IncomeResponse;
   onSaved: (income: IncomeResponse, message: string) => void;
   onCancel: () => void;
 }) {
-  const [receivedOn, setReceivedOn] = useState(localDate);
-  const [concept, setConcept] = useState('');
-  const [amount, setAmount] = useState('');
+  const editing = Boolean(initialData);
+  const [receivedOn, setReceivedOn] = useState(() => initialData?.received_on ?? localDate());
+  const [concept, setConcept] = useState(initialData?.concept ?? '');
+  const [amount, setAmount] = useState(() => (initialData ? trimDecimal(initialData.amount) : ''));
+  /** Server state the edit is compared against; refreshed after each applied PATCH. */
+  const [baseline, setBaseline] = useState<IncomeResponse | undefined>(initialData);
   const [receipts, setReceipts] = useState<ReceiptItem[]>([]);
   const [rejected, setRejected] = useState<string[]>([]);
   const [dragging, setDragging] = useState(false);
@@ -48,6 +57,17 @@ export function IncomeForm({ workId, onSaved, onCancel }: {
   const amountUnits = toUnits(amount.replace(/,/g, ''), 4n);
   const amountValid = amountUnits !== null && amountUnits > 0n;
   const pending = receipts.filter((item) => !item.linked);
+  const fieldsValid = amountValid && concept.trim().length >= 3 && Boolean(receivedOn);
+
+  function changes(): IncomeUpdate {
+    if (!baseline) return {};
+    const update: IncomeUpdate = {};
+    if (receivedOn !== baseline.received_on) update.received_on = receivedOn;
+    if (concept.trim() !== baseline.concept) update.concept = concept.trim();
+    if (amountUnits !== toUnits(trimDecimal(baseline.amount), 4n)) update.amount = amount.trim().replace(/,/g, '');
+    return update;
+  }
+  const changed = Object.keys(changes()).length > 0;
 
   function addFiles(files: File[]) {
     const accepted: ReceiptItem[] = [];
@@ -97,9 +117,52 @@ export function IncomeForm({ workId, onSaved, onCancel }: {
     return { failures, latest };
   }
 
+  async function submitEdit() {
+    if (!baseline) return;
+    if (!fieldsValid) {
+      setMessage('Captura fecha, un concepto (mínimo 3 caracteres) y un importe mayor que cero con hasta 4 decimales.');
+      return;
+    }
+    const update = changes();
+    if (!Object.keys(update).length && !pending.length) {
+      setMessage('No hay cambios que guardar.');
+      return;
+    }
+    submitting.current = true;
+    setBusy(true);
+    setMessage('');
+    setRejected([]);
+    let current = baseline;
+    let edited = false;
+    try {
+      if (Object.keys(update).length) {
+        current = await apiJson<IncomeResponse>(`/incomes/${baseline.id}`, {
+          method: 'PATCH', body: JSON.stringify(update),
+        });
+        edited = true;
+        setBaseline(current);
+      }
+      const { failures, latest } = await uploadAndLink(current.id);
+      if (failures.length) throw new Error(failures.join(' · '));
+      onSaved(latest ?? current, `Ingreso ${current.folio} actualizado.`);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'No fue posible actualizar el ingreso.';
+      setMessage(edited || current !== initialData
+        ? `Los datos del ingreso ${current.folio} ya se guardaron. Reintenta sólo los comprobantes pendientes. ${detail}`
+        : detail);
+    } finally {
+      submitting.current = false;
+      setBusy(false);
+    }
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (submitting.current || busy) return;
+    if (editing) {
+      await submitEdit();
+      return;
+    }
     if (!created && (!amountValid || concept.trim().length < 3)) {
       setMessage('Captura un concepto (mínimo 3 caracteres) y un importe mayor que cero con hasta 4 decimales.');
       return;
@@ -135,8 +198,11 @@ export function IncomeForm({ workId, onSaved, onCancel }: {
     }
   }
 
-  return <form className="panel income-form" onSubmit={submit} aria-busy={busy} aria-label="Nuevo ingreso">
-    <div className="panel-header"><div><h2>{created ? `Ingreso ${created.folio}` : 'Nuevo ingreso'}</h2><p>Anticipos, estimaciones y demás cobros de la obra</p></div></div>
+  const title = baseline ? `Editar ingreso ${baseline.folio}` : created ? `Ingreso ${created.folio}` : 'Nuevo ingreso';
+  const existing = baseline?.receipts || [];
+  return <form className="panel income-form" onSubmit={submit} aria-busy={busy} aria-label={editing ? 'Editar ingreso' : 'Nuevo ingreso'}>
+    <div className="panel-header"><div><h2>{title}</h2><p>{editing ? 'Corrige fecha, concepto o importe y anexa comprobantes; los actuales se conservan' : 'Anticipos, estimaciones y demás cobros de la obra'}</p></div></div>
+    {baseline?.state === 'conciliado' && <p className="notice panel-notice" role="note">Este ingreso ya está conciliado. Los cambios quedan registrados en la bitácora con el valor anterior.</p>}
     {message && <p className="notice error" role="alert">{message}</p>}
     <fieldset disabled={busy} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
       <div className="form-section"><fieldset className="form-grid three" aria-label="Datos del ingreso" disabled={Boolean(created)} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
@@ -145,8 +211,11 @@ export function IncomeForm({ workId, onSaved, onCancel }: {
         <label className="field">Importe<input inputMode="decimal" value={amount} placeholder="0.00" onChange={(event) => setAmount(event.target.value)} required aria-describedby="income-amount-preview" /><span id="income-amount-preview" className="field-hint">{amountValid ? displayCents(centsFromDecimal(amount)) : 'Importe en MXN'}</span></label>
       </fieldset></div>
       <div className="form-section">
+        {existing.length > 0 && <div className="existing-receipts"><h3 className="detail-section-title">Comprobantes actuales (se conservan)</h3><ul className="receipt-list">{existing.map((receipt) => <li key={receipt.id}>
+          <span className="receipt-kind">{receipt.kind.toUpperCase()}</span><span>{receiptFileName(receipt.path)}</span><small>Vinculado</small>
+        </li>)}</ul></div>}
         <label className={`dropzone compact${dragging ? ' dragging' : ''}`} onDragOver={(event) => { event.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={onDrop}>
-          <span><span className="dropzone-icon"><UploadIcon size={22} /></span><strong>Arrastra aquí los comprobantes</strong><p>Transferencias o facturas en PDF o imagen · varios archivos · máximo 10 MB c/u. También puedes hacer clic para elegirlos.</p><input type="file" multiple aria-label="Comprobantes del ingreso" accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp" onChange={(event) => { const files = Array.from(event.currentTarget.files || []); event.currentTarget.value = ''; if (files.length) addFiles(files); }} /></span>
+          <span><span className="dropzone-icon"><UploadIcon size={22} /></span><strong>{editing ? 'Arrastra aquí comprobantes adicionales' : 'Arrastra aquí los comprobantes'}</strong><p>Transferencias o facturas en PDF o imagen · varios archivos · máximo 10 MB c/u. También puedes hacer clic para elegirlos.</p><input type="file" multiple aria-label="Comprobantes del ingreso" accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp" onChange={(event) => { const files = Array.from(event.currentTarget.files || []); event.currentTarget.value = ''; if (files.length) addFiles(files); }} /></span>
         </label>
         {rejected.length > 0 && <p className="notice error" role="alert">No se agregaron: {rejected.join(' · ')}</p>}
         {receipts.length > 0 && <ul className="receipt-list">{receipts.map((item) => <li key={item.id} className={item.error ? 'failed' : undefined}>
@@ -157,7 +226,9 @@ export function IncomeForm({ workId, onSaved, onCancel }: {
       </div>
       <div className="form-section"><div className="header-actions">
         <button type="button" className="btn secondary" onClick={onCancel}>{created ? 'Cerrar (ingreso guardado)' : 'Cancelar'}</button>
-        <button type="submit" className="btn" disabled={busy || (!created && (!amountValid || concept.trim().length < 3))}><PlusIcon />{busy ? 'Guardando…' : created ? `Reintentar comprobantes (${pending.length})` : 'Registrar ingreso'}</button>
+        {editing
+          ? <button type="submit" className="btn" disabled={busy || !fieldsValid || (!changed && !pending.length)}>{busy ? 'Guardando…' : 'Guardar cambios'}</button>
+          : <button type="submit" className="btn" disabled={busy || (!created && (!amountValid || concept.trim().length < 3))}><PlusIcon />{busy ? 'Guardando…' : created ? `Reintentar comprobantes (${pending.length})` : 'Registrar ingreso'}</button>}
       </div></div>
     </fieldset>
   </form>;

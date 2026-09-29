@@ -1758,3 +1758,187 @@ test('Ingresos: tarjetas homologadas, quién concilió y estado vacío con acci�
   await page.getByRole('button', { name: 'Registrar el primer ingreso' }).click();
   await expect(page.getByRole('form', { name: 'Nuevo ingreso' })).toBeVisible();
 });
+
+// --- Ingresos: consulta y edición ------------------------------------------------------
+
+test('Ingresos: Ver abre la consulta de sólo lectura con comprobantes; operativo no ve Editar', async ({ page }) => {
+  const mutations: string[] = [];
+  page.on('request', (request) => {
+    if (request.url().includes('/api/v1/') && request.method() !== 'GET') mutations.push(`${request.method()} ${request.url()}`);
+  });
+  await page.route(new RegExp(`/api/v1/works/${workId}$`), async (route) => {
+    await route.fulfill({ json: { id: workId, nombre: 'Infra Toluca', ubicacion: 'Toluca', fecha_inicio: '2026-01-01', fecha_fin: null, estado: 'activa', areas: 1, partidas: 1, permissions: { can_manage: false, can_validate: false } } });
+  });
+  await page.route(`**/api/v1/works/${workId}/incomes`, async (route) => { await route.fulfill({ json: incomeRows }); });
+  await page.route(`**/api/v1/incomes/${incomeRows[0].id}`, async (route) => { await route.fulfill({ json: incomeRows[0] }); });
+  const signed: string[] = [];
+  await page.route('**/storage/v1/object/sign/comprobantes/**', async (route) => {
+    signed.push(decodeURIComponent(new URL(route.request().url()).pathname));
+    await route.fulfill({ json: { signedURL: '/object/sign/comprobantes/firmado.pdf?token=ingreso' } });
+  });
+  await page.route('**/storage/v1/object/sign/comprobantes/firmado.pdf**', async (route) => {
+    await route.fulfill({ body: '%PDF-1.4', contentType: 'application/pdf' });
+  });
+  await login(page);
+  await page.goto(`/obras/${workId}/ingresos`);
+  const table = page.getByRole('table', { name: 'Ingresos de la obra' });
+  await expect(table.getByRole('columnheader', { name: 'Acciones' })).toBeVisible();
+  await expect(table.getByRole('button', { name: /^Editar ingreso/ })).toHaveCount(0);
+  const viewButton = table.getByRole('button', { name: 'Ver ingreso I-00002' });
+  await viewButton.click();
+  const dialog = page.getByRole('dialog', { name: 'Ingreso I-00002' });
+  await expect(dialog).toContainText('Consulta de ingreso · sólo lectura');
+  await expect(dialog.getByTestId('income-detail-amount')).toHaveText('$120,000.01');
+  await expect(dialog).toContainText('Estimación 1');
+  await expect(dialog).toContainText('2026-09-20');
+  await expect(dialog).toContainText('Conciliado');
+  await expect(dialog).toContainText('Sergio Gómez');
+  await expect(dialog.getByRole('textbox')).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: 'Editar' })).toHaveCount(0);
+  const popup = page.waitForEvent('popup');
+  await dialog.getByRole('button', { name: 'Ver transferencia.pdf' }).click();
+  expect((await popup).url()).toContain('token=ingreso');
+  const download = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: 'Descargar transferencia.pdf' }).click();
+  await download;
+  expect(signed).toHaveLength(2);
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(viewButton).toBeFocused();
+  expect(mutations).toEqual([]);
+});
+
+test('Ingresos: Editar prellena, envía sólo lo modificado, conserva y anexa comprobantes', async ({ page }) => {
+  const income = incomeRows[0];
+  let rows: Record<string, unknown>[] = [...incomeRows];
+  const patches: unknown[] = [];
+  const uploads: string[] = [];
+  const linked: string[] = [];
+  await page.route(`**/api/v1/works/${workId}/incomes`, async (route) => { await route.fulfill({ json: rows }); });
+  await page.route(`**/api/v1/incomes/${income.id}`, async (route) => {
+    if (route.request().method() === 'PATCH') {
+      const body = route.request().postDataJSON();
+      patches.push(body);
+      const updated = { ...income, ...body, amount: body.amount ?? income.amount };
+      rows = [updated, incomeRows[1]];
+      await route.fulfill({ json: updated });
+    } else {
+      await route.fulfill({ json: rows[0] });
+    }
+  });
+  await page.route('**/storage/v1/object/comprobantes/**', async (route) => {
+    uploads.push(decodeURIComponent(new URL(route.request().url()).pathname));
+    await route.fulfill({ status: uploads.length === 1 ? 500 : 200, json: uploads.length === 1 ? { message: 'Fallo simulado de subida' } : { Key: 'ok' } });
+  });
+  await page.route(`**/api/v1/incomes/${income.id}/receipts`, async (route) => {
+    const path = route.request().postDataJSON().path;
+    linked.push(path);
+    const current = rows[0] as typeof income;
+    const withReceipt = { ...current, receipts: [...current.receipts, { id: '79797979-7979-4979-8979-797979797979', path, kind: 'pdf', created_at: '2026-09-29T12:00:00Z' }] };
+    rows = [withReceipt, incomeRows[1]];
+    await route.fulfill({ json: withReceipt });
+  });
+  await login(page);
+  await page.goto(`/obras/${workId}/ingresos`);
+  // Editing also starts from the read-only detail.
+  await page.getByRole('button', { name: 'Ver ingreso I-00002' }).click();
+  await page.getByRole('dialog', { name: 'Ingreso I-00002' }).getByRole('button', { name: 'Editar' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  const form = page.getByRole('form', { name: 'Editar ingreso' });
+  await expect(form.getByRole('heading', { name: 'Editar ingreso I-00002' })).toBeVisible();
+  await expect(form.getByRole('note')).toContainText('ya está conciliado');
+  await expect(form.getByLabel('Fecha')).toHaveValue('2026-09-20');
+  await expect(form.getByLabel('Concepto')).toHaveValue('Estimación 1');
+  await expect(form.getByLabel('Importe')).toHaveValue('120000.005');
+  await expect(form).toContainText('Comprobantes actuales (se conservan)');
+  await expect(form).toContainText('transferencia.pdf');
+  const save = form.getByRole('button', { name: 'Guardar cambios' });
+  await expect(save).toBeDisabled();
+  await form.getByLabel('Concepto').fill('Estimación 1 corregida');
+  await form.getByLabel('Importe').fill('121500.50');
+  await form.getByLabel('Comprobantes del ingreso').setInputFiles({ name: 'complemento.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4') });
+  await save.click();
+  // The edit was applied; the failed file is retried alone without repeating the PATCH.
+  await expect(form.getByRole('alert')).toContainText('Los datos del ingreso I-00002 ya se guardaron');
+  await save.click();
+  await expect(page.getByRole('status').filter({ hasText: 'Ingreso I-00002 actualizado.' })).toBeVisible();
+  await expect(form).toHaveCount(0);
+  expect(patches).toEqual([{ concept: 'Estimación 1 corregida', amount: '121500.50' }]);
+  expect(uploads).toHaveLength(2);
+  expect(uploads.every((path) => path.includes(`/${workId}/${income.id}/`))).toBe(true);
+  expect(linked).toHaveLength(1);
+  const row = page.getByRole('table', { name: 'Ingresos de la obra' }).getByRole('row').filter({ hasText: 'I-00002' });
+  await expect(row).toContainText('Estimación 1 corregida');
+  await expect(row).toContainText('$121,500.50');
+  await expect(row).toContainText('transferencia.pdf');
+  await expect(row).toContainText('complemento.pdf');
+});
+
+test('Ingresos: Editar sin cambios no envía nada y Cancelar cierra el formulario', async ({ page }) => {
+  const requests: string[] = [];
+  page.on('request', (request) => { if (request.method() === 'PATCH') requests.push(request.url()); });
+  await page.route(`**/api/v1/works/${workId}/incomes`, async (route) => { await route.fulfill({ json: incomeRows }); });
+  await login(page);
+  await page.goto(`/obras/${workId}/ingresos`);
+  await page.getByRole('button', { name: 'Editar ingreso I-00001' }).click();
+  const form = page.getByRole('form', { name: 'Editar ingreso' });
+  await expect(form.getByRole('note')).toHaveCount(0);
+  await form.getByLabel('Concepto').fill('Anticipo');
+  await expect(form.getByRole('button', { name: 'Guardar cambios' })).toBeDisabled();
+  await form.getByLabel('Importe').fill('0');
+  await form.getByLabel('Concepto').fill('Anticipo 2');
+  await expect(form.getByRole('button', { name: 'Guardar cambios' })).toBeDisabled();
+  await form.getByRole('button', { name: 'Cancelar' }).click();
+  await expect(form).toHaveCount(0);
+  expect(requests).toEqual([]);
+});
+
+test('Validación: Ver y Editar junto a Conciliar; al guardar la lista refleja el cambio', async ({ page }) => {
+  const a = pendingWithReceipt('75757575-7575-4575-8575-757575757575', 'I-00004', '30000.0000');
+  let rows: Record<string, unknown>[] = [a, incomeRows[0]];
+  const patches: unknown[] = [];
+  await page.route(`**/api/v1/works/${workId}/incomes`, async (route) => { await route.fulfill({ json: rows }); });
+  await page.route(`**/api/v1/incomes/${a.id}`, async (route) => {
+    if (route.request().method() === 'PATCH') {
+      const body = route.request().postDataJSON();
+      patches.push(body);
+      const updated = { ...a, ...body };
+      rows = [updated, incomeRows[0]];
+      await route.fulfill({ json: updated });
+    } else {
+      await route.fulfill({ json: rows[0] });
+    }
+  });
+  await login(page);
+  await page.goto(`/obras/${workId}/validacion`);
+  await page.getByRole('radiogroup', { name: 'Qué validar' }).getByRole('radio', { name: 'Conciliar ingresos' }).click();
+  const pendingTable = page.getByRole('table', { name: 'Ingresos pendientes de conciliar' });
+  const row = pendingTable.getByRole('row').filter({ hasText: 'I-00004' });
+  await expect(row.getByRole('button', { name: 'Ver ingreso I-00004' })).toBeVisible();
+  await expect(row.getByRole('button', { name: 'Editar ingreso I-00004' })).toBeVisible();
+  await expect(row.getByRole('button', { name: 'Conciliar ingreso I-00004' })).toBeVisible();
+  const reconciledTable = page.getByRole('table', { name: 'Ingresos conciliados' });
+  await expect(reconciledTable.getByRole('button', { name: 'Ver ingreso I-00002' })).toBeVisible();
+  await expect(reconciledTable.getByRole('button', { name: 'Editar ingreso I-00002' })).toBeVisible();
+  await expect(reconciledTable.getByRole('button', { name: 'Revertir conciliación del ingreso I-00002' })).toBeVisible();
+
+  await row.getByRole('button', { name: 'Ver ingreso I-00004' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Ingreso I-00004' });
+  await expect(dialog.getByTestId('income-detail-amount')).toHaveText('$30,000.00');
+  await dialog.getByRole('button', { name: 'Cerrar' }).click();
+
+  await row.getByRole('button', { name: 'Editar ingreso I-00004' }).click();
+  const form = page.getByRole('form', { name: 'Editar ingreso' });
+  await expect(form.getByLabel('Concepto')).toHaveValue('Estimación I-00004');
+  await form.getByLabel('Concepto').fill('Estimación 3 revisada');
+  await form.getByLabel('Importe').fill('32000');
+  await form.getByLabel('Fecha').fill('2026-09-10');
+  await form.getByRole('button', { name: 'Guardar cambios' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Ingreso I-00004 actualizado.' })).toBeVisible();
+  await expect(form).toHaveCount(0);
+  expect(patches).toEqual([{ received_on: '2026-09-10', concept: 'Estimación 3 revisada', amount: '32000' }]);
+  const refreshed = pendingTable.getByRole('row').filter({ hasText: 'I-00004' });
+  await expect(refreshed).toContainText('Estimación 3 revisada');
+  await expect(refreshed).toContainText('$32,000.00');
+  await expect(refreshed).toContainText('2026-09-10');
+});

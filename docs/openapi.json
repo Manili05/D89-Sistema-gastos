@@ -1575,6 +1575,55 @@
         "title": "IncomeStatusUpdate",
         "type": "object"
       },
+      "IncomeUpdate": {
+        "additionalProperties": false,
+        "description": "Partial edit of an income's data; state changes go through /status.",
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,14}|(?=[\\d.]{1,19}0*$)\\d{0,14}\\.\\d{0,4}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount"
+          },
+          "concept": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "minLength": 3,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Concept"
+          },
+          "received_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Received On"
+          }
+        },
+        "title": "IncomeUpdate",
+        "type": "object"
+      },
       "JevChatRequest": {
         "properties": {
           "extraction": {
@@ -4337,6 +4386,74 @@
           }
         },
         "summary": "Get Income Detail",
+        "tags": [
+          "cashflow"
+        ]
+      },
+      "patch": {
+        "description": "Edit date, concept or amount (admin). The state is changed only via /status.",
+        "operationId": "patch_income_api_v1_incomes__income_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "income_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Income Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IncomeUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncomeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Patch Income",
         "tags": [
           "cashflow"
         ]

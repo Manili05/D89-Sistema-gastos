@@ -21,6 +21,7 @@ from app.models import (
     IncomeCreate,
     IncomeState,
     IncomeStatusUpdate,
+    IncomeUpdate,
     LegacyIncomeCreate,
     Role,
     SubcontractCreate,
@@ -1249,6 +1250,48 @@ def attach_income_receipt(
         if added is not None:
             _audit_income(connection, income_id, user, "adjuntar_comprobante", {
                 "tipo": kind, "ruta": path,
+            })
+        return _income_detail(connection, income_id)
+
+
+INCOME_EDITABLE = {"received_on": "fecha", "concept": "concepto", "amount": "importe"}
+
+
+def update_income(
+    settings: Settings, user: UserContext, income_id: UUID, payload: IncomeUpdate,
+) -> dict[str, Any]:
+    """Admin edit of date, concept or amount, pending or reconciled; audited with before/after."""
+    with transaction(settings) as connection:
+        current = connection.execute(
+            """select obra_id, fecha, concepto, importe, estado::text as estado
+               from public.ingreso where id = %s for update""",
+            (income_id,),
+        ).fetchone()
+        if current is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Ingreso inexistente")
+        require_work_access(connection, user, current["obra_id"])
+        if user.role is not Role.ADMIN:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Solo administración modifica ingresos")
+        changes: dict[str, Any] = {}
+        for field in payload.model_fields_set:
+            value = getattr(payload, field)
+            if value is None:
+                continue
+            if field == "amount":
+                value = value.quantize(Decimal("0.0001"))
+            column = INCOME_EDITABLE[field]
+            if value != current[column]:
+                changes[column] = value
+        if changes:
+            assignments = ", ".join(f"{column} = %({column})s" for column in changes)
+            connection.execute(
+                f"update public.ingreso set {assignments} where id = %(id)s",
+                {**changes, "id": income_id},
+            )
+            _audit_income(connection, income_id, user, "editar", {
+                "estado": current["estado"],
+                "antes": {column: str(current[column]) for column in changes},
+                "despues": {column: str(value) for column, value in changes.items()},
             })
         return _income_detail(connection, income_id)
 

@@ -560,3 +560,11 @@ button { cursor: pointer; }
   .expense-table.reconcile-table td[data-label]::before { content: attr(data-label); display: block; color: var(--muted); font-size: 10px; font-weight: 700; text-transform: uppercase; }
   .revert-form { min-width: 0; }
 }
+
+/* Income actions (Ver / Editar / Conciliar / Revertir) and the edit form anchor. */
+.row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; }
+.income-form-anchor { scroll-margin-top: 16px; margin-bottom: 20px; }
+.income-form-anchor .income-form { margin-bottom: 0; }
+.existing-receipts { margin-bottom: 14px; }
+.existing-receipts .detail-section-title { margin-top: 0; }
+.income-table td[data-label="Folio"], .income-table td[data-label="Fecha"] { white-space: nowrap; }

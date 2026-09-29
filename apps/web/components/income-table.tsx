@@ -2,20 +2,21 @@
 
 import { useState } from 'react';
 import { PlusIcon, ReceiptIcon } from '@/components/icons';
-import { formatReconciledAt } from '@/components/income-reconcile-panel';
 import { StatusPill } from '@/components/status-pill';
-import type { components } from '@/lib/api.generated';
+import { type IncomeResponse, RECEIPT_KIND_LABEL as KIND_LABEL, reconciledBy } from '@/lib/incomes';
 import { centsFromDecimal, displayCents } from '@/lib/money';
 import { openSignedReceipt, receiptFileName } from '@/lib/receipts';
 
-type IncomeResponse = components['schemas']['IncomeResponse'];
-const KIND_LABEL: Record<string, string> = { pdf: 'PDF', xml: 'XML', imagen: 'Imagen' };
-
 /**
- * Read-only list of the work's incomes; receipts open or download via signed URLs.
- * `onCreate` (admin) turns the empty state into a call to action.
+ * List of the work's incomes; receipts open or download via signed URLs. "Ver" opens
+ * the read-only detail; `onEdit` and `onCreate` are only passed for administration.
  */
-export function IncomeTable({ items, onCreate }: { items: IncomeResponse[]; onCreate?: () => void }) {
+export function IncomeTable({ items, onView, onEdit, onCreate }: {
+  items: IncomeResponse[];
+  onView: (income: IncomeResponse) => void;
+  onEdit?: (income: IncomeResponse) => void;
+  onCreate?: () => void;
+}) {
   const [error, setError] = useState('');
 
   async function open(path: string, download: boolean) {
@@ -40,14 +41,14 @@ export function IncomeTable({ items, onCreate }: { items: IncomeResponse[]; onCr
     {error && <p className="notice error panel-notice" role="alert">{error}</p>}
     <div className="expense-table-wrap income-table-wrap"><table className="expense-table income-table" role="table">
       <caption className="sr-only">Ingresos de la obra</caption>
-      <thead role="rowgroup"><tr role="row">{['Folio', 'Fecha', 'Concepto', 'Importe', 'Estado', 'Comprobantes'].map((label) => <th role="columnheader" scope="col" key={label}>{label}</th>)}</tr></thead>
+      <thead role="rowgroup"><tr role="row">{['Folio', 'Fecha', 'Concepto', 'Importe', 'Estado', 'Comprobantes', 'Acciones'].map((label) => <th role="columnheader" scope="col" key={label}>{label}</th>)}</tr></thead>
       <tbody role="rowgroup">{items.map((income) => <tr role="row" key={income.id}>
         <td role="cell" data-label="Folio"><strong>{income.folio}</strong></td>
         <td role="cell" data-label="Fecha">{income.received_on}</td>
         <td role="cell" data-label="Concepto">{income.concept}</td>
         <td role="cell" data-label="Importe"><strong>{displayCents(centsFromDecimal(income.amount))}</strong></td>
         <td role="cell" data-label="Estado" className="income-state-cell"><div><StatusPill tone={income.state === 'conciliado' ? 'green' : 'amber'}>{income.state === 'conciliado' ? 'Conciliado' : 'Pendiente'}</StatusPill>
-          {income.state === 'conciliado' && income.reconciled_at && <small>{[income.reconciled_by, formatReconciledAt(income.reconciled_at)].filter(Boolean).join(' · ')}</small>}
+          {reconciledBy(income) && <small>{reconciledBy(income)}</small>}
           {income.state === 'pendiente' && income.reversal_reason && <small className="reversal-note">Revertido: {income.reversal_reason}</small>}</div></td>
         <td role="cell" data-label="Comprobantes">{(income.receipts || []).length === 0 ? <small>Sin comprobantes</small> : <ul className="income-receipts">{(income.receipts || []).map((receipt) => {
           const name = receiptFileName(receipt.path);
@@ -55,6 +56,10 @@ export function IncomeTable({ items, onCreate }: { items: IncomeResponse[]; onCr
             <button type="button" className="text-action" aria-label={`Ver ${name} del ingreso ${income.folio}`} onClick={() => void open(receipt.path, false)}>Ver</button>
             <button type="button" className="text-action" aria-label={`Descargar ${name} del ingreso ${income.folio}`} onClick={() => void open(receipt.path, true)}>Descargar</button></li>;
         })}</ul>}</td>
+        <td role="cell" data-label="Acciones"><div className="row-actions">
+          <button type="button" className="text-action" aria-label={`Ver ingreso ${income.folio}`} onClick={() => onView(income)}>Ver</button>
+          {onEdit && <button type="button" className="text-action" aria-label={`Editar ingreso ${income.folio}`} onClick={() => onEdit(income)}>Editar</button>}
+        </div></td>
       </tr>)}</tbody>
     </table></div>
   </>;

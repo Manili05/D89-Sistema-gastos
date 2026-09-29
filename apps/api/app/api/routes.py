@@ -36,6 +36,7 @@ from app.models import (
     IncomeReceiptCreate,
     IncomeResponse,
     IncomeStatusUpdate,
+    IncomeUpdate,
     JevChatRequest,
     JevChatResponse,
     LegacyIncomeCreate,
@@ -94,6 +95,7 @@ from app.services.repository import (
     store_import_preview,
     update_expense,
     update_import_preview,
+    update_income,
     update_income_status,
     update_work,
     validate_expenses_batch,
@@ -581,6 +583,17 @@ def get_income_detail(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> dict[str, Any]:
     return get_income(settings, user, income_id)
+
+
+@router.patch("/incomes/{income_id}", response_model=IncomeResponse, tags=["cashflow"])
+def patch_income(
+    income_id: UUID,
+    payload: IncomeUpdate,
+    user: AdminUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    """Edit date, concept or amount (admin). The state is changed only via /status."""
+    return update_income(settings, user, income_id, payload)
 
 
 @router.patch("/incomes/{income_id}/status", response_model=IncomeResponse, tags=["cashflow"])

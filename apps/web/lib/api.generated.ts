@@ -305,7 +305,11 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Patch Income
+         * @description Edit date, concept or amount (admin). The state is changed only via /status.
+         */
+        patch: operations["patch_income_api_v1_incomes__income_id__patch"];
         trace?: never;
     };
     "/api/v1/incomes/{income_id}/receipts": {
@@ -1372,6 +1376,18 @@ export interface components {
             /** Reason */
             reason?: string | null;
             state: components["schemas"]["IncomeState"];
+        };
+        /**
+         * IncomeUpdate
+         * @description Partial edit of an income's data; state changes go through /status.
+         */
+        IncomeUpdate: {
+            /** Amount */
+            amount?: number | string | null;
+            /** Concept */
+            concept?: string | null;
+            /** Received On */
+            received_on?: string | null;
         };
         /** JevChatRequest */
         JevChatRequest: {
@@ -2447,6 +2463,43 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IncomeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_income_api_v1_incomes__income_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                income_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IncomeUpdate"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

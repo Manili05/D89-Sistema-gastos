@@ -278,6 +278,51 @@ def test_income_api_migration_and_postgrest_security(isolated_services, installa
                 assert Decimal(str(incomes["pending"])) == Decimal("1234.5678") + legacy_offset
                 assert incomes["count"] == (4 if installation == "upgrade" else 2)
 
+                # Editing: admin only, validated amounts, persisted and audited.
+                edit_url = f"/api/v1/incomes/{bare['id']}"
+                change = {"amount": "2000.1234", "received_on": "2026-09-15"}
+                for role, expected in ((None, 401), ("operativo", 403), ("outsider", 403)):
+                    assert api.patch(
+                        edit_url, json=change, headers=headers(role)
+                    ).status_code == expected
+                invalid_changes = (
+                    {}, {"amount": "0"}, {"amount": "1.00001"}, {"state": "conciliado"},
+                )
+                for invalid in invalid_changes:
+                    assert api.patch(
+                        edit_url, json=invalid, headers=headers("admin")
+                    ).status_code == 422
+                assert api.patch(
+                    f"/api/v1/incomes/{uuid4()}", json=change, headers=headers("admin")
+                ).status_code == 404
+                edited = api.patch(edit_url, json=change, headers=headers("admin"))
+                assert edited.status_code == 200, edited.text
+                assert edited.json()["amount"] == "2000.1234"
+                assert edited.json()["received_on"] == "2026-09-15"
+                assert edited.json()["folio"] == bare["folio"]
+                assert connection.execute(
+                    "select importe, fecha, concepto from public.ingreso where id=%s", (bare["id"],)
+                ).fetchone() == (Decimal("2000.1234"), date(2026, 9, 15), "Anticipo")
+                # A reconciled income stays reconciled when its concept is corrected.
+                renamed = api.patch(
+                    f"/api/v1/incomes/{income_id}", json={"concept": "Anticipo corregido"},
+                    headers=headers("admin"),
+                )
+                assert renamed.status_code == 200, renamed.text
+                assert renamed.json()["concept"] == "Anticipo corregido"
+                assert renamed.json()["state"] == "conciliado"
+                audit = connection.execute(
+                    "select accion, detalle_json from public.audit_log_negocio "
+                    "where entidad='ingreso' and entidad_id=%s order by creado_en desc, id limit 1",
+                    (income_id,),
+                ).fetchone()
+                assert audit[0] == "editar"
+                assert audit[1] == {
+                    "estado": "conciliado",
+                    "antes": {"concepto": "Anticipo"},
+                    "despues": {"concepto": "Anticipo corregido"},
+                }
+
                 # Existing cashflow clients and dashboard still work after the rename.
                 legacy = api.post(
                     "/api/v1/incomes",
