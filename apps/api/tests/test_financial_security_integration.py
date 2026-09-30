@@ -437,6 +437,13 @@ def test_financial_security_end_to_end(isolated_services, installation):
                             f"/api/v1/expenses/{expense_id}", headers=headers("operativo")
                         )
                         assert detail.status_code == 200 and len(detail.json()["receipts"]) == 2
+                        # Read-only display data for the detail view.
+                        shown = detail.json()
+                        assert shown["supplier_name"] == "Test"
+                        assert shown["area_path"] == ["TEST"]
+                        assert shown["expense_item"] and shown["expense_subitem"]
+                        assert shown["expense_category"] and shown["author"] == "Test operativo"
+                        assert shown["created_at"] and shown["budget_item"] is None
                         assert (
                             api.get(
                                 f"/api/v1/expenses/{expense_id}", headers=headers("outsider")

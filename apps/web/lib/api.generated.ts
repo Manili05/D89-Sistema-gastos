@@ -1048,8 +1048,22 @@ export interface components {
         ExpenseResponse: {
             /** Amount */
             amount: string;
+            /** Area Path */
+            area_path?: string[];
+            /** Author */
+            author?: string | null;
+            /** Budget Item */
+            budget_item?: string | null;
             /** Concept */
             concept: string;
+            /** Created At */
+            created_at?: string | null;
+            /** Expense Category */
+            expense_category?: string | null;
+            /** Expense Item */
+            expense_item?: string | null;
+            /** Expense Subitem */
+            expense_subitem?: string | null;
             /** Folio */
             folio: string;
             /**
@@ -1065,6 +1079,8 @@ export interface components {
             lines: components["schemas"]["ExpenseLine"][];
             /** Receipts */
             receipts: components["schemas"]["ExpenseReceipt"][];
+            /** Review Reason */
+            review_reason?: string | null;
             /**
              * Spent On
              * Format: date
@@ -1076,6 +1092,8 @@ export interface components {
             subtotal: string;
             /** Supplier Folio */
             supplier_folio: string | null;
+            /** Supplier Name */
+            supplier_name?: string | null;
             /**
              * Work Id
              * Format: uuid

@@ -941,9 +941,83 @@
             "title": "Amount",
             "type": "string"
           },
+          "area_path": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Area Path",
+            "type": "array"
+          },
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "budget_item": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Item"
+          },
           "concept": {
             "title": "Concept",
             "type": "string"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "expense_category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expense Category"
+          },
+          "expense_item": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expense Item"
+          },
+          "expense_subitem": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expense Subitem"
           },
           "folio": {
             "title": "Folio",
@@ -977,6 +1051,17 @@
             "title": "Receipts",
             "type": "array"
           },
+          "review_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Reason"
+          },
           "spent_on": {
             "format": "date",
             "title": "Spent On",
@@ -1001,6 +1086,17 @@
               }
             ],
             "title": "Supplier Folio"
+          },
+          "supplier_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supplier Name"
           },
           "work_id": {
             "format": "uuid",

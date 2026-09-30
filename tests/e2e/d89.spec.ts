@@ -121,6 +121,9 @@ test.beforeEach(async ({ page }) => {
       id: '44444444-4444-4444-8444-444444444444', folio: 'G-00001', supplier_folio: 'A-1', work_id: workId,
       spent_on: '2026-08-28', concept: 'Cemento y adhesivo', subtotal: '3577.5900', iva: '572.4100',
       amount: '4150.0000', iva_breakdown: true, state: 'pendiente',
+      supplier_name: 'Concretos Toluca', area_path: ['OFICINA', 'PISOS'], expense_item: 'PRELIMINARES',
+      expense_subitem: 'LIMPIEZA', expense_category: 'MATERIAL', budget_item: 'ALB-05 · Firme de concreto',
+      author: 'Sergio Gómez', created_at: '2026-08-28T18:30:00Z', review_reason: null,
       lines: [{ position: 1, quantity: '10.0000', unit: 'bulto', description: 'Cemento', unit_price: '415.0000', discount: '0.0000', amount: '4150.0000' }],
       receipts: [{ id: 'aaaa0000-0000-4000-8000-000000000001', path: `${workId}/44444444-4444-4444-8444-444444444444/receipt.pdf`, kind: 'pdf', created_at: '2026-08-28T12:00:00Z' }],
     } });
@@ -527,6 +530,73 @@ test('gasto: corregir carga los conceptos, conserva comprobantes y reintenta sin
   });
   expect(uploads).toBe(2);
   expect(creations).toBe(0);
+});
+
+test('Ver: consulta de solo lectura del gasto con conceptos, totales y comprobantes', async ({ page }) => {
+  const mutations: string[] = [];
+  const signed: string[] = [];
+  page.on('request', (request) => {
+    if (request.url().includes('/api/v1/') && request.method() !== 'GET') mutations.push(`${request.method()} ${request.url()}`);
+  });
+  await page.route('**/storage/v1/object/sign/comprobantes/**', async (route) => {
+    signed.push(decodeURIComponent(new URL(route.request().url()).pathname));
+    await route.fulfill({ json: { signedURL: '/object/sign/comprobantes/firmado.pdf?token=temporal' } });
+  });
+  await page.route('**/storage/v1/object/sign/comprobantes/firmado.pdf**', async (route) => {
+    await route.fulfill({ body: '%PDF-1.4', contentType: 'application/pdf' });
+  });
+  await login(page);
+  await page.goto(`/obras/${workId}/gastos`);
+  const viewButton = page.getByRole('button', { name: 'Ver detalle del gasto G-00001' });
+  await viewButton.click();
+  const dialog = page.getByRole('dialog', { name: 'Gasto G-00001' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText('Consulta de gasto · sólo lectura');
+  // Header
+  for (const text of ['Concretos Toluca', 'A-1', '2026-08-28', 'OFICINA › PISOS', 'PRELIMINARES › LIMPIEZA › MATERIAL', 'ALB-05 · Firme de concreto', 'Sergio Gómez', 'Cemento y adhesivo']) {
+    await expect(dialog).toContainText(text);
+  }
+  await expect(dialog.getByText('pendiente', { exact: true })).toBeVisible();
+  // Concepts table and totals
+  const table = dialog.getByRole('table', { name: 'Conceptos del gasto G-00001' });
+  await expect(table.getByRole('row')).toHaveCount(2);
+  await expect(table.getByRole('row').nth(1)).toContainText('10');
+  await expect(table.getByRole('row').nth(1)).toContainText('bulto');
+  await expect(table.getByRole('row').nth(1)).toContainText('$415.00');
+  await expect(table.getByRole('row').nth(1)).toContainText('$4,150.00');
+  await expect(dialog.getByTestId('detail-subtotal')).toHaveText('$3,577.59');
+  await expect(dialog.getByTestId('detail-iva')).toHaveText('$572.41');
+  await expect(dialog.getByTestId('detail-total')).toHaveText('$4,150.00');
+  // Strictly read-only: no form fields, no save buttons.
+  await expect(dialog.locator('input, select, textarea, form')).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: /Guardar|Editar|Cancelar gasto|Validar/ })).toHaveCount(0);
+  // Receipts: view opens a signed URL in a new tab; download requests a signed URL too.
+  const popup = page.waitForEvent('popup');
+  await dialog.getByRole('button', { name: 'Ver receipt.pdf' }).click();
+  expect((await popup).url()).toContain('token=temporal');
+  const download = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: 'Descargar receipt.pdf' }).click();
+  await download;
+  expect(signed).toHaveLength(2);
+  expect(signed[0]).toContain(`/${workId}/44444444-4444-4444-8444-444444444444/receipt.pdf`);
+  // Escape closes and focus returns to the "Ver" button.
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(viewButton).toBeFocused();
+  expect(mutations).toEqual([]);
+});
+
+test('Ver: muestra error si el gasto no se puede cargar y se cierra con el botón', async ({ page }) => {
+  await page.route('**/api/v1/expenses/44444444-4444-4444-8444-444444444444', async (route) => {
+    await route.fulfill({ status: 403, json: { detail: 'Sin acceso a la obra' } });
+  });
+  await login(page);
+  await page.goto(`/obras/${workId}/gastos`);
+  await page.getByRole('button', { name: 'Ver detalle del gasto G-00001' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Gasto' });
+  await expect(dialog.getByRole('alert')).toContainText('Sin acceso a la obra');
+  await dialog.getByRole('button', { name: 'Cerrar' }).click();
+  await expect(dialog).toHaveCount(0);
 });
 
 const cfdiResult = {

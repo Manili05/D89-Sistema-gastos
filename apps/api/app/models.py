@@ -264,6 +264,16 @@ class ExpenseResponse(BaseModel):
     state: str
     lines: list[ExpenseLine]
     receipts: list[ExpenseReceipt]
+    # Read-only display data for the detail view (names, not ids).
+    supplier_name: str | None = None
+    area_path: list[str] = Field(default_factory=list)
+    expense_item: str | None = None
+    expense_subitem: str | None = None
+    expense_category: str | None = None
+    budget_item: str | None = None
+    author: str | None = None
+    created_at: datetime | None = None
+    review_reason: str | None = None
 
 
 class ExpenseReview(BaseModel):

@@ -182,6 +182,28 @@ button { cursor: pointer; }
   .expense-line .line-amount { text-align: right; }
   .line-remove { position: absolute; top: 6px; right: 8px; }
 }
+/* Two classes: must beat .confirm-dialog's 540px width, which is declared later. */
+.confirm-dialog.detail-dialog { width: min(940px, 100%); max-height: calc(100vh - 40px); overflow-y: auto; display: grid; gap: 14px; }
+.detail-dialog-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.detail-dialog-header h2 { margin: 4px 0 0; }
+.detail-header { margin: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px 18px; padding: 14px; border: 1px solid var(--line); background: #fdfcfa; }
+.detail-header .wide { grid-column: span 2; }
+.detail-header dt { color: var(--muted); font-size: 10px; font-weight: 700; text-transform: uppercase; }
+.detail-header dd { margin: 3px 0 0; color: var(--ink); font-size: 13px; overflow-wrap: anywhere; }
+.detail-section-title { margin: 4px 0 0; color: var(--navy); font: 500 16px/1.2 Georgia, serif; }
+.detail-lines td:nth-child(1), .detail-lines td:nth-last-child(-n+2), .detail-lines th:nth-child(1), .detail-lines th:nth-last-child(-n+2) { text-align: right; white-space: nowrap; }
+.expense-table.detail-lines { min-width: 0; } /* the listing's 980px minimum does not apply here */
+.detail-totals { justify-self: end; }
+@media (max-width: 760px) {
+  .detail-header { grid-template-columns: 1fr 1fr; } .detail-header .wide { grid-column: 1 / -1; }
+  /* Concepts as labelled cards: six columns do not fit a phone. */
+  /* Visually hidden, still announced: display:none would drop the header row for screen readers. */
+  .expense-table.detail-lines thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+  .expense-table.detail-lines, .expense-table.detail-lines tbody, .expense-table.detail-lines tr, .expense-table.detail-lines td { display: block; width: 100%; }
+  .expense-table.detail-lines tr { margin-bottom: 8px; padding: 10px; border: 1px solid var(--line); background: #fff; }
+  .expense-table.detail-lines td { padding: 3px 0; border: 0; display: flex; justify-content: space-between; gap: 12px; text-align: right !important; white-space: normal !important; }
+  .expense-table.detail-lines td::before { content: attr(data-label); color: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; text-align: left; }
+}
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .import-panel { max-width: none; }
 .target-switch { display: inline-flex; gap: 4px; margin: 0 0 18px; padding: 4px; border: 1px solid var(--line); border-radius: 5px; background: var(--paper); }
