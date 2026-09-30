@@ -432,7 +432,8 @@ def _expense_detail(
                g.importe as amount, g.iva_desglosado as iva_breakdown,
                g.estado::text as state,
                prov.nombre as supplier_name,
-               coalesce(a.ruta_normalizada, array[a.nombre]) as area_path,
+               case when a.id is null then '{}'::text[]
+                 else coalesce(a.ruta_normalizada, array[a.nombre]) end as area_path,
                coalesce(cpg.nombre, cc.nombre) as expense_item,
                csg.nombre as expense_subitem,
                coalesce(cag.nombre, cat.nombre) as expense_category,
@@ -455,7 +456,7 @@ def _expense_detail(
                  from public.gasto_comprobante k where k.gasto_id = g.id), '[]'::jsonb)
                  as receipts
         from public.gasto g
-        join public.area a on a.id = g.area_id
+        left join public.area a on a.id = g.area_id
         left join public.catalogo_partida_gasto cpg on cpg.id = g.partida_gasto_id
         left join public.catalogo_subpartida_gasto csg on csg.id = g.subpartida_gasto_id
         left join public.catalogo_categoria_gasto cag on cag.id = g.categoria_gasto_id
@@ -500,18 +501,23 @@ def get_expense(settings: Settings, user: UserContext, expense_id: UUID) -> dict
         return _expense_detail(connection, expense_id)
 
 
+def _selectable_area(connection: psycopg.Connection, area_id: UUID, work_id: UUID) -> bool:
+    return connection.execute(
+        """select 1 from public.area
+           where id = %s and obra_id = %s and vigente and seleccionable""",
+        (area_id, work_id),
+    ).fetchone() is not None
+
+
 def create_expense(settings: Settings, user: UserContext, payload: ExpenseCreate) -> dict[str, Any]:
     totals = _totals_or_422(payload)
     with transaction(settings) as connection:
         require_work_access(connection, user, payload.work_id)
         if _expense_locked(connection, payload.work_id, payload.spent_on):
             raise HTTPException(status.HTTP_409_CONFLICT, "La semana del gasto está cerrada")
-        area = connection.execute(
-            """select id from public.area
-               where id = %s and obra_id = %s and vigente and seleccionable""",
-            (payload.area_id, payload.work_id),
-        ).fetchone()
-        if area is None:
+        if payload.area_id is not None and not _selectable_area(
+            connection, payload.area_id, payload.work_id
+        ):
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Área ajena a la obra")
 
         hierarchy = connection.execute(
@@ -642,7 +648,7 @@ def list_expenses(settings: Settings, user: UserContext, work_id: UUID) -> list[
                 """
                 select g.id, g.fecha, g.concepto, g.folio, g.folio_proveedor,
                        g.subtotal, g.iva, g.importe, g.iva_desglosado,
-                       g.estado::text as estado, a.nombre as area,
+                       g.estado::text as estado, coalesce(a.nombre, 'Sin área') as area,
                        coalesce(cpg.nombre, cc.nombre, '') as partida,
                        coalesce(csg.nombre, '') as subpartida,
                        coalesce(cag.nombre, cat.nombre, '') as categoria,
@@ -650,7 +656,7 @@ def list_expenses(settings: Settings, user: UserContext, work_id: UUID) -> list[
                        cp.codigo as partida_presupuesto_codigo,
                        cp.descripcion as partida_presupuesto
                 from public.gasto g
-                join public.area a on a.id = g.area_id
+                left join public.area a on a.id = g.area_id
                 left join public.catalogo_partida_gasto cpg on cpg.id = g.partida_gasto_id
                 left join public.catalogo_subpartida_gasto csg on csg.id = g.subpartida_gasto_id
                 left join public.catalogo_categoria_gasto cag on cag.id = g.categoria_gasto_id
@@ -841,7 +847,7 @@ def list_work_expenses(
                    cp.descripcion as partida_presupuesto,
                    coalesce(pu.nombre, 'Usuario') as autor
             from public.gasto g
-            join public.area a on a.id = g.area_id
+            left join public.area a on a.id = g.area_id
             left join public.catalogo_partida_gasto cpg on cpg.id = g.partida_gasto_id
             left join public.catalogo_subpartida_gasto csg on csg.id = g.subpartida_gasto_id
             left join public.catalogo_categoria_gasto cag on cag.id = g.categoria_gasto_id
@@ -904,11 +910,9 @@ def update_expense(
         if _expense_locked(connection, expense["obra_id"], payload.spent_on):
             raise HTTPException(status.HTTP_409_CONFLICT, "La semana de destino está cerrada")
 
-        area = connection.execute(
-            """select id from public.area
-               where id = %s and obra_id = %s and vigente and seleccionable""",
-            (payload.area_id, expense["obra_id"]),
-        ).fetchone()
+        area_ok = payload.area_id is None or _selectable_area(
+            connection, payload.area_id, expense["obra_id"]
+        )
         hierarchy = connection.execute(
             """
             select cs.id from public.catalogo_subpartida_gasto cs
@@ -919,7 +923,7 @@ def update_expense(
             """,
             (payload.expense_subitem_id, payload.expense_item_id, payload.expense_category_id),
         ).fetchone()
-        if area is None or hierarchy is None:
+        if not area_ok or hierarchy is None:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Clasificación inválida")
 
         budget_partida_id = budget_class_id = budget_category_id = None
@@ -1541,6 +1545,82 @@ def dashboard(settings: Settings, user: UserContext) -> dict[str, Any]:
         }
 
 
+def _spend_breakdown(
+    connection: psycopg.Connection, work_id: UUID, end_date: date, total_validated: Decimal,
+) -> dict[str, list[dict[str, Any]]]:
+    """Spend by the 23-item catalog and by category, cumulative to `end_date`.
+
+    Validated and committed (validated + pending) follow `totals`; the NEODATA budget
+    stays the global ceiling, so there is no per-item budget here. Legacy expenses
+    without catalog classification are grouped as "Sin partida" / "Sin categoría".
+    """
+    rows = connection.execute(
+        """
+        select g.partida_gasto_id as item_id, coalesce(cpg.nombre, 'Sin partida') as item,
+               coalesce(cpg.orden, 999) as item_order,
+               g.categoria_gasto_id as category_id,
+               coalesce(cag.nombre, 'Sin categoría') as category,
+               coalesce(cag.orden, 999) as category_order,
+               coalesce(sum(g.importe) filter (where g.estado = 'validado'), 0) as validated,
+               coalesce(sum(g.importe), 0) as committed,
+               count(*) as expense_count
+        from public.gasto g
+        left join public.catalogo_partida_gasto cpg on cpg.id = g.partida_gasto_id
+        left join public.catalogo_categoria_gasto cag on cag.id = g.categoria_gasto_id
+        where g.obra_id = %s and g.eliminado_en is null and g.fecha <= %s
+          and g.estado in ('validado', 'pendiente')
+        group by 1, 2, 3, 4, 5, 6
+        """,
+        (work_id, end_date),
+    ).fetchall()
+
+    def share(amount: Decimal) -> Decimal:
+        return Decimal("0") if not total_validated else amount / total_validated * Decimal("100")
+
+    items: dict[Any, dict[str, Any]] = {}
+    categories: dict[Any, dict[str, Any]] = {
+        row["id"]: {"id": row["id"], "name": row["nombre"], "order": row["orden"],
+                    "validated": Decimal("0"), "committed": Decimal("0")}
+        for row in connection.execute(
+            "select id, nombre, orden from public.catalogo_categoria_gasto where activo"
+        ).fetchall()
+    }
+    for row in rows:
+        item = items.setdefault(row["item_id"], {
+            "id": row["item_id"], "name": row["item"], "order": row["item_order"],
+            "validated": Decimal("0"), "committed": Decimal("0"), "expense_count": 0,
+            "categories": {},
+        })
+        item["validated"] += row["validated"]
+        item["committed"] += row["committed"]
+        item["expense_count"] += row["expense_count"]
+        item["categories"][row["category"]] = (
+            item["categories"].get(row["category"], Decimal("0")) + row["validated"]
+        )
+        category = categories.setdefault(row["category_id"], {
+            "id": row["category_id"], "name": row["category"], "order": row["category_order"],
+            "validated": Decimal("0"), "committed": Decimal("0"),
+        })
+        category["validated"] += row["validated"]
+        category["committed"] += row["committed"]
+
+    ordered_items = sorted(items.values(), key=lambda item: (-item["validated"],
+                                                             -item["committed"], item["order"]))
+    for item in ordered_items:
+        item["share_percent"] = share(item["validated"])
+        item["pending"] = item["committed"] - item["validated"]
+        item["categories"] = [
+            {"name": name, "validated": amount} for name, amount in item["categories"].items()
+        ]
+    ordered_categories = [
+        category for category in sorted(categories.values(), key=lambda value: value["order"])
+        if category["id"] is not None or category["committed"]
+    ]
+    for category in ordered_categories:
+        category["share_percent"] = share(category["validated"])
+    return {"items": ordered_items, "categories": ordered_categories}
+
+
 def work_overview(
     settings: Settings,
     user: UserContext,
@@ -1586,6 +1666,8 @@ def work_overview(
         totals["execution_percent"] = (
             Decimal("0") if not budget else totals["validated"] / budget * Decimal("100")
         )
+
+        breakdown = _spend_breakdown(connection, work_id, end_date, totals["validated"])
 
         # Cumulative to the period end, like `validated`, so both compare on the same basis.
         incomes = connection.execute(
@@ -1678,6 +1760,8 @@ def work_overview(
             "suppliers": list(suppliers),
             "categories": list(categories),
             "incomes": incomes,
+            "by_item": breakdown["items"],
+            "by_category": breakdown["categories"],
             "permissions": {"can_validate": user.role is Role.ADMIN},
         }
 
@@ -1782,7 +1866,7 @@ def report_expenses(
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Obra inexistente")
         rows = connection.execute(
             """
-            select g.fecha::text as "Fecha", a.nombre as "Área",
+            select g.fecha::text as "Fecha", coalesce(a.nombre, 'Sin área') as "Área",
                    coalesce(cpg.nombre, cc.nombre, '') as "Partida",
                    coalesce(csg.nombre, '') as "Subpartida",
                    coalesce(cag.nombre, cat.nombre, '') as "Categoría",
@@ -1791,7 +1875,7 @@ def report_expenses(
                    g.subtotal as "Subtotal", g.iva as "IVA", g.importe as "Importe",
                    g.estado::text as "Estado"
             from public.gasto g
-            join public.area a on a.id = g.area_id
+            left join public.area a on a.id = g.area_id
             left join public.catalogo_partida_gasto cpg on cpg.id = g.partida_gasto_id
             left join public.catalogo_subpartida_gasto csg on csg.id = g.subpartida_gasto_id
             left join public.catalogo_categoria_gasto cag on cag.id = g.categoria_gasto_id

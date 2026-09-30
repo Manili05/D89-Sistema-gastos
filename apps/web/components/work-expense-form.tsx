@@ -32,7 +32,7 @@ export type WorkCatalog = {
 
 /** Row of the expenses list used to open the edit form; the detail is loaded by id. */
 export type EditableExpense = {
-  id: string; area_id: string; expense_item_id: string; expense_subitem_id: string;
+  id: string; area_id: string | null; expense_item_id: string; expense_subitem_id: string;
   expense_category_id: string; supplier_id: string; proveedor: string;
   budget_item_id: string | null; fecha: string; concepto: string;
   folio: string; folio_proveedor: string | null;
@@ -92,8 +92,9 @@ export function WorkExpenseForm({
   workId: string; catalog: WorkCatalog; expense?: EditableExpense;
   onSaved: (message: string) => void; onCancel?: () => void;
 }) {
-  const firstArea = catalog.areas.find((area) => area.seleccionable)?.id || '';
-  const [areaId, setAreaId] = useState(expense?.area_id || firstArea);
+  // The NEODATA area is an optional link (Cambio 8): never preselected.
+  const [areaId, setAreaId] = useState(expense?.area_id || '');
+  const [neodataOpen, setNeodataOpen] = useState(Boolean(expense?.area_id));
   const [areaSearch, setAreaSearch] = useState('');
   const [partidaId, setPartidaId] = useState(
     expense?.expense_item_id || catalog.expense_partidas[0]?.id || '',
@@ -111,7 +112,8 @@ export function WorkExpenseForm({
   );
   const [budgetItemId, setBudgetItemId] = useState(expense?.budget_item_id || '');
   const [suppliers, setSuppliers] = useState<CatalogOption[]>(catalog.suppliers);
-  const [supplierId, setSupplierId] = useState(expense?.supplier_id || catalog.suppliers[0]?.id || '');
+  // An intentional choice: a new expense starts at "Seleccionar proveedor".
+  const [supplierId, setSupplierId] = useState(expense?.supplier_id || '');
   const [supplierDialog, setSupplierDialog] = useState<{ initial?: SupplierInitial } | null>(null);
   const [spentOn, setSpentOn] = useState(expense?.fecha || localDate());
   const [concept, setConcept] = useState(expense?.concepto || '');
@@ -143,6 +145,8 @@ export function WorkExpenseForm({
     if (!expense || suppliers.some((item) => item.id === expense.supplier_id)) return suppliers;
     return [{ id: expense.supplier_id, nombre: `${expense.proveedor} · histórico` }, ...suppliers];
   }, [suppliers, expense]);
+  const selectedArea = catalog.areas.find((area) => area.id === areaId);
+  const selectedBudgetItem = budgetItems.find((item) => item.budget_item_id === budgetItemId);
   const pendingReceipts = receipts.filter((item) => !item.linked);
   const blocked = busy || assistantBusy || cfdi?.state === 'reading' || detailState !== 'ready';
 
@@ -183,6 +187,12 @@ export function WorkExpenseForm({
       setAreaId(match.id);
       setBudgetItemId('');
     }
+  }
+
+  function clearNeodataLink() {
+    setAreaId('');
+    setBudgetItemId('');
+    setAreaSearch('');
   }
 
   function changePartida(value: string) {
@@ -313,7 +323,7 @@ export function WorkExpenseForm({
       if (!savedExpenseId) {
         const payload = {
           ...(expense ? {} : { work_id: workId }),
-          area_id: areaId,
+          area_id: areaId || null,
           expense_item_id: partidaId,
           expense_subitem_id: subpartidaId,
           expense_category_id: categoryId,
@@ -369,16 +379,28 @@ export function WorkExpenseForm({
         if (ticketLines.length) changeLines(ticketLines);
         if (!concept.trim() && ticketConcept) setConcept(ticketConcept);
       }} /></div>}
-    <div className="form-section"><fieldset className="form-grid three" aria-label="Datos del gasto" disabled={Boolean(createdExpenseId)} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
-      <label className="field area-picker">Área NEODATA<span className="field-hint">{areaSearch ? `${matchingAreas.length} coincidencia${matchingAreas.length === 1 ? '' : 's'} de ` : 'Busca dentro de '}{catalog.areas.filter((area) => area.seleccionable).length} rutas</span><input aria-label="Buscar área NEODATA" type="search" placeholder="Ej. cimentación sótano" value={areaSearch} onChange={(event) => changeAreaSearch(event.target.value)} /><select aria-label="Área NEODATA" value={areaId} onChange={(event) => { setAreaId(event.target.value); setBudgetItemId(''); }} required><option value="">Seleccionar</option>{selectableAreas.map((area) => <option key={area.id} value={area.id}>{area.ruta.join(' › ')}</option>)}</select>{areaSearch && matchingAreas.length === 0 && <small className="field-error">No hay áreas que coincidan.</small>}</label>
+    <div className="form-section"><fieldset className="form-grid four" aria-label="Datos del gasto" disabled={Boolean(createdExpenseId)} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
       <label className="field">Partida<select aria-label="Partida" value={partidaId} onChange={(event) => changePartida(event.target.value)} required>{catalog.expense_partidas.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}</select></label>
       <label className="field">Subpartida<select aria-label="Subpartida" value={subpartidaId} onChange={(event) => setSubpartidaId(event.target.value)} required>{availableSubitems.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}</select></label>
       <label className="field">Categoría<select aria-label="Categoría" value={categoryId} onChange={(event) => setCategoryId(event.target.value)} required>{catalog.expense_categories.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}</select></label>
       <label className="field">Proveedor<select aria-label="Proveedor" value={supplierId} onChange={(event) => changeSupplier(event.target.value)} required><option value="">Seleccionar proveedor</option>{selectableSuppliers.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}{canManageSuppliers && <option value={NEW_SUPPLIER}>+ Nuevo proveedor</option>}</select></label>
-      <label className="field">Partida NEODATA (opcional)<select aria-label="Partida NEODATA" value={budgetItemId} onChange={(event) => setBudgetItemId(event.target.value)}><option value="">Sin vínculo específico</option>{budgetItems.map((item) => <option key={item.budget_item_id} value={item.budget_item_id}>{item.codigo} · {item.descripcion} · {money.format(Number(item.presupuesto))}</option>)}</select></label>
-      <label className="field">Fecha<input name="spent_on" type="date" value={spentOn} onChange={(event) => setSpentOn(event.target.value)} required /></label>
-      <label className="field">Folio del proveedor<input name="supplier_folio" value={supplierFolio} maxLength={120} onChange={(event) => setSupplierFolio(event.target.value)} placeholder="Factura o nota, p. ej. A-123" /></label>
+      <label className="field span-2">Fecha<input name="spent_on" type="date" value={spentOn} onChange={(event) => setSpentOn(event.target.value)} required /></label>
+      <label className="field span-2">Folio del proveedor<input name="supplier_folio" value={supplierFolio} maxLength={120} onChange={(event) => setSupplierFolio(event.target.value)} placeholder="Factura o nota, p. ej. A-123" /></label>
       <label className="field full">Concepto general<textarea name="concept" value={concept} minLength={3} maxLength={500} onChange={(event) => setConcept(event.target.value)} required /></label>
+      <div className="full neodata-link">
+        <button type="button" className="neodata-toggle" aria-expanded={neodataOpen} aria-controls="neodata-link-body" onClick={() => setNeodataOpen((open) => !open)}>
+          <span><strong>Vincular a NEODATA (Opcional)</strong><small data-testid="neodata-summary">{selectedArea ? `${selectedArea.ruta.join(' › ')}${selectedBudgetItem ? ` · ${selectedBudgetItem.codigo}` : ''}` : 'Sin área específica'}</small></span>
+          <span className="collapsible-chevron" aria-hidden="true" />
+        </button>
+        <div id="neodata-link-body" className="neodata-link-body" hidden={!neodataOpen}>{neodataOpen && <>
+          <p className="field-hint">El gasto se controla por partida, subpartida y categoría. El área y la partida NEODATA son un dato de referencia opcional.</p>
+          <div className="form-grid">
+        <label className="field area-picker">Área NEODATA<span className="field-hint">{areaSearch ? `${matchingAreas.length} coincidencia${matchingAreas.length === 1 ? '' : 's'} de ` : 'Busca dentro de '}{catalog.areas.filter((area) => area.seleccionable).length} rutas</span><input aria-label="Buscar área NEODATA" type="search" placeholder="Ej. cimentación sótano" value={areaSearch} onChange={(event) => changeAreaSearch(event.target.value)} /><select aria-label="Área NEODATA" value={areaId} onChange={(event) => { setAreaId(event.target.value); setBudgetItemId(''); }}><option value="">Sin área específica</option>{selectableAreas.map((area) => <option key={area.id} value={area.id}>{area.ruta.join(' › ')}</option>)}</select>{areaSearch && matchingAreas.length === 0 && <small className="field-error">No hay áreas que coincidan.</small>}</label>
+        <label className="field">Partida NEODATA<select aria-label="Partida NEODATA" value={budgetItemId} disabled={!areaId} onChange={(event) => setBudgetItemId(event.target.value)}><option value="">{areaId ? 'Sin vínculo específico' : 'Primero elige un área'}</option>{budgetItems.map((item) => <option key={item.budget_item_id} value={item.budget_item_id}>{item.codigo} · {item.descripcion} · {money.format(Number(item.presupuesto))}</option>)}</select></label>
+          </div>
+          {areaId && <button type="button" className="text-action danger" onClick={clearNeodataLink}>Quitar vínculo</button>}
+        </>}</div>
+      </div>
       <div className="full"><ExpenseLinesEditor lines={lines} totals={totals} explicitIvaLabel={explicitIva?.label} onChange={changeLines} />
         {explicitIva && <p className="field-hint">IVA tomado del {explicitIva.label === 'CFDI' ? 'CFDI' : 'gasto registrado'}. Si modificas los conceptos se recalcula con la regla del 16 %.</p>}</div>
     </fieldset>
@@ -404,7 +426,7 @@ export function WorkExpenseForm({
         </div>}
       </section>
     {!expense && suppliers.length === 0 ? <p className="notice">No hay proveedores asignados a esta obra. {canManageSuppliers ? <button type="button" className="text-action" onClick={() => setSupplierDialog({})}>+ Nuevo proveedor</button> : <Link className="text-action" href="/proveedores">Solicita a administración que asigne uno</Link>}</p> : null}</div>
-    <div className="form-section"><div className="header-actions">{onCancel && <button className="btn secondary" type="button" onClick={onCancel}>{createdExpenseId ? 'Cerrar (gasto guardado)' : 'Cancelar'}</button>}<button type="submit" className="btn" disabled={blocked || !areaId || !subpartidaId || !categoryId || !supplierId || (!createdExpenseId && !totals.valid)}><PlusIcon />{busy ? 'Guardando…' : createdExpenseId ? `Reintentar comprobantes (${pendingReceipts.length})` : expense ? 'Guardar corrección' : 'Guardar pendiente'}</button></div></div>
+    <div className="form-section"><div className="header-actions">{onCancel && <button className="btn secondary" type="button" onClick={onCancel}>{createdExpenseId ? 'Cerrar (gasto guardado)' : 'Cancelar'}</button>}<button type="submit" className="btn" disabled={blocked || !partidaId || !subpartidaId || !categoryId || !supplierId || (!createdExpenseId && !totals.valid)}><PlusIcon />{busy ? 'Guardando…' : createdExpenseId ? `Reintentar comprobantes (${pendingReceipts.length})` : expense ? 'Guardar corrección' : 'Guardar pendiente'}</button></div></div>
     </fieldset>
     {supplierDialog && <SupplierCreateDialog workId={workId} initial={supplierDialog.initial} onClose={() => setSupplierDialog(null)} onCreated={supplierCreated} />}
   </form>;

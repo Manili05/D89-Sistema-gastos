@@ -643,9 +643,16 @@
       "ExpenseCreate": {
         "properties": {
           "area_id": {
-            "format": "uuid",
-            "title": "Area Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Area Id"
           },
           "budget_item_id": {
             "anyOf": [
@@ -740,7 +747,6 @@
         "required": [
           "lines",
           "work_id",
-          "area_id",
           "expense_item_id",
           "expense_subitem_id",
           "expense_category_id",
@@ -1160,9 +1166,16 @@
       "ExpenseUpdate": {
         "properties": {
           "area_id": {
-            "format": "uuid",
-            "title": "Area Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Area Id"
           },
           "budget_item_id": {
             "anyOf": [
@@ -1247,7 +1260,6 @@
         },
         "required": [
           "lines",
-          "area_id",
           "expense_item_id",
           "expense_subitem_id",
           "expense_category_id",
