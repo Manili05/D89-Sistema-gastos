@@ -46,3 +46,7 @@ swapon --show --bytes
 
 TLS permanece pendiente hasta que `d89.escalaleads.com.mx` tenga un registro
 DNS apuntando al VPS. Nginx ya publica HTTP por `Host` hacia loopback 3089.
+El procedimiento está preparado en `infra/nginx/README.md`: con el DNS listo,
+`sudo infra/scripts/enable-d89-tls.sh --apply` emite el certificado (webroot) e
+instala la configuración HTTPS del repo. Mientras tanto, el acceso HTTPS temporal
+es `d89-ngrok.service`, que va directo a Caddy sin pasar por Nginx.
