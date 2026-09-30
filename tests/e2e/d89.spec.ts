@@ -30,6 +30,27 @@ const previewData = {
   }],
 };
 
+/** Catalog of the mocked work (1 subpartida per partida, 1 category, 1 supplier). */
+function workCatalog() {
+  return {
+    areas: [{ id: areaId, nombre: 'Oficina', ruta: ['OFICINA'], nivel: 0, seleccionable: true }],
+    items: [{ budget_item_id: budgetItemId, area_id: areaId, codigo: 'ALB-05', descripcion: 'Firme de concreto', clase: 'ALBAÑILERÍAS' }],
+    expense_partidas: [{ id: expensePartidaId, nombre: 'PRELIMINARES' }, { id: secondExpensePartidaId, nombre: 'ALBANILERIA' }],
+    expense_subitems: [{ id: expenseSubpartidaId, partida_id: expensePartidaId, nombre: 'LIMPIEZA' }, { id: secondExpenseSubpartidaId, partida_id: secondExpensePartidaId, nombre: 'FIRMES Y HORMIGONES' }],
+    expense_categories: [{ id: expenseCategoryId, nombre: 'MATERIAL' }],
+    suppliers: [{ id: supplierId, nombre: 'Concretos Toluca' }],
+    permissions: { can_manage_suppliers: true },
+  };
+}
+
+/** Spend bucket of the overview breakdown (validated + pending = committed). */
+function spend(name: string, validated: string, pending: string, count: number) {
+  return {
+    id: null, name, validated, pending, committed: String(Number(validated) + Number(pending)),
+    expense_count: count, share_percent: '0',
+  };
+}
+
 test.beforeEach(async ({ page }) => {
   let workDeleted = false;
   await page.route('**/auth/v1/token**', async (route) => {
@@ -108,6 +129,26 @@ test.beforeEach(async ({ page }) => {
       weekly: [{ week: '2026-08-24', validated: '18450', pending: '4150' }],
       suppliers: [{ name: 'Concretos Toluca', amount: '18450' }], categories: [{ name: 'MATERIAL', amount: '18450' }],
       incomes: { total: '170000.0050', reconciled: '120000.0050', pending: '50000.0000', count: 2 },
+      by_item: [
+        { id: secondExpensePartidaId, name: 'ALBANILERIA', validated: '12000', committed: '14000', pending: '2000', expense_count: 3, share_percent: '65.04',
+          categories: [spend('MATERIAL', '9000', '2000', 2), spend('MANO DE OBRA', '3000', '0', 1)],
+          subitems: [
+            { ...spend('FIRMES Y HORMIGONES', '9000', '2000', 2), categories: [spend('MATERIAL', '9000', '2000', 2)] },
+            { ...spend('MUROS', '3000', '0', 1), categories: [spend('MANO DE OBRA', '3000', '0', 1)] },
+          ] },
+        { id: expensePartidaId, name: 'PRELIMINARES', validated: '6450', committed: '8600', pending: '2150', expense_count: 2, share_percent: '34.96',
+          categories: [spend('MATERIAL', '6450', '2150', 2)],
+          subitems: [{ ...spend('LIMPIEZA', '6450', '2150', 2), categories: [spend('MATERIAL', '6450', '2150', 2)] }] },
+      ],
+      by_provider: [
+        { id: supplierId, ...spend('Concretos Toluca', '14450', '4150', 4), share_percent: '78.32' },
+        { id: 'f0f0f0f0-f0f0-4f0f-8f0f-f0f0f0f0f0f0', ...spend('Aceros del Centro', '4000', '0', 1), share_percent: '21.68' },
+      ],
+      by_category: [
+        { ...spend('MATERIAL', '15450', '4150', 4), id: expenseCategoryId, share_percent: '83.74' },
+        { ...spend('MANO DE OBRA', '3000', '0', 1), id: 'c2c2c2c2-c2c2-4c2c-8c2c-c2c2c2c2c2c2', share_percent: '16.26' },
+        { ...spend('EQUIPO/HERR', '0', '0', 0), id: 'c3c3c3c3-c3c3-4c3c-8c3c-c3c3c3c3c3c3' },
+      ],
     } });
   });
   await page.route(`**/api/v1/works/${workId}/expenses**`, async (route) => {
@@ -130,23 +171,15 @@ test.beforeEach(async ({ page }) => {
     } });
   });
   await page.route('**/api/v1/works/*/catalog', async (route) => {
-    await route.fulfill({
-      json: {
-        areas: [{ id: areaId, nombre: 'Oficina', ruta: ['OFICINA'], nivel: 0, seleccionable: true }],
-        items: [{ budget_item_id: budgetItemId, area_id: areaId, codigo: 'ALB-05', descripcion: 'Firme de concreto', clase: 'ALBAÑILERÍAS' }],
-        expense_partidas: [{ id: expensePartidaId, nombre: 'PRELIMINARES' }, { id: secondExpensePartidaId, nombre: 'ALBANILERIA' }],
-        expense_subitems: [{ id: expenseSubpartidaId, partida_id: expensePartidaId, nombre: 'LIMPIEZA' }, { id: secondExpenseSubpartidaId, partida_id: secondExpensePartidaId, nombre: 'FIRMES Y HORMIGONES' }],
-        expense_categories: [{ id: expenseCategoryId, nombre: 'MATERIAL' }],
-        suppliers: [{ id: supplierId, nombre: 'Concretos Toluca' }],
-        permissions: { can_manage_suppliers: true },
-      },
-    });
+    await route.fulfill({ json: workCatalog() });
   });
   await page.route('**/api/v1/expenses', async (route) => {
     const payload = route.request().postDataJSON();
+    // Cambio 8: the NEODATA link is optional and never preselected.
     expect(payload).toMatchObject({
       work_id: workId,
-      area_id: areaId,
+      area_id: null,
+      budget_item_id: null,
       expense_item_id: secondExpensePartidaId,
       expense_subitem_id: secondExpenseSubpartidaId,
       expense_category_id: expenseCategoryId,
@@ -271,6 +304,18 @@ function uploadedPartType(body: Buffer | null): string | undefined {
 type LineInput = { quantity?: string; unit?: string; description: string; price: string; discount?: string; taxable?: boolean };
 
 /** Fill the multi-concept editor; adds rows as needed. */
+/** The supplier starts at "Seleccionar proveedor": capture requires an explicit choice. */
+async function chooseSupplier(form: Locator) {
+  await form.getByLabel('Proveedor', { exact: true }).selectOption(supplierId);
+}
+
+/** Partida, categoría and proveedor all start empty; a single subpartida is auto-chosen. */
+async function chooseClassification(form: Locator, partida = secondExpensePartidaId) {
+  await form.getByLabel('Partida', { exact: true }).selectOption(partida);
+  await form.getByLabel('Categoría', { exact: true }).selectOption(expenseCategoryId);
+  await chooseSupplier(form);
+}
+
 async function fillLines(form: Locator, lines: LineInput[]) {
   for (const [index, line] of lines.entries()) {
     const n = index + 1;
@@ -306,7 +351,16 @@ test('/gastos: multi-concepto con totales en vivo, exentos y varios comprobantes
   await login(page);
   await page.goto('/gastos');
   const form = page.locator('form.work-expense-form');
-  await expect(form.getByLabel('Buscar área NEODATA')).toBeVisible();
+  // Classification first; NEODATA is an optional, collapsed block.
+  await expect(form.getByRole('button', { name: /Vincular a NEODATA \(Opcional\)/ })).toHaveAttribute('aria-expanded', 'false');
+  await expect(form.getByTestId('neodata-summary')).toHaveText('Sin área específica');
+  await expect(form.getByLabel('Buscar área NEODATA')).toHaveCount(0);
+  await expect(form.getByLabel('Proveedor', { exact: true })).toHaveValue('');
+  await expect(form.getByLabel('Partida', { exact: true })).toHaveValue('');
+  await expect(form.getByLabel('Categoría', { exact: true })).toHaveValue('');
+  await expect(form.getByLabel('Subpartida', { exact: true })).toBeDisabled();
+  await expect(form.getByRole('button', { name: /Guardar pendiente/ })).toBeDisabled();
+  await chooseClassification(form);
   await form.getByLabel('Partida', { exact: true }).selectOption(secondExpensePartidaId);
   await expect(form.getByLabel('Subpartida', { exact: true })).toHaveValue(secondExpenseSubpartidaId);
   await fillLines(form, [
@@ -390,6 +444,7 @@ for (const failure of ['upload', 'link'] as const) {
     await page.goto(`/obras/${workId}/gastos`);
     await page.getByRole('button', { name: 'Nuevo gasto', exact: true }).click();
     const form = page.locator('form.work-expense-form');
+    await chooseClassification(form);
     await fillLines(form, [{ description: 'Material único', price: '321.00' }]);
     await form.getByLabel('Concepto general').fill('Gasto que sólo debe crearse una vez');
     await form.getByLabel('Comprobantes', { exact: true }).setInputFiles({
@@ -428,6 +483,7 @@ for (const failure of ['upload', 'link'] as const) {
     await page.getByRole('button', { name: 'Nuevo gasto', exact: true }).click();
     await expect(form.getByLabel('Descripción concepto 1')).toBeEmpty();
     await expect(form.getByLabel('Concepto general')).toBeEmpty();
+    await chooseClassification(form);
     await fillLines(form, [{ description: 'Otro', price: '99' }]);
     await form.getByLabel('Concepto general').fill('Otro gasto intencional');
     await form.getByRole('button', { name: 'Guardar pendiente' }).click();
@@ -448,6 +504,7 @@ test('gasto: error al crear conserva datos editables para reintentar', async ({ 
   await page.goto(`/obras/${workId}/gastos`);
   await page.getByRole('button', { name: 'Nuevo gasto', exact: true }).click();
   const form = page.locator('form.work-expense-form');
+  await chooseClassification(form);
   await fillLines(form, [{ description: 'Arena', price: '100' }]);
   await form.getByLabel('Concepto general').fill('Intento no guardado');
   await form.getByRole('button', { name: 'Guardar pendiente' }).click();
@@ -468,6 +525,7 @@ test('gasto: renglón inválido no se envía y se explica', async ({ page }) => 
   await login(page);
   await page.goto('/gastos');
   const form = page.locator('form.work-expense-form');
+  await chooseClassification(form);
   await fillLines(form, [{ quantity: '2', description: 'Tubo', price: '10', discount: '25' }]);
   await form.getByLabel('Concepto general').fill('Descuento imposible');
   await expect(form.getByRole('alert')).toContainText('un descuento que no supere cantidad × precio');
@@ -779,6 +837,8 @@ test('CFDI: el XML se lee sin IA, llena conceptos e IVA, y el emisor se da de al
   expect(supplierPayloads).toHaveLength(1);
   expect(supplierPayloads[0]).toMatchObject({ name: 'Nuevo Proveedor', tax_id: 'NPR990101AB1', work_id: workId });
   await expect(form.getByLabel('Proveedor', { exact: true })).toHaveValue(newSupplierId);
+  await form.getByLabel('Partida', { exact: true }).selectOption(secondExpensePartidaId);
+  await form.getByLabel('Categoría', { exact: true }).selectOption(expenseCategoryId);
 
   await form.getByRole('button', { name: /Guardar pendiente/ }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Gasto guardado como pendiente' })).toBeVisible();
@@ -831,6 +891,8 @@ test('alta rápida de proveedor desde el selector y permisos de operativo', asyn
   await page.goto('/gastos');
   const form = page.locator('form.work-expense-form');
   const supplier = form.getByLabel('Proveedor', { exact: true });
+  await expect(supplier).toHaveValue(''); // no silent default: the choice is intentional
+  await chooseSupplier(form);
   await supplier.selectOption({ label: '+ Nuevo proveedor' });
   await expect(supplier).toHaveValue(supplierId); // selection kept while the modal is open
   const dialog = page.getByRole('dialog', { name: 'Alta de proveedor' });
@@ -1147,6 +1209,7 @@ test('Jev: foto del ticket, corrección conversacional y guardado con el ticket 
   await page.goto(`/obras/${workId}/gastos`);
   await page.getByRole('button', { name: 'Nuevo gasto', exact: true }).click();
   const form = page.locator('form.work-expense-form');
+  await chooseClassification(form);
   const save = form.getByRole('button', { name: /Guardar pendiente/ });
   const assistant = form.getByRole('region', { name: 'Captura inteligente del ticket' });
   try {
@@ -1247,6 +1310,7 @@ test('Jev: si la IA está caída se captura a mano; la foto se puede quitar y se
   await login(page);
   await page.goto('/gastos');
   const form = page.locator('form.work-expense-form');
+  await chooseClassification(form);
   await form.getByLabel('Foto del ticket o nota de remisión').setInputFiles({
     name: 'ticket.png', mimeType: 'image/png', buffer: Buffer.from('png'),
   });
@@ -1278,6 +1342,7 @@ test('Jev: un archivo que no es imagen se rechaza sin llamar a la IA', async ({ 
   await login(page);
   await page.goto('/gastos');
   const form = page.locator('form.work-expense-form');
+  await chooseClassification(form);
   await form.getByLabel('Foto del ticket o nota de remisión').setInputFiles({
     name: 'ticket.gif', mimeType: 'image/gif', buffer: Buffer.from('GIF89a'),
   });
@@ -1319,6 +1384,7 @@ test('administrador entra al espacio específico de una obra y recorre sus módu
   await expect(page.getByRole('heading', { name: 'Movimientos de la obra' })).toBeVisible();
   await expect(page.getByText('Cemento y adhesivo')).toBeVisible();
   await page.getByRole('button', { name: 'Nuevo gasto' }).click();
+  await page.getByRole('button', { name: /Vincular a NEODATA/ }).click();
   await page.getByLabel('Buscar área NEODATA').fill('oficina');
   await expect(page.getByLabel('Área NEODATA').getByRole('option', { name: 'OFICINA' })).toHaveCount(1);
   await page.locator('form').getByRole('button', { name: 'Cancelar' }).click();
@@ -1561,7 +1627,7 @@ test('Ingresos: el estado vacío no ofrece registrar a operativo', async ({ page
   await expect(page.getByRole('button', { name: 'Registrar el primer ingreso' })).toHaveCount(0);
 });
 
-test('Resumen: tarjetas de ingresos, gráfica de flujo con tooltip y Control por área colapsable', async ({ page }) => {
+test('Resumen: tarjetas de ingresos, gráfica de flujo con tooltip y Gasto por partida colapsable', async ({ page }) => {
   await login(page);
   await page.goto(`/obras/${workId}`);
   await expect(page.getByTestId('overview-income-total')).toHaveText('$170,000.01');
@@ -1578,7 +1644,7 @@ test('Resumen: tarjetas de ingresos, gráfica de flujo con tooltip y Control por
   await expect(income.locator('.cashflow-bar')).toHaveAttribute('data-width', '60.00');
   await expect(expense).toContainText('$18,450.00');
   await expect(income).toContainText('$120,000.01');
-  await expect(page.getByRole('list', { name: 'Leyenda' })).toContainText('Ingreso conciliado');
+  await expect(page.getByRole('list', { name: 'Leyenda', exact: true })).toContainText('Ingreso conciliado');
   await expect(page.getByTestId('cashflow-health')).toContainText('cubre 650.4 % del gasto validado');
   await expect(page.getByTestId('cashflow-health')).toContainText('Gasto cubierto');
   // Tooltip on hover and on keyboard focus (desktop; phones rely on the direct labels).
@@ -1600,17 +1666,17 @@ test('Resumen: tarjetas de ingresos, gráfica de flujo con tooltip y Control por
   const table = page.getByRole('table', { name: 'Gasto validado contra ingreso conciliado' });
   await expect(table.getByRole('row', { name: /Ingreso conciliado/ })).toContainText('$120,000.01');
 
-  // "Control por área" starts closed and toggles with aria-expanded.
-  const toggle = page.getByRole('button', { name: /Control por área/ });
+  // "Gasto por partida" starts closed and toggles with aria-expanded.
+  const toggle = page.getByRole('button', { name: /Gasto por partida/ });
+  await expect(page.getByRole('button', { name: /Control por área/ })).toHaveCount(0);
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-  await expect(page.locator('#area-control-body')).toBeHidden();
+  await expect(page.locator('#spend-breakdown-body')).toBeHidden();
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
-  await expect(page.locator('#area-control-body')).toContainText('Oficina');
-  await expect(page.locator('#area-control-body')).toContainText('0.7%');
+  await expect(page.getByTestId('item-row-ALBANILERIA')).toBeVisible();
   await toggle.press('Enter');
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-  await expect(page.locator('#area-control-body')).toBeHidden();
+  await expect(page.locator('#spend-breakdown-body')).toBeHidden();
 });
 
 test('Resumen: déficit cuando el gasto validado supera al ingreso conciliado', async ({ page }) => {
@@ -1619,6 +1685,7 @@ test('Resumen: déficit cuando el gasto validado supera al ingreso conciliado', 
       totals: { budget: '100000', validated: '40000', committed: '40000', available: '60000', projected_available: '60000', execution_percent: '40', pending: '0', pending_count: 0, rejected_count: 0, missing_receipts: 0 },
       period: { validated: '40000', pending: '0' }, areas: [], weekly: [], suppliers: [], categories: [],
       incomes: { total: '10000', reconciled: '10000', pending: '0', count: 1 },
+      by_item: [], by_category: [], by_provider: [],
     } });
   });
   await login(page);
@@ -1941,4 +2008,224 @@ test('Validación: Ver y Editar junto a Conciliar; al guardar la lista refleja e
   await expect(refreshed).toContainText('Estimación 3 revisada');
   await expect(refreshed).toContainText('$32,000.00');
   await expect(refreshed).toContainText('2026-09-10');
+});
+
+// --- Cambio 8: jerarquía de 23 partidas y NEODATA opcional ------------------------------
+
+test('Resumen: gasto por partida en eje común y barra por categoría con tooltip', async ({ page }, testInfo) => {
+  await login(page);
+  await page.goto(`/obras/${workId}`);
+  // The NEODATA budget remains the global ceiling on the summary cards.
+  await expect(page.getByText('Presupuesto vigente')).toBeVisible();
+  await page.getByRole('button', { name: /Gasto por partida/ }).click();
+  const rows = page.locator('.item-group > .item-row');
+  await expect(rows).toHaveCount(2);
+  await expect(rows.first()).toHaveAttribute('data-testid', 'item-row-ALBANILERIA');
+  const albanileria = page.getByTestId('item-row-ALBANILERIA');
+  // Common axis = largest committed item ($14,000): 12,000 → 85.71 %, 6,450 → 46.07 %.
+  await expect(albanileria.locator('.item-bar.validated')).toHaveAttribute('data-width', '85.71');
+  await expect(page.getByTestId('item-row-PRELIMINARES').locator('.item-bar.validated')).toHaveAttribute('data-width', '46.07');
+  await expect(albanileria).toContainText('$12,000.00');
+  await expect(albanileria).toContainText('+ $2,000.00 pend.');
+  await expect(albanileria).toContainText('3 gastos · 65.0 % del validado');
+  await expect(page.getByTestId('category-MATERIAL')).toContainText('$15,450.00');
+  await expect(page.getByTestId('category-MATERIAL')).toContainText('83.7 %');
+  await expect(page.getByTestId('category-EQUIPO/HERR')).toContainText('$0.00');
+  await expect(page.getByTestId('category-segment-MATERIAL')).toBeVisible();
+  await expect(page.getByTestId('category-segment-EQUIPO/HERR')).toHaveCount(0); // no zero-width segment
+  const byItem = page.getByRole('table', { name: 'Gasto acumulado por partida y subpartida' });
+  await expect(byItem.getByRole('row', { name: /^PRELIMINARES \$/ })).toContainText('$2,150.00');
+  await expect(page.getByRole('table', { name: 'Gasto validado por categoría' }).getByRole('row', { name: /MANO DE OBRA/ })).toContainText('$3,000.00');
+  if (testInfo.project.name === 'desktop-chromium') {
+    await albanileria.hover();
+    await expect(page.getByRole('tooltip')).toContainText('MATERIAL: $9,000.00');
+    await expect(page.getByRole('tooltip')).toContainText('MANO DE OBRA: $3,000.00');
+    await page.getByTestId('category-segment-MANO DE OBRA').focus();
+    await expect(page.getByRole('tooltip')).toContainText('16.3 % del gasto validado');
+  }
+});
+
+test('Resumen: desglose vacío explica que aún no hay gasto', async ({ page }) => {
+  await page.route(`**/api/v1/works/${workId}/overview**`, async (route) => {
+    await route.fulfill({ json: {
+      totals: { budget: '100000', validated: '0', committed: '0', available: '100000', projected_available: '100000', execution_percent: '0', pending: '0', pending_count: 0, rejected_count: 0, missing_receipts: 0 },
+      period: { validated: '0', pending: '0' }, areas: [], weekly: [], suppliers: [], categories: [],
+      incomes: { total: '0', reconciled: '0', pending: '0', count: 0 },
+      by_item: [], by_provider: [],
+      by_category: [{ ...spend('MATERIAL', '0', '0', 0), id: expenseCategoryId }],
+    } });
+  });
+  await login(page);
+  await page.goto(`/obras/${workId}`);
+  await page.getByRole('button', { name: /Gasto por partida/ }).click();
+  await expect(page.getByText('Aún no hay gastos registrados en el periodo.')).toBeVisible();
+  await expect(page.getByText('Aún no hay gastos con proveedor en el periodo.')).toBeVisible();
+  await expect(page.getByTestId('category-empty')).toBeVisible();
+});
+
+test('gasto: vincular a NEODATA es opcional; se vincula, se quita y se vuelve a vincular', async ({ page }) => {
+  const payloads: Record<string, unknown>[] = [];
+  await page.route('**/api/v1/expenses', async (route) => {
+    payloads.push(route.request().postDataJSON());
+    await route.fulfill({ status: 201, json: { id: '44444444-4444-4444-8444-444444444444' } });
+  });
+  await login(page);
+  await page.goto('/gastos');
+  const form = page.locator('form.work-expense-form');
+  const toggle = form.getByRole('button', { name: /Vincular a NEODATA \(Opcional\)/ });
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  const budget = form.getByLabel('Partida NEODATA');
+  await expect(budget).toBeDisabled(); // needs an area first
+  await form.getByLabel('Buscar área NEODATA').fill('oficina');
+  await expect(form.getByLabel('Área NEODATA', { exact: true })).toHaveValue(areaId);
+  await budget.selectOption(budgetItemId);
+  await expect(form.getByTestId('neodata-summary')).toHaveText('OFICINA · ALB-05');
+  await form.getByRole('button', { name: 'Quitar vínculo' }).click();
+  await expect(form.getByTestId('neodata-summary')).toHaveText('Sin área específica');
+  await expect(form.getByLabel('Área NEODATA', { exact: true })).toHaveValue('');
+  await expect(budget).toBeDisabled();
+  await form.getByLabel('Área NEODATA', { exact: true }).selectOption(areaId);
+  await budget.selectOption(budgetItemId);
+  // Collapsing keeps the link and the summary tells what is linked.
+  await toggle.click();
+  await expect(form.getByTestId('neodata-summary')).toHaveText('OFICINA · ALB-05');
+  await chooseClassification(form);
+  await fillLines(form, [{ description: 'Firme', price: '500' }]);
+  await form.getByLabel('Concepto general').fill('Firme de oficina');
+  await form.getByRole('button', { name: /Guardar pendiente/ }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Gasto guardado como pendiente' })).toBeVisible();
+  expect(payloads).toHaveLength(1);
+  expect(payloads[0]).toMatchObject({ area_id: areaId, budget_item_id: budgetItemId, supplier_id: supplierId });
+});
+
+test('gasto: al corregir un gasto con área, el bloque NEODATA abre con su vínculo y se puede quitar', async ({ page }) => {
+  const patches: Record<string, unknown>[] = [];
+  await page.route('**/api/v1/expenses/44444444-4444-4444-8444-444444444444', async (route) => {
+    if (route.request().method() !== 'PATCH') return route.fallback();
+    patches.push(route.request().postDataJSON());
+    await route.fulfill({ json: { id: '44444444-4444-4444-8444-444444444444' } });
+  });
+  await login(page);
+  await page.goto(`/obras/${workId}/gastos`);
+  await page.getByRole('button', { name: 'Editar', exact: true }).click();
+  const form = page.locator('form.work-expense-form');
+  await expect(form.getByRole('heading', { name: 'Corregir gasto G-00001' })).toBeVisible();
+  await expect(form.getByRole('button', { name: /Vincular a NEODATA/ })).toHaveAttribute('aria-expanded', 'true');
+  await expect(form.getByLabel('Área NEODATA', { exact: true })).toHaveValue(areaId);
+  await expect(form.getByLabel('Proveedor', { exact: true })).toHaveValue(supplierId);
+  await form.getByRole('button', { name: 'Quitar vínculo' }).click();
+  await form.getByRole('button', { name: 'Guardar corrección' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Gasto corregido correctamente' })).toBeVisible();
+  expect(patches).toHaveLength(1);
+  expect(patches[0]).toMatchObject({ area_id: null, budget_item_id: null, supplier_id: supplierId });
+});
+
+test('gastos: la clasificación muestra partida primero y el área sólo como dato secundario', async ({ page }) => {
+  await login(page);
+  await page.goto(`/obras/${workId}/gastos`);
+  const cell = page.getByRole('cell', { name: /PRELIMINARES › LIMPIEZA/ });
+  await expect(cell).toContainText('MATERIAL · Área: OFICINA');
+  await expect(page.getByRole('columnheader', { name: 'Clasificación' })).toBeVisible();
+});
+
+test('gasto: Partida, Subpartida y Categoría exigen una elección explícita', async ({ page }) => {
+  const thirdSubpartidaId = '13131313-1313-4313-8313-131313131313';
+  await page.route('**/api/v1/works/*/catalog', async (route) => {
+    const json = workCatalog();
+    // ALBANILERIA with two subpartidas: none is auto-selected.
+    await route.fulfill({ json: { ...json, expense_subitems: [...json.expense_subitems, { id: thirdSubpartidaId, partida_id: secondExpensePartidaId, nombre: 'MUROS' }] } });
+  });
+  await login(page);
+  await page.goto('/gastos');
+  const form = page.locator('form.work-expense-form');
+  const partida = form.getByLabel('Partida', { exact: true });
+  const subpartida = form.getByLabel('Subpartida', { exact: true });
+  const categoria = form.getByLabel('Categoría', { exact: true });
+  const save = form.getByRole('button', { name: /Guardar pendiente/ });
+  await expect(partida).toHaveValue('');
+  await expect(partida.locator('option').first()).toHaveText('Seleccionar partida');
+  await expect(categoria).toHaveValue('');
+  await expect(categoria.locator('option').first()).toHaveText('Seleccionar categoría');
+  await expect(subpartida).toBeDisabled();
+  await expect(subpartida.locator('option').first()).toHaveText('Primero elige una partida');
+  await chooseSupplier(form);
+  await fillLines(form, [{ description: 'Block', price: '50' }]);
+  await form.getByLabel('Concepto general').fill('Block para muros');
+  await expect(save).toBeDisabled();
+  await partida.selectOption(secondExpensePartidaId);
+  await expect(subpartida).toBeEnabled();
+  await expect(subpartida).toHaveValue('');
+  await expect(subpartida.locator('option').first()).toHaveText('Seleccionar subpartida');
+  await expect(save).toBeDisabled();
+  await subpartida.selectOption(thirdSubpartidaId);
+  await expect(save).toBeDisabled(); // category still missing
+  await categoria.selectOption(expenseCategoryId);
+  await expect(save).toBeEnabled();
+  // Changing the partida clears the subpartida again.
+  await partida.selectOption(expensePartidaId);
+  await expect(subpartida).toHaveValue(expenseSubpartidaId); // single option: nothing to choose
+  await partida.selectOption('');
+  await expect(subpartida).toBeDisabled();
+  await expect(save).toBeDisabled();
+});
+
+test('Resumen: drill-down Partida → Subpartida → Categoría con importes validados y pendientes', async ({ page }) => {
+  await login(page);
+  await page.goto(`/obras/${workId}`);
+  await page.getByRole('button', { name: /Gasto por partida/ }).click();
+  const albanileria = page.getByTestId('item-row-ALBANILERIA');
+  await expect(albanileria).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByRole('region', { name: 'Subpartidas de ALBANILERIA' })).toBeHidden();
+  await albanileria.click();
+  await expect(albanileria).toHaveAttribute('aria-expanded', 'true');
+  const panel = page.getByRole('region', { name: 'Subpartidas de ALBANILERIA' });
+  await expect(panel.locator('.subitem')).toHaveCount(2);
+  const firmes = page.getByTestId('subitem-ALBANILERIA-FIRMES-Y-HORMIGONES');
+  await expect(firmes).toContainText('$9,000.00');
+  await expect(firmes).toContainText('+ $2,000.00 pend.');
+  await expect(firmes.getByTestId('chip-MATERIAL')).toContainText('$9,000.00');
+  await expect(firmes.getByTestId('chip-MATERIAL')).toContainText('+ $2,000.00 pend.');
+  const muros = page.getByTestId('subitem-ALBANILERIA-MUROS');
+  await expect(muros.getByTestId('chip-MANO-DE-OBRA')).toContainText('$3,000.00');
+  await expect(muros.getByTestId('chip-MATERIAL')).toHaveCount(0);
+  // Subitem bars share the chart axis ($14,000): 9,000 → 64.29 %.
+  await expect(firmes.locator('.item-bar.validated')).toHaveAttribute('data-width', '64.29');
+  // Other partidas stay collapsed; keyboard toggles too.
+  await expect(page.getByRole('region', { name: 'Subpartidas de PRELIMINARES' })).toBeHidden();
+  await albanileria.press('Enter');
+  await expect(albanileria).toHaveAttribute('aria-expanded', 'false');
+  await expect(panel).toBeHidden();
+  const table = page.getByRole('table', { name: 'Gasto acumulado por partida y subpartida' });
+  await expect(table.getByRole('row', { name: /ALBANILERIA › MUROS/ })).toContainText('$3,000.00');
+});
+
+test('Resumen: gasto por proveedor ordenado, con importes, porcentajes y tooltip', async ({ page }, testInfo) => {
+  await login(page);
+  await page.goto(`/obras/${workId}`);
+  await expect(page.getByRole('heading', { name: 'Principales proveedores' })).toHaveCount(0);
+  const panel = page.getByRole('region', { name: 'Gasto por proveedor' });
+  const rows = panel.locator('.provider-row');
+  await expect(rows).toHaveCount(2);
+  await expect(rows.first()).toHaveAttribute('data-testid', 'provider-row-Concretos Toluca');
+  const concretos = page.getByTestId('provider-row-Concretos Toluca');
+  await expect(concretos).toContainText('$14,450.00');
+  await expect(concretos).toContainText('+ $4,150.00 pend.');
+  await expect(concretos).toContainText('4 gastos · 78.3 % del validado');
+  await expect(page.getByTestId('provider-row-Aceros del Centro')).toContainText('1 gasto · 21.7 % del validado');
+  // Common axis = largest committed ($18,600): 14,450 → 77.69 %, 4,000 → 21.51 %.
+  await expect(concretos.locator('.item-bar.validated')).toHaveAttribute('data-width', '77.69');
+  await expect(page.getByTestId('provider-row-Aceros del Centro').locator('.item-bar.validated')).toHaveAttribute('data-width', '21.51');
+  const table = page.getByRole('table', { name: 'Gasto por proveedor' });
+  await expect(table.getByRole('row', { name: /Aceros del Centro/ })).toContainText('$4,000.00');
+  if (testInfo.project.name === 'desktop-chromium') {
+    await concretos.hover();
+    const tooltip = page.getByRole('tooltip');
+    await expect(tooltip).toContainText('$14,450.00 validado');
+    await expect(tooltip).toContainText('$4,150.00 pendiente');
+    await expect(tooltip).toContainText('78.3 % del gasto validado de la obra');
+    await page.mouse.move(0, 0);
+    await page.getByTestId('provider-row-Aceros del Centro').focus();
+    await expect(page.getByRole('tooltip')).toContainText('Aceros del Centro');
+  }
 });

@@ -12,6 +12,12 @@ ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL
 ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 COPY apps/web apps/web
+# Internal architecture maps (Archify) must never be served: .dockerignore keeps them out
+# of the context; this guard fails the build if one slips in. An empty public/ lets a
+# runner stage copy it without failing.
+RUN mkdir -p apps/web/public \
+  && if find apps/web/public -iname 'arquitectura*' | grep -q .; then \
+       echo 'arquitectura.html no debe incluirse en la imagen' >&2; exit 1; fi
 RUN npm run build
 
 FROM node:24-alpine AS runner

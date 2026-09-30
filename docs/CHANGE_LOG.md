@@ -114,6 +114,37 @@ alcance de monolito simple sin importación automática de Excel ni agente de IA
   - PostgREST queda de **sólo lectura** para `gasto`, `gasto_concepto` y
     `gasto_comprobante`: toda mutación pasa por FastAPI.
 
+## Cambio 8 — Jerarquía de 23 partidas y vínculo opcional a NEODATA (2026-09-30)
+- **Naturaleza:** cambio de alcance **funcional**, **acordado con el cliente (D89)**, derivado
+  del levantamiento de su formato operativo de estimaciones.
+- **Qué cambia:**
+  - La captura y el control se organizan por **Partida (23) → Subpartida → Categoría →
+    Proveedor** (`catalogo_partida_gasto`, `catalogo_subpartida_gasto`,
+    `catalogo_categoria_gasto`). Los cuatro campos son obligatorios.
+  - El **área NEODATA** deja de ser obligatoria (`gasto.area_id` acepta nulo, migración
+    `202609300001`). El área y la partida NEODATA quedan en un bloque opcional "Vincular a
+    NEODATA", cerrado por defecto. Una partida NEODATA sigue exigiendo su área (check
+    `gasto_partida_neodata_requiere_area`). Los gastos existentes conservan su área.
+  - El formulario ya no preselecciona área ni proveedor: el proveedor exige una elección
+    explícita ("Seleccionar proveedor").
+  - El Resumen reemplaza "Control por área" por **"Gasto por partida"**: gasto acumulado por
+    partida (validado y pendiente) y reparto del gasto validado por categoría (Material, Mano
+    de obra, Equipo/Herr).
+- **Presupuesto:** el importe total de NEODATA se mantiene como **Presupuesto Total Vigente**,
+  techo financiero global de la obra contra el que se calculan el % ejercido y el saldo
+  disponible. Las 23 partidas y las 3 categorías agrupan el gasto real; no tienen presupuesto
+  propio.
+- **Impacto:** los listados, el detalle, el reporte Excel/PDF y el cierre semanal muestran los
+  gastos sin área ("Sin área"). No cambian importes ni gastos existentes.
+- **Ajustes (2026-09-30):**
+  - Partida, Subpartida, Categoría y Proveedor inician vacíos ("Seleccionar …"); la
+    Subpartida se habilita al elegir Partida (si la partida tiene una sola subpartida, se
+    toma sola).
+  - "Gasto por partida" se despliega por partida → subpartidas → categorías, con importes
+    validados y pendientes.
+  - "Gasto por proveedor" reemplaza "Principales proveedores": todos los proveedores con
+    movimientos, validado, pendiente, número de gastos y % del gasto validado de la obra.
+
 ---
 *Cualquier desviación nueva de alcance detectada durante el desarrollo debe agregarse aquí,
 siguiendo el mismo formato: naturaleza del cambio, si fue acordado con el cliente o es decisión

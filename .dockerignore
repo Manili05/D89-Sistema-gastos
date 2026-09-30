@@ -16,4 +16,9 @@ test-results
 *.xlsm
 *.zip
 *.log
-
+# Internal architecture (Archify): never part of any image. The generated map would be
+# served publicly by Next from apps/web/public.
+apps/web/public/arquitectura*.html
+docs/architecture
+plans
+.agents

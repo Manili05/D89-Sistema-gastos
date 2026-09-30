@@ -1017,11 +1017,8 @@ export interface components {
         };
         /** ExpenseCreate */
         ExpenseCreate: {
-            /**
-             * Area Id
-             * Format: uuid
-             */
-            area_id: string;
+            /** Area Id */
+            area_id?: string | null;
             /** Budget Item Id */
             budget_item_id?: string | null;
             /** Concept */
@@ -1207,11 +1204,8 @@ export interface components {
         ExpenseState: "pendiente" | "validado" | "rechazado";
         /** ExpenseUpdate */
         ExpenseUpdate: {
-            /**
-             * Area Id
-             * Format: uuid
-             */
-            area_id: string;
+            /** Area Id */
+            area_id?: string | null;
             /** Budget Item Id */
             budget_item_id?: string | null;
             /** Concept */

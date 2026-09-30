@@ -208,13 +208,24 @@ class ExpenseLinesPayload(BaseModel):
     iva: Decimal | None = Field(default=None, ge=0, max_digits=14, decimal_places=4)
 
 
-class ExpenseCreate(ExpenseLinesPayload):
+class OptionalNeodataLink(BaseModel):
+    """The NEODATA area is an optional link; a NEODATA budget item belongs to an area."""
+
+    area_id: UUID | None = None
+    budget_item_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def budget_item_needs_area(self) -> "OptionalNeodataLink":
+        if self.budget_item_id is not None and self.area_id is None:
+            raise ValueError("La partida NEODATA requiere un área")
+        return self
+
+
+class ExpenseCreate(OptionalNeodataLink, ExpenseLinesPayload):
     work_id: UUID
-    area_id: UUID
     expense_item_id: UUID
     expense_subitem_id: UUID
     expense_category_id: UUID
-    budget_item_id: UUID | None = None
     supplier_id: UUID
     spent_on: date
     concept: str = Field(min_length=3, max_length=500)
@@ -222,12 +233,10 @@ class ExpenseCreate(ExpenseLinesPayload):
     state: ExpenseState = ExpenseState.PENDIENTE
 
 
-class ExpenseUpdate(ExpenseLinesPayload):
-    area_id: UUID
+class ExpenseUpdate(OptionalNeodataLink, ExpenseLinesPayload):
     expense_item_id: UUID
     expense_subitem_id: UUID
     expense_category_id: UUID
-    budget_item_id: UUID | None = None
     supplier_id: UUID
     spent_on: date
     concept: str = Field(min_length=3, max_length=500)

@@ -568,3 +568,84 @@ button { cursor: pointer; }
 .existing-receipts { margin-bottom: 14px; }
 .existing-receipts .detail-section-title { margin-top: 0; }
 .income-table td[data-label="Folio"], .income-table td[data-label="Fecha"] { white-space: nowrap; }
+
+/* Cambio 8: expense form leads with Partida → Subpartida → Categoría → Proveedor; the
+   NEODATA link is an optional, collapsed block. */
+.form-grid.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.form-grid.four > .span-2 { grid-column: span 2; }
+.neodata-link { border: 1px solid var(--line); background: #fdfcfa; }
+.neodata-toggle { width: 100%; min-height: 56px; padding: 12px 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 0; background: transparent; color: var(--navy); text-align: left; font: inherit; cursor: pointer; }
+.neodata-toggle:hover { background: #f6f3ee; }
+.neodata-toggle:focus-visible { outline: 2px solid var(--navy); outline-offset: -3px; }
+.neodata-toggle strong { display: block; font-size: 13px; }
+.neodata-toggle small { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+.neodata-link-body:not([hidden]) { padding: 4px 14px 14px; display: grid; gap: 12px; border-top: 1px solid var(--line); }
+.neodata-link-body .text-action { justify-self: start; }
+@media (max-width: 980px) { .form-grid.four { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 760px) {
+  .form-grid.four, .neodata-link-body .form-grid { grid-template-columns: 1fr; }
+  .form-grid.four > .span-2 { grid-column: auto; }
+}
+
+/* Resumen: spend by the 23 items (common axis) and a 100 % category bar. */
+#spend-breakdown-body:not([hidden]) { padding: 0 20px 20px; border-top: 1px solid var(--line); }
+.spend-breakdown { display: grid; gap: 22px; padding-top: 16px; }
+.breakdown-title { margin: 0 0 10px; color: var(--navy); font: 500 16px/1.2 Georgia, serif; }
+.breakdown-title small { margin-left: 6px; color: var(--muted); font: 400 11px/1.2 Inter, sans-serif; }
+.empty-state.compact { padding: 8px 0; }
+.category-bar { display: flex; gap: 2px; height: 22px; }
+.category-segment { position: relative; flex: 0 0 var(--width); min-width: 6px; padding: 0; border: 0; background: var(--color); cursor: default; }
+.category-segment:first-child { border-radius: 4px 0 0 4px; }
+.category-segment:last-child { border-radius: 0 4px 4px 0; }
+.category-segment:only-child { border-radius: 4px; }
+.category-segment:focus-visible { outline: 2px solid var(--navy); outline-offset: 2px; }
+.category-tooltip { top: auto; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%); }
+.category-legend { margin: 12px 0 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px 18px; }
+.category-legend li { display: grid; grid-template-columns: 12px 1fr; align-items: center; gap: 2px 8px; font-size: 11px; color: var(--muted); }
+.category-legend b { color: var(--navy); font-weight: 750; }
+.category-legend i { width: 12px; height: 12px; border-radius: 3px; }
+.category-legend strong { grid-column: 2; color: var(--ink); font-size: 13px; font-variant-numeric: tabular-nums; }
+.item-rows { display: grid; gap: 2px; margin-top: 10px; }
+.item-row { width: 100%; min-height: 50px; padding: 6px 8px; display: grid; grid-template-columns: minmax(150px, 220px) minmax(0, 1fr) 150px; align-items: center; gap: 14px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: default; }
+.item-row:hover, .item-row:focus-visible { background: #f6f3ee; }
+.item-row:focus-visible { outline: 2px solid var(--navy); outline-offset: -2px; }
+.item-name { color: var(--navy); font-size: 12px; font-weight: 750; }
+.item-name small, .item-value small { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; font-weight: 500; }
+.item-value { text-align: right; font-size: 12px; font-weight: 750; font-variant-numeric: tabular-nums; }
+.item-track { position: relative; height: 16px; border-left: 1px solid #b9b2a7; }
+.item-bar { position: absolute; top: 2px; bottom: 2px; left: var(--left, 0); width: var(--width); background: var(--color); }
+.item-bar.validated, .item-bar.pending { border-radius: 0 4px 4px 0; }
+.item-bar.validated.joined { border-radius: 0; }
+.item-bar.pending { margin-left: 2px; }
+/* Beside the end of its row's bar (like the cash-flow chart), never over another bar. */
+@media (max-width: 760px) {
+  #spend-breakdown-body:not([hidden]) { padding: 0 14px 16px; }
+  .item-row { grid-template-columns: minmax(0, 1fr) auto; row-gap: 6px; }
+  .item-track { grid-column: 1 / -1; grid-row: 2; }
+  .category-tooltip, .item-tooltip { display: none; }
+}
+
+/* Drill-down Partida → Subpartida → Categoría and "Gasto por proveedor". */
+.item-group { border-bottom: 1px solid var(--line); }
+.item-group > .item-row { border-bottom: 0; cursor: pointer; }
+.item-row[tabindex="0"] { cursor: default; }
+.item-row[tabindex="0"]:focus-visible { outline: 2px solid var(--navy); outline-offset: -2px; }
+.item-caret { display: inline-block; width: 7px; height: 7px; margin: 0 8px 1px 0; border-right: 2px solid var(--navy); border-bottom: 2px solid var(--navy); transform: rotate(-45deg); transition: transform .2s ease; }
+.item-group.open .item-caret { transform: rotate(45deg); }
+.subitem-panel:not([hidden]) { margin: 0 0 10px 18px; padding-left: 12px; border-left: 2px solid #e6e0d6; display: grid; gap: 4px; }
+.subitem { padding: 2px 0 6px; }
+.subitem-row { min-height: 42px; border-bottom: 0; }
+.subitem-row .item-name { font-weight: 650; }
+.subitem-row .item-track { height: 12px; }
+.category-chips { margin: 0 0 0 8px; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 11px; color: var(--muted); }
+.category-chips li { display: inline-flex; align-items: center; gap: 6px; }
+.category-chips i { width: 10px; height: 10px; border-radius: 3px; }
+.category-chips strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+.provider-panel { margin-top: 20px; }
+.provider-spend { padding: 16px 20px 20px; display: grid; gap: 10px; }
+.provider-row { border-bottom: 1px solid var(--line); }
+@media (prefers-reduced-motion: reduce) { .item-caret { transition: none; } }
+@media (max-width: 760px) {
+  .subitem-panel:not([hidden]) { margin-left: 6px; padding-left: 8px; }
+  .provider-spend { padding: 12px 14px 16px; }
+}

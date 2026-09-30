@@ -48,7 +48,8 @@ cambio a este documento debe justificarse y reflejarse en la migración correspo
 ## 4. Movimientos
 
 **`Gasto`**
-`id, obra_id, area_id, clase_id, categoria_id (nullable), partida_id, proveedor_id, fecha, concepto, folio, importe, estado [validado|pendiente], comprobante_url, origen [web|whatsapp], creado_por, creado_en, editado_por, editado_en, eliminado_por (nullable), eliminado_en (nullable)`
+`id, obra_id, area_id (nullable desde el Cambio 8), clase_id, categoria_id (nullable), partida_id, proveedor_id, fecha, concepto, folio, importe, estado [validado|pendiente], comprobante_url, origen [web|whatsapp], creado_por, creado_en, editado_por, editado_en, eliminado_por (nullable), eliminado_en (nullable)`
+- Clasificación operativa (Cambio 8): `partida_gasto_id → subpartida_gasto_id`, `categoria_gasto_id` y `proveedor_id`. El área NEODATA es un vínculo opcional; una partida NEODATA (`partida_id`) exige área.
 - Borrado siempre lógico.
 
 **`CierreSemanal`**
