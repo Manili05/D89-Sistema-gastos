@@ -2480,6 +2480,8 @@ test('Subcontratos: un error al exportar la nómina se explica', async ({ page }
   });
   await login(page);
   await page.goto(`/obras/${workId}/subcontratos`);
+  // Wait for the loaded list (the page is hydrated) before clicking.
+  await expect(page.getByRole('heading', { name: 'Aún no hay subcontratos en esta obra' })).toBeVisible();
   await page.getByRole('button', { name: 'Exportar Nómina (Excel)' }).click();
   await expect(page.locator('.notice.error')).toContainText('Rango de fechas inválido');
 });

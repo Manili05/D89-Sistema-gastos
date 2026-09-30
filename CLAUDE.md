@@ -16,7 +16,7 @@ desarrollado por EscalaLeads. Metodología: Spec-Driven Development.
 6. `docs/OPEN_QUESTIONS.md` — pendientes que NO deben resolverse por supuesto propio.
 
 ## Stack (resumen)
-Next.js 16.2.11 (frontend) · FastAPI/Python (backend) · Supabase self-hosted
+Next.js 16.3.7 (frontend) · FastAPI/Python (backend) · Supabase self-hosted
 (Postgres+Auth+Storage, sin Studio/Realtime permanentes) · Hermes Agent v2026.6.5
 (self-hosted, canal WhatsApp) · LiteLLM v1.83.x (alias `kimi-k3`, presupuesto mensual máximo
 de $1,000 MXN) · Playwright 1.61.x · Docker Compose · Caddy detrás del Nginx del host.
