@@ -532,6 +532,101 @@ test('gasto: corregir carga los conceptos, conserva comprobantes y reintenta sin
   expect(creations).toBe(0);
 });
 
+function expenseForFilter(id: number, estado: 'pendiente' | 'validado' | 'rechazado') {
+  return {
+    id: `expense-${id}`, estado, concepto: `Material ${id}`, folio: `G-${String(id).padStart(5, '0')}`,
+    folio_proveedor: `PROV-${id}`, fecha: '2026-08-28', proveedor: 'Concretos Toluca',
+    importe: '100', area: 'Oficina', area_ruta: ['OFICINA'], partida: 'PRELIMINARES',
+    subpartida: 'LIMPIEZA', categoria: 'MATERIAL', autor: 'Sergio Gómez',
+    comprobante_path: null, motivo_revision: null, expense_locked: false,
+    can_edit: false, can_cancel: false, can_resubmit: false,
+  };
+}
+
+test('filtros de estado: selección instantánea, búsqueda combinada, vacío y teclado', async ({ page }) => {
+  const items = [expenseForFilter(1, 'pendiente'), expenseForFilter(2, 'validado'), expenseForFilter(3, 'rechazado')];
+  let calls = 0;
+  await page.route(`**/api/v1/works/${workId}/expenses?**`, async (route) => {
+    calls += 1;
+    const params = new URL(route.request().url()).searchParams;
+    expect(params.has('state')).toBe(false);
+    const query = (params.get('q') || '').toLowerCase();
+    const matches = items.filter((item) => [item.concepto, item.folio, item.folio_proveedor, item.proveedor].some((value) => value.toLowerCase().includes(query)));
+    await route.fulfill({ json: { items: matches, total: matches.length, page: 1, page_size: 50 } });
+  });
+  await login(page);
+  await page.goto(`/obras/${workId}/gastos`);
+  const filters = page.getByRole('radiogroup', { name: 'Estado del gasto' });
+  const rows = page.locator('.expense-table tbody tr');
+  await expect(rows).toHaveCount(3);
+  await expect(filters.getByRole('radio', { name: 'Todos', exact: true })).toBeChecked();
+  const initialCalls = calls;
+  for (const [label, state, concept] of [
+    ['Pendientes', 'pendiente', 'Material 1'], ['Validados', 'validado', 'Material 2'], ['Rechazados', 'rechazado', 'Material 3'],
+  ]) {
+    await filters.getByRole('radio', { name: label, exact: true }).click();
+    await expect(rows).toHaveCount(1);
+    await expect(rows).toContainText(concept);
+    await expect(rows.locator('td').nth(4)).toHaveText(state);
+    await expect(filters.getByRole('radio', { checked: true })).toHaveText(label);
+    await expect(page.getByRole('status')).toHaveText('1 gastos encontrados');
+  }
+  await filters.getByRole('radio', { name: 'Todos', exact: true }).click();
+  await expect(rows).toHaveCount(3);
+  expect(calls).toBe(initialCalls);
+
+  // Clicking the active option keeps a single selected filter.
+  await filters.getByRole('radio', { name: 'Todos', exact: true }).click();
+  await expect(filters.getByRole('radio', { name: 'Todos', exact: true })).toBeChecked();
+  await filters.getByRole('radio', { name: 'Todos', exact: true }).focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(filters.getByRole('radio', { name: 'Pendientes', exact: true })).toBeFocused();
+  await page.keyboard.press('Space');
+  await expect(filters.getByRole('radio', { name: 'Pendientes', exact: true })).toBeChecked();
+  await expect(rows).toHaveCount(1);
+
+  await page.getByLabel('Buscar gastos').fill('PROV-2');
+  await expect(rows).toHaveCount(0);
+  await expect(page.getByText('No hay movimientos con estos filtros.')).toBeVisible();
+  await expect(page.getByRole('status')).toHaveText('0 gastos encontrados');
+  await filters.getByRole('radio', { name: 'Validados', exact: true }).click();
+  await expect(rows).toHaveCount(1);
+  await expect(rows).toContainText('Material 2');
+  await expect(page.getByLabel('Buscar gastos')).toHaveValue('PROV-2');
+  await filters.getByRole('radio', { name: 'Todos', exact: true }).click();
+  await expect(rows).toHaveCount(1);
+  await page.getByLabel('Buscar gastos').fill('');
+  await expect(rows).toHaveCount(3);
+});
+
+test('filtros de estado: incluye gastos de las páginas posteriores de la API', async ({ page }) => {
+  const items = [...Array.from({ length: 50 }, (_, index) => expenseForFilter(index + 1, 'pendiente')),
+    expenseForFilter(51, 'validado'), expenseForFilter(52, 'rechazado')];
+  const requestedPages: number[] = [];
+  await page.route(`**/api/v1/works/${workId}/expenses?**`, async (route) => {
+    const number = Number(new URL(route.request().url()).searchParams.get('page') || '1');
+    requestedPages.push(number);
+    await route.fulfill({ json: { items: items.slice((number - 1) * 50, number * 50), total: items.length, page: number, page_size: 50 } });
+  });
+  await login(page);
+  await page.goto(`/obras/${workId}/gastos`);
+  const filters = page.getByRole('radiogroup', { name: 'Estado del gasto' });
+  const rows = page.locator('.expense-table tbody tr');
+  await expect(rows).toHaveCount(52);
+  expect(requestedPages).toEqual([1, 2]);
+  await filters.getByRole('radio', { name: 'Validados', exact: true }).click();
+  await expect(rows).toHaveCount(1);
+  await expect(rows).toContainText('Material 51');
+  await filters.getByRole('radio', { name: 'Rechazados', exact: true }).click();
+  await expect(rows).toHaveCount(1);
+  await expect(rows).toContainText('Material 52');
+  await filters.getByRole('radio', { name: 'Pendientes', exact: true }).click();
+  await expect(rows).toHaveCount(50);
+  await filters.getByRole('radio', { name: 'Todos', exact: true }).click();
+  await expect(rows).toHaveCount(52);
+  expect(requestedPages).toEqual([1, 2]);
+});
+
 test('Ver: consulta de solo lectura del gasto con conceptos, totales y comprobantes', async ({ page }) => {
   const mutations: string[] = [];
   const signed: string[] = [];

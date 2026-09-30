@@ -345,6 +345,12 @@ button { cursor: pointer; }
 .work-tabs a { flex: 0 0 auto; min-height: 38px; padding: 0 15px; display: grid; place-items: center; border-radius: 3px; color: var(--muted); font-size: 12px; font-weight: 750; }
 .work-tabs a:hover { color: var(--navy); background: var(--paper); }
 .work-tabs a.active { color: white; background: var(--navy); }
+.panel-header .expense-filters { display: flex; flex-direction: column; gap: 10px; }
+.expense-state-filters { display: flex; flex-wrap: wrap; gap: 6px; }
+.expense-state-pill { min-height: 40px; padding: 8px 13px; border: 1px solid var(--line); border-radius: 22px; background: var(--surface); color: var(--muted); font: inherit; font-size: 12px; font-weight: 750; cursor: pointer; }
+.expense-state-pill:hover { color: var(--navy); background: var(--paper); }
+.expense-state-pill[data-state="on"] { border-color: var(--navy); color: white; background: var(--navy); }
+.expense-state-pill:focus-visible { outline: 2px solid var(--navy); outline-offset: 3px; }
 .period-toolbar { display: flex; align-items: end; flex-wrap: wrap; gap: 10px; margin-bottom: 20px; }
 .period-toolbar label { display: grid; gap: 5px; color: var(--muted); font-size: 10px; font-weight: 750; text-transform: uppercase; letter-spacing: .08em; }
 .period-toolbar select, .period-toolbar input, .expense-filters input, .expense-filters select { min-height: 38px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 3px; color: var(--ink); background: white; }
