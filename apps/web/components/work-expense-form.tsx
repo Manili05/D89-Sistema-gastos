@@ -96,20 +96,15 @@ export function WorkExpenseForm({
   const [areaId, setAreaId] = useState(expense?.area_id || '');
   const [neodataOpen, setNeodataOpen] = useState(Boolean(expense?.area_id));
   const [areaSearch, setAreaSearch] = useState('');
-  const [partidaId, setPartidaId] = useState(
-    expense?.expense_item_id || catalog.expense_partidas[0]?.id || '',
-  );
+  // Partida, subpartida, categoría and proveedor start empty: every classification is
+  // an intentional choice, never a silent default.
+  const [partidaId, setPartidaId] = useState(expense?.expense_item_id || '');
   const availableSubitems = useMemo(
     () => catalog.expense_subitems.filter((item) => item.partida_id === partidaId),
     [catalog.expense_subitems, partidaId],
   );
-  const [subpartidaId, setSubpartidaId] = useState(
-    expense?.expense_subitem_id
-      || catalog.expense_subitems.find((item) => item.partida_id === partidaId)?.id || '',
-  );
-  const [categoryId, setCategoryId] = useState(
-    expense?.expense_category_id || catalog.expense_categories[0]?.id || '',
-  );
+  const [subpartidaId, setSubpartidaId] = useState(expense?.expense_subitem_id || '');
+  const [categoryId, setCategoryId] = useState(expense?.expense_category_id || '');
   const [budgetItemId, setBudgetItemId] = useState(expense?.budget_item_id || '');
   const [suppliers, setSuppliers] = useState<CatalogOption[]>(catalog.suppliers);
   // An intentional choice: a new expense starts at "Seleccionar proveedor".
@@ -197,7 +192,9 @@ export function WorkExpenseForm({
 
   function changePartida(value: string) {
     setPartidaId(value);
-    setSubpartidaId(catalog.expense_subitems.find((item) => item.partida_id === value)?.id || '');
+    // A partida with a single subpartida leaves nothing to choose; otherwise pick explicitly.
+    const options = catalog.expense_subitems.filter((item) => item.partida_id === value);
+    setSubpartidaId(options.length === 1 ? options[0]!.id : '');
   }
 
   function changeSupplier(value: string) {
@@ -380,9 +377,9 @@ export function WorkExpenseForm({
         if (!concept.trim() && ticketConcept) setConcept(ticketConcept);
       }} /></div>}
     <div className="form-section"><fieldset className="form-grid four" aria-label="Datos del gasto" disabled={Boolean(createdExpenseId)} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
-      <label className="field">Partida<select aria-label="Partida" value={partidaId} onChange={(event) => changePartida(event.target.value)} required>{catalog.expense_partidas.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}</select></label>
-      <label className="field">Subpartida<select aria-label="Subpartida" value={subpartidaId} onChange={(event) => setSubpartidaId(event.target.value)} required>{availableSubitems.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}</select></label>
-      <label className="field">Categoría<select aria-label="Categoría" value={categoryId} onChange={(event) => setCategoryId(event.target.value)} required>{catalog.expense_categories.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}</select></label>
+      <label className="field">Partida<select aria-label="Partida" value={partidaId} onChange={(event) => changePartida(event.target.value)} required><option value="">Seleccionar partida</option>{catalog.expense_partidas.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}</select></label>
+      <label className="field">Subpartida<select aria-label="Subpartida" value={subpartidaId} disabled={!partidaId} onChange={(event) => setSubpartidaId(event.target.value)} required><option value="">{partidaId ? 'Seleccionar subpartida' : 'Primero elige una partida'}</option>{availableSubitems.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}</select></label>
+      <label className="field">Categoría<select aria-label="Categoría" value={categoryId} onChange={(event) => setCategoryId(event.target.value)} required><option value="">Seleccionar categoría</option>{catalog.expense_categories.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}</select></label>
       <label className="field">Proveedor<select aria-label="Proveedor" value={supplierId} onChange={(event) => changeSupplier(event.target.value)} required><option value="">Seleccionar proveedor</option>{selectableSuppliers.map((item) => <option key={item.id} value={item.id}>{item.nombre}</option>)}{canManageSuppliers && <option value={NEW_SUPPLIER}>+ Nuevo proveedor</option>}</select></label>
       <label className="field span-2">Fecha<input name="spent_on" type="date" value={spentOn} onChange={(event) => setSpentOn(event.target.value)} required /></label>
       <label className="field span-2">Folio del proveedor<input name="supplier_folio" value={supplierFolio} maxLength={120} onChange={(event) => setSupplierFolio(event.target.value)} placeholder="Factura o nota, p. ej. A-123" /></label>

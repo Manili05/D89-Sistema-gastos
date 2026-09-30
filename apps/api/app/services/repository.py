@@ -1548,77 +1548,111 @@ def dashboard(settings: Settings, user: UserContext) -> dict[str, Any]:
 def _spend_breakdown(
     connection: psycopg.Connection, work_id: UUID, end_date: date, total_validated: Decimal,
 ) -> dict[str, list[dict[str, Any]]]:
-    """Spend by the 23-item catalog and by category, cumulative to `end_date`.
+    """Spend by the 23-item catalog (→ subitem → category), by category and by supplier.
 
-    Validated and committed (validated + pending) follow `totals`; the NEODATA budget
-    stays the global ceiling, so there is no per-item budget here. Legacy expenses
-    without catalog classification are grouped as "Sin partida" / "Sin categoría".
+    Cumulative to `end_date` like `totals`: validated, pending and committed (validated +
+    pending). Shares are of the work's validated spend, the same basis for items,
+    categories and suppliers. The NEODATA budget stays the global ceiling, so there is
+    no per-item budget here. Legacy expenses without catalog classification are grouped
+    as "Sin partida" / "Sin subpartida" / "Sin categoría".
     """
     rows = connection.execute(
         """
         select g.partida_gasto_id as item_id, coalesce(cpg.nombre, 'Sin partida') as item,
                coalesce(cpg.orden, 999) as item_order,
+               g.subpartida_gasto_id as subitem_id,
+               coalesce(csg.nombre, 'Sin subpartida') as subitem,
+               coalesce(csg.orden, 999) as subitem_order,
                g.categoria_gasto_id as category_id,
                coalesce(cag.nombre, 'Sin categoría') as category,
                coalesce(cag.orden, 999) as category_order,
                coalesce(sum(g.importe) filter (where g.estado = 'validado'), 0) as validated,
-               coalesce(sum(g.importe), 0) as committed,
+               coalesce(sum(g.importe) filter (where g.estado = 'pendiente'), 0) as pending,
                count(*) as expense_count
         from public.gasto g
         left join public.catalogo_partida_gasto cpg on cpg.id = g.partida_gasto_id
+        left join public.catalogo_subpartida_gasto csg on csg.id = g.subpartida_gasto_id
         left join public.catalogo_categoria_gasto cag on cag.id = g.categoria_gasto_id
         where g.obra_id = %s and g.eliminado_en is null and g.fecha <= %s
           and g.estado in ('validado', 'pendiente')
-        group by 1, 2, 3, 4, 5, 6
+        group by 1, 2, 3, 4, 5, 6, 7, 8, 9
         """,
         (work_id, end_date),
+    ).fetchall()
+    supplier_rows = connection.execute(
+        """
+        select g.proveedor_id as id, coalesce(p.nombre, 'Sin proveedor') as name,
+               coalesce(sum(g.importe) filter (where g.estado = 'validado'), 0) as validated,
+               coalesce(sum(g.importe) filter (where g.estado = 'pendiente'), 0) as pending,
+               count(*) as expense_count
+        from public.gasto g
+        left join public.catalogo_proveedor p on p.id = g.proveedor_id
+        where g.obra_id = %s and g.eliminado_en is null and g.fecha <= %s
+          and g.estado in ('validado', 'pendiente')
+        group by 1, 2
+        """,
+        (work_id, end_date),
+    ).fetchall()
+    catalog = connection.execute(
+        "select id, nombre, orden from public.catalogo_categoria_gasto where activo"
     ).fetchall()
 
     def share(amount: Decimal) -> Decimal:
         return Decimal("0") if not total_validated else amount / total_validated * Decimal("100")
 
+    def bucket(key_id: Any, name: str, order: int) -> dict[str, Any]:
+        return {"id": key_id, "name": name, "order": order, "validated": Decimal("0"),
+                "pending": Decimal("0"), "expense_count": 0}
+
+    def add(target: dict[str, Any], row: dict[str, Any]) -> None:
+        target["validated"] += row["validated"]
+        target["pending"] += row["pending"]
+        target["expense_count"] += row["expense_count"]
+
+    def finish(values: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        for value in values:
+            value["committed"] = value["validated"] + value["pending"]
+            value["share_percent"] = share(value["validated"])
+        return sorted(values, key=lambda value: (-value["validated"], -value["pending"],
+                                                 value.get("order", 0), value["name"]))
+
     items: dict[Any, dict[str, Any]] = {}
     categories: dict[Any, dict[str, Any]] = {
-        row["id"]: {"id": row["id"], "name": row["nombre"], "order": row["orden"],
-                    "validated": Decimal("0"), "committed": Decimal("0")}
-        for row in connection.execute(
-            "select id, nombre, orden from public.catalogo_categoria_gasto where activo"
-        ).fetchall()
+        row["id"]: bucket(row["id"], row["nombre"], row["orden"]) for row in catalog
     }
     for row in rows:
         item = items.setdefault(row["item_id"], {
-            "id": row["item_id"], "name": row["item"], "order": row["item_order"],
-            "validated": Decimal("0"), "committed": Decimal("0"), "expense_count": 0,
-            "categories": {},
+            **bucket(row["item_id"], row["item"], row["item_order"]),
+            "subitems": {}, "categories": {},
         })
-        item["validated"] += row["validated"]
-        item["committed"] += row["committed"]
-        item["expense_count"] += row["expense_count"]
-        item["categories"][row["category"]] = (
-            item["categories"].get(row["category"], Decimal("0")) + row["validated"]
-        )
-        category = categories.setdefault(row["category_id"], {
-            "id": row["category_id"], "name": row["category"], "order": row["category_order"],
-            "validated": Decimal("0"), "committed": Decimal("0"),
+        add(item, row)
+        subitem = item["subitems"].setdefault(row["subitem_id"], {
+            **bucket(row["subitem_id"], row["subitem"], row["subitem_order"]), "categories": {},
         })
-        category["validated"] += row["validated"]
-        category["committed"] += row["committed"]
+        add(subitem, row)
+        for parent in (item, subitem):
+            add(parent["categories"].setdefault(row["category_id"], bucket(
+                row["category_id"], row["category"], row["category_order"],
+            )), row)
+        add(categories.setdefault(row["category_id"], bucket(
+            row["category_id"], row["category"], row["category_order"],
+        )), row)
 
-    ordered_items = sorted(items.values(), key=lambda item: (-item["validated"],
-                                                             -item["committed"], item["order"]))
+    def by_order(values: dict[Any, dict[str, Any]]) -> list[dict[str, Any]]:
+        return sorted(finish(list(values.values())), key=lambda value: value["order"])
+
+    ordered_items = finish(list(items.values()))
     for item in ordered_items:
-        item["share_percent"] = share(item["validated"])
-        item["pending"] = item["committed"] - item["validated"]
-        item["categories"] = [
-            {"name": name, "validated": amount} for name, amount in item["categories"].items()
-        ]
+        item["categories"] = by_order(item["categories"])
+        item["subitems"] = finish(list(item["subitems"].values()))
+        for subitem in item["subitems"]:
+            subitem["categories"] = by_order(subitem["categories"])
     ordered_categories = [
-        category for category in sorted(categories.values(), key=lambda value: value["order"])
+        category for category in by_order(categories)
         if category["id"] is not None or category["committed"]
     ]
-    for category in ordered_categories:
-        category["share_percent"] = share(category["validated"])
-    return {"items": ordered_items, "categories": ordered_categories}
+    providers = finish([{**row, "order": 0} for row in supplier_rows])
+    return {"items": ordered_items, "categories": ordered_categories, "providers": providers}
 
 
 def work_overview(
@@ -1762,6 +1796,7 @@ def work_overview(
             "incomes": incomes,
             "by_item": breakdown["items"],
             "by_category": breakdown["categories"],
+            "by_provider": breakdown["providers"],
             "permissions": {"can_validate": user.role is Role.ADMIN},
         }
 

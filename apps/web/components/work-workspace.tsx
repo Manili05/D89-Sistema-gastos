@@ -7,7 +7,7 @@ import * as ToggleGroup from '@radix-ui/react-toggle-group';
 import { AppShell } from '@/components/app-shell';
 import { PlusIcon } from '@/components/icons';
 import { PageHeader } from '@/components/page-header';
-import { type CategorySpend, type ItemSpend, SpendBreakdown } from '@/components/spend-breakdown';
+import { type CategorySpend, type ItemSpend, type ProviderSpend, ProviderSpendChart, SpendBreakdown } from '@/components/spend-breakdown';
 import { StatusPill } from '@/components/status-pill';
 import { CASHFLOW_COLORS, CashflowChart } from '@/components/cashflow-chart';
 import { ExpenseDetailView } from '@/components/expense-detail-view';
@@ -44,6 +44,7 @@ type Overview = {
   /** Cumulative spend by the 23-item catalog and by category (Cambio 8). */
   by_item: ItemSpend[];
   by_category: CategorySpend[];
+  by_provider: ProviderSpend[];
 };
 type ValidationMode = 'gastos' | 'ingresos';
 type Expense = EditableExpense & {
@@ -300,7 +301,8 @@ export function WorkWorkspace({ workId, tab }: { workId: string; tab: Tab }) {
         <h2 className="collapsible-heading"><button type="button" aria-expanded={breakdownOpen} aria-controls="spend-breakdown-body" onClick={() => setBreakdownOpen((open) => !open)}><span><span className="collapsible-title">Gasto por partida</span><small>Gasto acumulado por las 23 partidas y por categoría; el techo es el presupuesto NEODATA total</small></span><span className="collapsible-chevron" aria-hidden="true" /></button></h2>
         <div id="spend-breakdown-body" hidden={!breakdownOpen}>{breakdownOpen && <SpendBreakdown items={overview?.by_item || []} categories={overview?.by_category || []} />}</div>
       </section>
-      <div className="content-grid work-analysis"><section className="panel"><div className="panel-header"><div><h2>Tendencia semanal</h2><p>Validado y pendiente en el periodo</p></div></div><div className="trend-list">{overview?.weekly.map((week) => <div key={week.week}><span>{week.week}</span><strong>{currency(week.validated)}</strong><small>{currency(week.pending)} pendiente</small></div>)}{overview?.weekly.length === 0 && <p className="empty-state">Aún no hay movimientos en el periodo.</p>}</div></section><section className="panel"><div className="panel-header"><div><h2>Principales proveedores</h2><p>Gasto validado del periodo</p></div></div><div className="cash-grid">{overview?.suppliers.map((supplier) => <div key={supplier.name}><span>{supplier.name}</span><strong>{currency(supplier.amount)}</strong></div>)}{overview?.suppliers.length === 0 && <p className="empty-state">Sin gasto validado.</p>}</div></section></div>
+      <div className="work-analysis"><section className="panel"><div className="panel-header"><div><h2>Tendencia semanal</h2><p>Validado y pendiente en el periodo</p></div></div><div className="trend-list">{overview?.weekly.map((week) => <div key={week.week}><span>{week.week}</span><strong>{currency(week.validated)}</strong><small>{currency(week.pending)} pendiente</small></div>)}{overview?.weekly.length === 0 && <p className="empty-state">Aún no hay movimientos en el periodo.</p>}</div></section></div>
+      <section className="panel provider-panel" aria-labelledby="provider-spend-title"><div className="panel-header"><div><h2 id="provider-spend-title">Gasto por proveedor</h2><p>Todos los proveedores con movimientos, de mayor a menor gasto validado, acumulado al cierre del periodo</p></div></div>{overview && <ProviderSpendChart providers={overview.by_provider} />}</section>
     </>}
 
     {tab === 'gastos' && <>{(showForm || editing) && catalog && <WorkExpenseForm key={editing?.id || 'new'} workId={workId} catalog={catalog} expense={editing} onCancel={() => { setShowForm(false); setEditing(undefined); }} onSaved={(text) => { setMessage(text); setShowForm(false); setEditing(undefined); void refresh(); }} />}<section className="panel"><div className="panel-header"><div><h2>Movimientos de la obra</h2><p role="status">{visibleExpenses.length} gastos encontrados</p></div><div className="expense-filters">

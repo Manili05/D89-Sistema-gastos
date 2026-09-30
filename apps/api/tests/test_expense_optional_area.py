@@ -125,57 +125,93 @@ def test_create_with_foreign_area_is_rejected(monkeypatch):
     assert error.value.status_code == 422
 
 
-def test_spend_breakdown_groups_by_item_and_category():
+def _row(item_id, item, order, subitem_id, subitem, category_id, category, category_order,
+         validated, pending, count):
+    return {
+        "item_id": item_id, "item": item, "item_order": order, "subitem_id": subitem_id,
+        "subitem": subitem, "subitem_order": 1, "category_id": category_id,
+        "category": category, "category_order": category_order,
+        "validated": Decimal(validated), "pending": Decimal(pending), "expense_count": count,
+    }
+
+
+def _breakdown(rows, suppliers, catalog, total):
+    connection = MagicMock()
+    connection.execute.side_effect = [
+        MagicMock(fetchall=MagicMock(return_value=rows)),
+        MagicMock(fetchall=MagicMock(return_value=suppliers)),
+        MagicMock(fetchall=MagicMock(return_value=catalog)),
+    ]
+    return repository._spend_breakdown(connection, uuid4(), date(2026, 9, 30), Decimal(total))
+
+
+def test_spend_breakdown_nests_item_subitem_category_and_lists_suppliers():
     material, labor, tools = uuid4(), uuid4(), uuid4()
-    prelim, structure = uuid4(), uuid4()
+    prelim, structure, cleaning, layout, steel = uuid4(), uuid4(), uuid4(), uuid4(), uuid4()
     rows = [
-        {"item_id": prelim, "item": "PRELIMINARES", "item_order": 1, "category_id": material,
-         "category": "MATERIAL", "category_order": 1, "validated": Decimal("100"),
-         "committed": Decimal("150"), "expense_count": 2},
-        {"item_id": prelim, "item": "PRELIMINARES", "item_order": 1, "category_id": labor,
-         "category": "MANO DE OBRA", "category_order": 2, "validated": Decimal("50"),
-         "committed": Decimal("50"), "expense_count": 1},
-        {"item_id": structure, "item": "ESTRUCTURA", "item_order": 5, "category_id": material,
-         "category": "MATERIAL", "category_order": 1, "validated": Decimal("250"),
-         "committed": Decimal("250"), "expense_count": 1},
-        {"item_id": None, "item": "Sin partida", "item_order": 999, "category_id": None,
-         "category": "Sin categoría", "category_order": 999, "validated": Decimal("0"),
-         "committed": Decimal("20"), "expense_count": 1},
+        _row(prelim, "PRELIMINARES", 1, cleaning, "LIMPIEZA", material, "MATERIAL", 1,
+             "100", "50", 2),
+        _row(prelim, "PRELIMINARES", 1, cleaning, "LIMPIEZA", labor, "MANO DE OBRA", 2,
+             "30", "0", 1),
+        _row(prelim, "PRELIMINARES", 1, layout, "TRAZO Y NIVEL", labor, "MANO DE OBRA", 2,
+             "20", "0", 1),
+        _row(structure, "ESTRUCTURA", 5, steel, "ESTRUCTURA METALICA", material, "MATERIAL",
+             1, "250", "0", 1),
+        _row(None, "Sin partida", 999, None, "Sin subpartida", None, "Sin categoría", 999,
+             "0", "20", 1),
+    ]
+    supplier_a, supplier_b = uuid4(), uuid4()
+    suppliers = [
+        {"id": supplier_a, "name": "Concretos", "validated": Decimal("100"),
+         "pending": Decimal("70"), "expense_count": 4},
+        {"id": supplier_b, "name": "Aceros", "validated": Decimal("300"),
+         "pending": Decimal("0"), "expense_count": 2},
     ]
     catalog = [{"id": material, "nombre": "MATERIAL", "orden": 1},
                {"id": labor, "nombre": "MANO DE OBRA", "orden": 2},
                {"id": tools, "nombre": "EQUIPO/HERR", "orden": 3}]
-    connection = MagicMock()
-    connection.execute.side_effect = [
-        MagicMock(fetchall=MagicMock(return_value=rows)),
-        MagicMock(fetchall=MagicMock(return_value=catalog)),
-    ]
-    result = repository._spend_breakdown(connection, uuid4(), date(2026, 9, 30), Decimal("400"))
+    result = _breakdown(rows, suppliers, catalog, "400")
+
     assert [item["name"] for item in result["items"]] == [
         "ESTRUCTURA", "PRELIMINARES", "Sin partida",
     ]
     prelim_row = result["items"][1]
-    assert prelim_row["validated"] == Decimal("150") and prelim_row["pending"] == Decimal("50")
-    assert prelim_row["share_percent"] == Decimal("37.5")
-    assert prelim_row["expense_count"] == 3
-    assert {c["name"]: c["validated"] for c in prelim_row["categories"]} == {
-        "MATERIAL": Decimal("100"), "MANO DE OBRA": Decimal("50"),
-    }
+    assert (prelim_row["validated"], prelim_row["pending"], prelim_row["committed"]) == (
+        Decimal("150"), Decimal("50"), Decimal("200"),
+    )
+    assert prelim_row["share_percent"] == Decimal("37.5") and prelim_row["expense_count"] == 4
+    assert [(c["name"], c["validated"], c["pending"]) for c in prelim_row["categories"]] == [
+        ("MATERIAL", Decimal("100"), Decimal("50")), ("MANO DE OBRA", Decimal("50"), Decimal("0")),
+    ]
+    # Subitems ordered by validated spend, each with its categories.
+    cleaning_row, layout_row = prelim_row["subitems"]
+    assert (cleaning_row["name"], cleaning_row["validated"], cleaning_row["pending"]) == (
+        "LIMPIEZA", Decimal("130"), Decimal("50"),
+    )
+    assert [(c["name"], c["validated"]) for c in cleaning_row["categories"]] == [
+        ("MATERIAL", Decimal("100")), ("MANO DE OBRA", Decimal("30")),
+    ]
+    assert layout_row["name"] == "TRAZO Y NIVEL" and layout_row["share_percent"] == Decimal("5")
     # The three catalog categories always appear (EQUIPO/HERR at zero), legacy last.
-    assert [(c["name"], c["validated"]) for c in result["categories"]] == [
-        ("MATERIAL", Decimal("350")), ("MANO DE OBRA", Decimal("50")),
-        ("EQUIPO/HERR", Decimal("0")), ("Sin categoría", Decimal("0")),
+    assert [(c["name"], c["validated"], c["pending"]) for c in result["categories"]] == [
+        ("MATERIAL", Decimal("350"), Decimal("50")), ("MANO DE OBRA", Decimal("50"), Decimal("0")),
+        ("EQUIPO/HERR", Decimal("0"), Decimal("0")), ("Sin categoría", Decimal("0"),
+                                                       Decimal("20")),
     ]
     assert result["categories"][0]["share_percent"] == Decimal("87.5")
+    # Every supplier with spend, largest validated first, share of the validated total.
+    assert [(p["name"], p["validated"], p["pending"], p["committed"], p["expense_count"],
+             p["share_percent"]) for p in result["providers"]] == [
+        ("Aceros", Decimal("300"), Decimal("0"), Decimal("300"), 2, Decimal("75")),
+        ("Concretos", Decimal("100"), Decimal("70"), Decimal("170"), 4, Decimal("25")),
+    ]
 
 
 def test_spend_breakdown_without_validated_spend_has_zero_shares():
-    connection = MagicMock()
-    connection.execute.side_effect = [
-        MagicMock(fetchall=MagicMock(return_value=[])),
-        MagicMock(fetchall=MagicMock(return_value=[{"id": uuid4(), "nombre": "MATERIAL",
-                                                    "orden": 1}])),
-    ]
-    result = repository._spend_breakdown(connection, uuid4(), date(2026, 9, 30), Decimal("0"))
+    supplier = {"id": uuid4(), "name": "Concretos", "validated": Decimal("0"),
+                "pending": Decimal("10"), "expense_count": 1}
+    result = _breakdown([], [supplier], [{"id": uuid4(), "nombre": "MATERIAL", "orden": 1}], "0")
     assert result["items"] == []
     assert result["categories"][0]["share_percent"] == Decimal("0")
+    assert result["providers"][0]["share_percent"] == Decimal("0")
+    assert result["providers"][0]["committed"] == Decimal("10")

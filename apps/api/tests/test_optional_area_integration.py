@@ -163,6 +163,17 @@ def test_expense_without_area_end_to_end(isolated_services, installation):  # no
                 assert by_item[item_name]["expense_count"] == 1
                 # The legacy expense has no catalog classification.
                 assert Decimal(str(by_item["Sin partida"]["validated"])) == Decimal("125")
+                [subitem] = by_item[item_name]["subitems"]
+                assert subitem["id"] == str(ids["subitem"])
+                assert Decimal(str(subitem["pending"])) == Decimal("116")
+                [subitem_category] = subitem["categories"]
+                assert subitem_category["id"] == str(ids["category"])
+                assert Decimal(str(subitem_category["pending"])) == Decimal("116")
+                providers = {row["name"]: row for row in overview["by_provider"]}
+                assert providers["Test"]["expense_count"] == 1
+                assert Decimal(str(providers["Test"]["pending"])) == Decimal("116")
+                assert Decimal(str(providers["Sin proveedor"]["validated"])) == Decimal("125")
+                assert Decimal(str(providers["Sin proveedor"]["share_percent"])) == Decimal("100")
                 names = [row["name"] for row in overview["by_category"]]
                 assert names[:3] == ["MATERIAL", "MANO DE OBRA", "EQUIPO/HERR"]
                 assert sum(

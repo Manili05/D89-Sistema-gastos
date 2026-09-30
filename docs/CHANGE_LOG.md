@@ -136,6 +136,14 @@ alcance de monolito simple sin importación automática de Excel ni agente de IA
   propio.
 - **Impacto:** los listados, el detalle, el reporte Excel/PDF y el cierre semanal muestran los
   gastos sin área ("Sin área"). No cambian importes ni gastos existentes.
+- **Ajustes (2026-09-30):**
+  - Partida, Subpartida, Categoría y Proveedor inician vacíos ("Seleccionar …"); la
+    Subpartida se habilita al elegir Partida (si la partida tiene una sola subpartida, se
+    toma sola).
+  - "Gasto por partida" se despliega por partida → subpartidas → categorías, con importes
+    validados y pendientes.
+  - "Gasto por proveedor" reemplaza "Principales proveedores": todos los proveedores con
+    movimientos, validado, pendiente, número de gastos y % del gasto validado de la obra.
 
 ---
 *Cualquier desviación nueva de alcance detectada durante el desarrollo debe agregarse aquí,
