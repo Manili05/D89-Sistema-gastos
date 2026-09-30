@@ -497,6 +497,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/subcontracts/{subcontract_id}/estimations/{estimation_id}/receipt.pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Estimation Receipt
+         * @description Payment receipt (PDF) with the breakdown and a signature space for the worker.
+         */
+        get: operations["get_estimation_receipt_api_v1_subcontracts__subcontract_id__estimations__estimation_id__receipt_pdf_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/subcontracts/{subcontract_id}/estimations/{estimation_id}/status": {
         parameters: {
             query?: never;
@@ -3242,6 +3262,40 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_estimation_receipt_api_v1_subcontracts__subcontract_id__estimations__estimation_id__receipt_pdf_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                subcontract_id: string;
+                estimation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
             };
             /** @description Validation Error */
             422: {

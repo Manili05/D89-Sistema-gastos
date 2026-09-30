@@ -166,6 +166,16 @@ def test_subcontract_lifecycle_security_and_overview(isolated_services, installa
                     "estimated_on": "2026-09-21", "kind": "avance", "gross_amount": "1",
                 }, headers=headers("admin")).status_code == 409
                 assert api.delete(f"{est}/{p['id']}", headers=headers("admin")).status_code == 409
+                receipt = f"{est}/{p['id']}/receipt.pdf"
+                for role in ("admin", "operativo"):
+                    pdf = api.get(receipt, headers=headers(role))
+                    assert pdf.status_code == 200, pdf.text
+                    assert pdf.headers["content-type"] == "application/pdf"
+                    assert pdf.content.startswith(b"%PDF")
+                    assert "recibo-SC-" in pdf.headers["content-disposition"]
+                assert api.get(receipt, headers=headers("outsider")).status_code == 403
+                assert api.get(f"{est}/{uuid4()}/receipt.pdf",
+                               headers=headers("admin")).status_code == 404
                 draft = post({"kind": "avance", "gross_amount": "10"})
                 assert api.delete(
                     f"{est}/{draft.json()['id']}", headers=headers("admin")

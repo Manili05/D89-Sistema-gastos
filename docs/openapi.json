@@ -5921,6 +5921,74 @@
         ]
       }
     },
+    "/api/v1/subcontracts/{subcontract_id}/estimations/{estimation_id}/receipt.pdf": {
+      "get": {
+        "description": "Payment receipt (PDF) with the breakdown and a signature space for the worker.",
+        "operationId": "get_estimation_receipt_api_v1_subcontracts__subcontract_id__estimations__estimation_id__receipt_pdf_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "subcontract_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Subcontract Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "estimation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Estimation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Estimation Receipt",
+        "tags": [
+          "subcontracts"
+        ]
+      }
+    },
     "/api/v1/subcontracts/{subcontract_id}/estimations/{estimation_id}/status": {
       "patch": {
         "description": "borrador → pagado (irreversible); paying the finiquito settles the contract.",

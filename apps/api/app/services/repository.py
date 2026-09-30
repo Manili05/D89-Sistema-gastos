@@ -1813,6 +1813,41 @@ def delete_estimation(
         })
 
 
+ESTIMATION_KIND_LABEL = {"anticipo": "Anticipo", "avance": "Avance", "finiquito": "Finiquito"}
+
+
+def estimation_receipt(
+    settings: Settings, user: UserContext, subcontract_id: UUID, estimation_id: UUID,
+) -> dict[str, Any]:
+    """Stored amounts of one estimation plus its contract, for the payment receipt."""
+    with transaction(settings) as connection:
+        contract = _subcontract_detail(connection, subcontract_id)
+        require_work_access(connection, user, contract["work_id"])
+        estimation = next(
+            (row for row in contract["estimations"] if row["id"] == estimation_id), None
+        )
+        if estimation is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Estimación inexistente")
+        work = connection.execute(
+            "select nombre from public.obra where id = %s", (contract["work_id"],)
+        ).fetchone()
+        paid_at = estimation["paid_at"]
+        return {
+            **estimation,
+            "work_name": work["nombre"] if work else "",
+            "supplier_name": contract["supplier_name"],
+            "subcontract_folio": contract["folio"],
+            "estimation_folio": estimation["folio"],
+            "description": contract["description"],
+            "classification": " › ".join(
+                part for part in (contract["expense_item"], contract["expense_subitem"]) if part
+            ),
+            "retention_percent": contract["retention_percent"],
+            "kind_label": ESTIMATION_KIND_LABEL[estimation["kind"]],
+            "paid_at": paid_at.date().isoformat() if paid_at else None,
+        }
+
+
 def pay_estimation(
     settings: Settings, user: UserContext, subcontract_id: UUID, estimation_id: UUID,
 ) -> dict[str, Any]:

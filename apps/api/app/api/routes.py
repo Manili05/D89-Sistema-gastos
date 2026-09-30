@@ -68,7 +68,7 @@ from app.models import (
 from app.services.ai_extraction import extract_csf, extract_receipt, jev_chat
 from app.services.cfdi import extract_cfdi
 from app.services.neodata import NeodataError, parse_neodata_workbook
-from app.services.reports import build_excel_report, build_pdf_report
+from app.services.reports import build_estimation_receipt, build_excel_report, build_pdf_report
 from app.services.repository import (
     attach_income_receipt,
     attach_receipt,
@@ -84,6 +84,7 @@ from app.services.repository import (
     dashboard,
     delete_estimation,
     delete_work,
+    estimation_receipt,
     get_expense,
     get_income,
     get_subcontract,
@@ -762,6 +763,26 @@ def patch_subcontract_estimation_status(
 ) -> dict[str, Any]:
     """borrador → pagado (irreversible); paying the finiquito settles the contract."""
     return pay_estimation(settings, user, subcontract_id, estimation_id)
+
+
+@router.get(
+    "/subcontracts/{subcontract_id}/estimations/{estimation_id}/receipt.pdf",
+    tags=["subcontracts"],
+)
+def get_estimation_receipt(
+    subcontract_id: UUID,
+    estimation_id: UUID,
+    user: CurrentUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> Response:
+    """Payment receipt (PDF) with the breakdown and a signature space for the worker."""
+    data = estimation_receipt(settings, user, subcontract_id, estimation_id)
+    name = f"recibo-{data['subcontract_folio']}-{data['estimation_folio']}.pdf"
+    return Response(
+        build_estimation_receipt(data),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
 
 
 REPORT_COLUMNS = (

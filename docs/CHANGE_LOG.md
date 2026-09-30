@@ -174,6 +174,16 @@ alcance de monolito simple sin importación automática de Excel ni agente de IA
 - Se retiran los endpoints del esquema inicial (`GET/POST /subcontracts?work_id`,
   `POST /subcontracts/{id}/payments`), sin uso en la interfaz y sin datos en staging; los
   reemplazan `/works/{id}/subcontracts` y `/subcontracts/{id}/estimations`.
+- **Interfaz (2026-10-01):** pestaña **Subcontratos** en cada obra: catálogo con estado
+  (Activo, Finiquitado, Cancelado), alta/edición, detalle con resumen financiero
+  (contratado, pagado neto, retenido, por estimar) e historial de estimaciones. El
+  formulario de estimación muestra en vivo la retención y el neto con la misma regla del
+  servidor. "Pagar/Aprobar" (sólo administración) pide confirmación porque es
+  irreversible.
+- **Recibo PDF** por estimación (`GET …/estimations/{id}/receipt.pdf`, generado en el
+  servidor con reportlab como los demás PDF): proveedor, folios, desglose
+  Bruto + Aditivas − Deductivas − Amortización − Retención = Neto y espacio para la firma
+  del destajista. Un borrador lleva la leyenda "sin validez como comprobante de pago".
 
 ---
 *Cualquier desviación nueva de alcance detectada durante el desarrollo debe agregarse aquí,

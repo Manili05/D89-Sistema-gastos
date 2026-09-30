@@ -2229,3 +2229,211 @@ test('Resumen: gasto por proveedor ordenado, con importes, porcentajes y tooltip
     await expect(page.getByRole('tooltip')).toContainText('Aceros del Centro');
   }
 });
+
+// --- Subcontratos (Cambio 9) ------------------------------------------------------------
+
+const subcontractId = '5c5c5c5c-5c5c-4c5c-8c5c-5c5c5c5c5c5c';
+
+function subcontractRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: subcontractId, work_id: workId, folio: 'SC-0001', supplier_id: supplierId, supplier_name: 'Concretos Toluca',
+    expense_item_id: secondExpensePartidaId, expense_item: 'ALBANILERIA', expense_subitem_id: secondExpenseSubpartidaId,
+    expense_subitem: 'FIRMES Y HORMIGONES', category: 'MANO DE OBRA', description: 'Colado de firmes',
+    contracted_amount: '10000.0000', retention_percent: '5.00', state: 'activo', created_at: '2026-09-20T12:00:00Z',
+    estimated_gross: '0.0000', paid_net: '0.0000', retained: '0.0000', advances_paid: '0.0000',
+    advance_pending_amortization: '0.0000', remaining_to_estimate: '10000.0000', estimations: [],
+    ...overrides,
+  };
+}
+
+function estimationRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: '6d6d6d6d-6d6d-4d6d-8d6d-6d6d6d6d6d6d', subcontract_id: subcontractId, number: 1, folio: 'EST-01',
+    estimated_on: '2026-09-21', kind: 'anticipo', gross_amount: '1000.0000', advance_amortization: '0.0000',
+    retention_amount: '0.0000', additions: '0.0000', deductions: '0.0000', net_amount: '1000.0000',
+    adjustment_notes: null, state: 'pagado', paid_at: '2026-09-22T15:00:00Z', paid_by: 'Sergio Gómez',
+    created_at: '2026-09-21T12:00:00Z', ...overrides,
+  };
+}
+
+test('Subcontratos: alta de subcontrato y estimación con retención y neto calculados en vivo', async ({ page }) => {
+  let list: Record<string, unknown>[] = [];
+  let detail = subcontractRow();
+  const created: unknown[] = [];
+  const estimations: unknown[] = [];
+  await page.route(`**/api/v1/works/${workId}/subcontracts`, async (route) => {
+    if (route.request().method() === 'POST') {
+      created.push(route.request().postDataJSON());
+      list = [detail];
+      await route.fulfill({ status: 201, json: detail });
+    } else {
+      await route.fulfill({ json: list });
+    }
+  });
+  await page.route(`**/api/v1/subcontracts/${subcontractId}`, async (route) => { await route.fulfill({ json: detail }); });
+  await page.route(`**/api/v1/subcontracts/${subcontractId}/estimations`, async (route) => {
+    const body = route.request().postDataJSON();
+    estimations.push(body);
+    const saved = estimationRow({ kind: 'avance', state: 'borrador', paid_at: null, paid_by: null, gross_amount: '4000.0000', additions: '200.0000', deductions: '100.0000', retention_amount: '200.0000', net_amount: '3900.0000', adjustment_notes: body.adjustment_notes });
+    detail = subcontractRow({ estimations: [saved], estimated_gross: '4000.0000', remaining_to_estimate: '6000.0000' });
+    await route.fulfill({ status: 201, json: saved });
+  });
+  await login(page);
+  await page.goto(`/obras/${workId}/gastos`);
+  await page.getByRole('navigation', { name: 'Secciones de la obra' }).getByRole('link', { name: 'Subcontratos', exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/obras/${workId}/subcontratos$`), { timeout: 30_000 });
+  await expect(page.getByRole('heading', { name: 'Aún no hay subcontratos en esta obra' })).toBeVisible();
+  await expect(page.getByLabel('Periodo')).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Nuevo subcontrato' }).click();
+  const form = page.getByRole('form', { name: 'Nuevo subcontrato' });
+  const save = form.getByRole('button', { name: 'Registrar subcontrato' });
+  await expect(form.getByLabel('Categoría', { exact: true })).toHaveValue('MANO DE OBRA');
+  await expect(form.getByLabel('Subpartida', { exact: true })).toBeDisabled();
+  await expect(save).toBeDisabled();
+  await form.getByLabel('Proveedor', { exact: true }).selectOption(supplierId);
+  await form.getByLabel('Partida', { exact: true }).selectOption(secondExpensePartidaId);
+  await expect(form.getByLabel('Subpartida', { exact: true })).toHaveValue(secondExpenseSubpartidaId);
+  await form.getByLabel('Importe contratado').fill('10,000');
+  await expect(form.getByText('$10,000.00')).toBeVisible();
+  await form.getByLabel('% Fondo de garantía').fill('5');
+  await form.getByLabel('Descripción').fill('Colado de firmes');
+  await save.click();
+  await expect(page.getByRole('status').filter({ hasText: 'Subcontrato SC-0001 registrado.' })).toBeVisible();
+  expect(created).toEqual([{ supplier_id: supplierId, expense_item_id: secondExpensePartidaId, expense_subitem_id: secondExpenseSubpartidaId, description: 'Colado de firmes', contracted_amount: '10000', retention_percent: '5' }]);
+
+  // The detail opens with the financial summary.
+  const detailPanel = page.getByRole('region', { name: /SC-0001 · Concretos Toluca/ });
+  await expect(detailPanel.getByTestId('sc-contracted')).toHaveText('$10,000.00');
+  await expect(detailPanel.getByTestId('sc-paid')).toHaveText('$0.00');
+  await detailPanel.getByRole('button', { name: 'Nueva estimación' }).click();
+  const estimation = page.getByRole('form', { name: 'Nueva estimación' });
+  const net = estimation.getByTestId('preview-net');
+  await estimation.getByLabel('Importe bruto').fill('4000');
+  await expect(estimation.getByTestId('preview-retention')).toHaveText('$200.00');
+  await expect(net).toHaveText('$3,800.00');
+  await estimation.getByLabel('Aditivas').fill('200');
+  await expect(net).toHaveText('$4,000.00');
+  await estimation.getByLabel('Deductivas').fill('100');
+  await expect(net).toHaveText('$3,900.00');
+  // Adjustments need a justification before saving.
+  await expect(estimation.getByRole('alert')).toContainText('Justifica las aditivas o deductivas');
+  await expect(estimation.getByRole('button', { name: 'Registrar estimación' })).toBeDisabled();
+  await estimation.getByLabel('Notas de ajustes').fill('Firme extra; daño en muro');
+  await estimation.getByRole('button', { name: 'Registrar estimación' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Estimación EST-01 registrada como borrador.' })).toBeVisible();
+  expect(estimations).toEqual([{ estimated_on: expect.any(String), kind: 'avance', gross_amount: '4000', advance_amortization: '0', additions: '200', deductions: '100', adjustment_notes: 'Firme extra; daño en muro' }]);
+  const history = page.getByRole('table', { name: 'Historial de estimaciones de SC-0001' });
+  const row = history.getByRole('row').filter({ hasText: 'EST-01' });
+  await expect(row).toContainText('$3,900.00');
+  await expect(row).toContainText('Borrador');
+  await expect(page.getByRole('table', { name: 'Subcontratos de la obra' }).getByRole('row').filter({ hasText: 'SC-0001' })).toContainText('Activo');
+});
+
+test('Subcontratos: retención HALF_UP y reglas de anticipo, amortización y finiquito en vivo', async ({ page }) => {
+  const paidAdvance = estimationRow();
+  await page.route(`**/api/v1/works/${workId}/subcontracts`, async (route) => { await route.fulfill({ json: [subcontractRow({ advances_paid: '1000.0000', advance_pending_amortization: '1000.0000' })] }); });
+  await page.route(`**/api/v1/subcontracts/${subcontractId}`, async (route) => {
+    await route.fulfill({ json: subcontractRow({ estimations: [paidAdvance], paid_net: '1000.0000', advances_paid: '1000.0000', advance_pending_amortization: '1000.0000' }) });
+  });
+  await login(page);
+  await page.goto(`/obras/${workId}/subcontratos`);
+  await page.getByRole('button', { name: 'Ver subcontrato SC-0001' }).click();
+  await page.getByRole('button', { name: 'Nueva estimación' }).click();
+  const form = page.getByRole('form', { name: 'Nueva estimación' });
+  const save = form.getByRole('button', { name: 'Registrar estimación' });
+  // 100.10 × 5 % = 5.005 → 5.01 (half up, like the server).
+  await form.getByLabel('Importe bruto').fill('100.10');
+  await expect(form.getByTestId('preview-retention')).toHaveText('$5.01');
+  await expect(form.getByTestId('preview-net')).toHaveText('$95.09');
+  await expect(form.getByText('Anticipo pagado pendiente: $1,000.00')).toBeVisible();
+  // Amortization cannot exceed the paid advance pending.
+  await form.getByLabel('Amortización de anticipo').fill('1000.01');
+  await expect(form.getByRole('alert')).toContainText('excede el anticipo pagado');
+  await expect(save).toBeDisabled();
+  // A negative net is never allowed.
+  await form.getByLabel('Amortización de anticipo').fill('96');
+  await expect(form.getByRole('alert')).toContainText('no puede ser negativo');
+  // The finiquito proposes amortizing everything pending and requires it.
+  await form.getByLabel('Tipo').selectOption('finiquito');
+  await expect(form.getByLabel('Amortización de anticipo')).toHaveValue('1000');
+  await form.getByLabel('Importe bruto').fill('6000');
+  await expect(form.getByTestId('preview-net')).toHaveText('$4,700.00'); // 6000 − 300 − 1000
+  await expect(save).toBeEnabled();
+  await form.getByLabel('Amortización de anticipo').fill('900');
+  await expect(form.getByRole('alert')).toContainText('debe amortizar todo el anticipo');
+  // An anticipo is paid in full: adjustments are disabled and there is no retention.
+  await form.getByLabel('Tipo').selectOption('anticipo');
+  await expect(form.getByLabel('Aditivas')).toBeDisabled();
+  await expect(form.getByLabel('Amortización de anticipo')).toHaveValue('');
+  await form.getByLabel('Importe bruto').fill('2000');
+  await expect(form.getByTestId('preview-retention')).toHaveText('$0.00');
+  await expect(form.getByTestId('preview-net')).toHaveText('$2,000.00');
+  // Contract cap: 1,000 already advanced + 9,000.01 > 10,000.
+  await form.getByLabel('Importe bruto').fill('9000.01');
+  await expect(form.getByRole('alert')).toContainText('Los anticipos exceden el importe contratado');
+});
+
+test('Subcontratos: Pagar/Aprobar con confirmación y descarga del recibo PDF', async ({ page }) => {
+  let paid = false;
+  const draft = estimationRow({ id: '7e7e7e7e-7e7e-4e7e-8e7e-7e7e7e7e7e7e', number: 2, folio: 'EST-02', kind: 'avance', state: 'borrador', paid_at: null, paid_by: null, gross_amount: '4000.0000', retention_amount: '200.0000', advance_amortization: '500.0000', net_amount: '3300.0000' });
+  const receipts: string[] = [];
+  const patches: unknown[] = [];
+  await page.route(`**/api/v1/works/${workId}/subcontracts`, async (route) => { await route.fulfill({ json: [subcontractRow()] }); });
+  await page.route(`**/api/v1/subcontracts/${subcontractId}`, async (route) => {
+    const current = paid ? { ...draft, state: 'pagado', paid_by: 'Sergio Gómez', paid_at: '2026-09-30T12:00:00Z' } : draft;
+    await route.fulfill({ json: subcontractRow({ estimations: [estimationRow(), current], paid_net: paid ? '4300.0000' : '1000.0000', retained: paid ? '200.0000' : '0.0000' }) });
+  });
+  await page.route(`**/api/v1/subcontracts/${subcontractId}/estimations/${draft.id}/status`, async (route) => {
+    patches.push(route.request().postDataJSON());
+    paid = true;
+    await route.fulfill({ json: { ...draft, state: 'pagado' } });
+  });
+  await page.route(`**/api/v1/subcontracts/${subcontractId}/estimations/*/receipt.pdf`, async (route) => {
+    receipts.push(new URL(route.request().url()).pathname);
+    await route.fulfill({ body: '%PDF-1.4 recibo', contentType: 'application/pdf' });
+  });
+  await login(page);
+  await page.goto(`/obras/${workId}/subcontratos`);
+  await page.getByRole('button', { name: 'Ver subcontrato SC-0001' }).click();
+  const history = page.getByRole('table', { name: 'Historial de estimaciones de SC-0001' });
+  const row = history.getByRole('row').filter({ hasText: 'EST-02' });
+  // The paid anticipo has no pay/edit/delete actions, only its receipt.
+  const advanceRow = history.getByRole('row').filter({ hasText: 'EST-01' });
+  await expect(advanceRow.getByRole('button', { name: /Pagar/ })).toHaveCount(0);
+  await expect(advanceRow).toContainText('Sergio Gómez');
+  await row.getByRole('button', { name: 'Pagar estimación EST-02' }).click();
+  const confirm = row.getByRole('group', { name: 'Confirmar pago de EST-02' });
+  await expect(confirm).toContainText('¿Pagar $3,300.00? No se puede revertir.');
+  await confirm.getByRole('button', { name: 'Cancelar' }).click();
+  expect(patches).toEqual([]);
+  await row.getByRole('button', { name: 'Pagar estimación EST-02' }).click();
+  await row.getByRole('button', { name: 'Confirmar pago' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Estimación EST-02 pagada.' })).toBeVisible();
+  expect(patches).toEqual([{ state: 'pagado' }]);
+  await expect(row).toContainText('Pagado');
+  await expect(page.getByTestId('sc-paid')).toHaveText('$4,300.00');
+  await expect(page.getByTestId('sc-retained')).toHaveText('$200.00');
+  const download = page.waitForEvent('download');
+  await row.getByRole('button', { name: 'Descargar recibo de EST-02' }).click();
+  expect((await download).suggestedFilename()).toBe('recibo-SC-0001-EST-02.pdf');
+  expect(receipts).toEqual([`/api/v1/subcontracts/${subcontractId}/estimations/${draft.id}/receipt.pdf`]);
+});
+
+test('Subcontratos: operativo consulta y descarga recibos, sin registrar ni pagar', async ({ page }) => {
+  await page.route(new RegExp(`/api/v1/works/${workId}$`), async (route) => {
+    await route.fulfill({ json: { id: workId, nombre: 'Infra Toluca', ubicacion: 'Toluca', fecha_inicio: '2026-01-01', fecha_fin: null, estado: 'activa', areas: 1, partidas: 1, permissions: { can_manage: false, can_validate: false } } });
+  });
+  const draft = estimationRow({ folio: 'EST-02', id: '7e7e7e7e-7e7e-4e7e-8e7e-7e7e7e7e7e7e', state: 'borrador', paid_at: null, paid_by: null });
+  await page.route(`**/api/v1/works/${workId}/subcontracts`, async (route) => { await route.fulfill({ json: [subcontractRow()] }); });
+  await page.route(`**/api/v1/subcontracts/${subcontractId}`, async (route) => { await route.fulfill({ json: subcontractRow({ estimations: [draft] }) }); });
+  await login(page);
+  await page.goto(`/obras/${workId}/subcontratos`);
+  await expect(page.getByRole('button', { name: 'Nuevo subcontrato' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Editar subcontrato SC-0001' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Ver subcontrato SC-0001' }).click();
+  await expect(page.getByRole('button', { name: 'Nueva estimación' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Pagar estimación/ })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Cancelar subcontrato/ })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Descargar recibo de EST-02' })).toBeVisible();
+});
