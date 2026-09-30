@@ -1,0 +1,13 @@
+[Unit]
+Description=Monthly isolated restore check for D89 backup
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/var/www/Apparquitectos/d89-sistema-gastos
+EnvironmentFile=/var/www/Apparquitectos/d89-sistema-gastos/.env
+ExecStart=/var/www/Apparquitectos/d89-sistema-gastos/infra/scripts/restore-check-d89.sh
+Nice=15
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

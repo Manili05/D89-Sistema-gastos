@@ -1,0 +1,89 @@
+{
+  auto_https off
+  admin off
+}
+
+:80 {
+  encode zstd gzip
+
+  @api path /api/v1/* /health
+  handle @api {
+    reverse_proxy api:8000
+  }
+
+  @auth path /auth/v1/*
+  handle @auth {
+    uri strip_prefix /auth/v1
+    reverse_proxy auth:9999
+  }
+
+  # GoTrue genera enlaces de correo absolutos hacia /verify.
+  @auth_verify path /verify
+  handle @auth_verify {
+    reverse_proxy auth:9999
+  }
+
+  @rest path /rest/v1/*
+  handle @rest {
+    uri strip_prefix /rest/v1
+    reverse_proxy rest:3000
+  }
+
+  @storage path /storage/v1/*
+  handle @storage {
+    uri strip_prefix /storage/v1
+    reverse_proxy storage:5000
+  }
+
+  @studio_logout path /__studio/logout
+  handle @studio_logout {
+    header Set-Cookie "d89_studio_session=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0"
+    header Location /
+    respond 302
+  }
+
+  @studio_login path /__studio
+  handle @studio_login {
+    basic_auth {
+      {$STUDIO_BASIC_AUTH_USER} {$STUDIO_BASIC_AUTH_HASH}
+    }
+    header Set-Cookie "d89_studio_session={$STUDIO_SESSION_TOKEN}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=3600"
+    header Location /
+    respond 302
+  }
+
+  @studio_session header Cookie *d89_studio_session={$STUDIO_SESSION_TOKEN}*
+  handle @studio_session {
+    reverse_proxy studio:3000
+  }
+
+  handle {
+    reverse_proxy web:3000
+  }
+
+  header {
+    -Server
+    X-Content-Type-Options nosniff
+    X-Frame-Options DENY
+    Referrer-Policy strict-origin-when-cross-origin
+    Permissions-Policy "camera=(self), microphone=(), geolocation=()"
+  }
+}
+
+:8081 {
+  encode zstd gzip
+
+  basic_auth {
+    {$STUDIO_BASIC_AUTH_USER} {$STUDIO_BASIC_AUTH_HASH}
+  }
+
+  reverse_proxy studio:3000
+
+  header {
+    -Server
+    X-Content-Type-Options nosniff
+    X-Frame-Options DENY
+    Referrer-Policy no-referrer
+    Cache-Control "no-store"
+  }
+}

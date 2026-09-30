@@ -1,0 +1,20 @@
+model_list:
+  - model_name: kimi-k3
+    litellm_params:
+      model: moonshot/kimi-k3
+      api_key: os.environ/MOONSHOT_API_KEY
+      timeout: 60
+      stream_timeout: 60
+      max_retries: 2
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/LITELLM_DATABASE_URL
+  store_model_in_db: true
+  disable_spend_logs: false
+
+litellm_settings:
+  success_callback: ["prometheus"]
+  failure_callback: ["prometheus"]
+  drop_params: true
+  request_timeout: 60

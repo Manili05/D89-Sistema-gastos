@@ -1,0 +1,5 @@
+name: d89
+version: 0.1.0
+description: Diez tools financieras D89 firmadas contra FastAPI
+toolsets:
+  - d89
