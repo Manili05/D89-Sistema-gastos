@@ -26,3 +26,6 @@ docs/evidence/*.webm
 docs/evidence/*.zip
 test-results-live/
 playwright-report-live/
+# Autogenerados por Next.js 16.3 al instalarse (instrucciones para agentes de IA).
+apps/web/AGENTS.md
+apps/web/CLAUDE.md
