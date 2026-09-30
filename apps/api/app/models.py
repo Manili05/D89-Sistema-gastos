@@ -541,6 +541,9 @@ class EstimationResponse(BaseModel):
     paid_at: datetime | None = None
     paid_by: str | None = None
     created_at: datetime
+    # Validated expense generated when the estimation was paid (financial bridge).
+    expense_id: UUID | None = None
+    expense_folio: str | None = None
 
 
 class SubcontractResponse(BaseModel):

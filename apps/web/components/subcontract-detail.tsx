@@ -141,14 +141,14 @@ export function SubcontractDetail({ subcontractId, canManage, onChanged, onClose
             <td role="cell" data-label="− Amortización">{money(item.advance_amortization)}</td>
             <td role="cell" data-label="− Retención">{money(item.retention_amount)}</td>
             <td role="cell" data-label="Neto"><strong>{money(item.net_amount)}</strong>{item.adjustment_notes && <small>{item.adjustment_notes}</small>}</td>
-            <td role="cell" data-label="Estado"><StatusPill tone={draft ? 'amber' : 'green'}>{draft ? 'Borrador' : 'Pagado'}</StatusPill>{!draft && <small>{[item.paid_by, formatDateTime(item.paid_at)].filter(Boolean).join(' · ')}</small>}</td>
+            <td role="cell" data-label="Estado"><StatusPill tone={draft ? 'amber' : 'green'}>{draft ? 'Borrador' : 'Pagado'}</StatusPill>{!draft && <small>{[item.paid_by, formatDateTime(item.paid_at)].filter(Boolean).join(' · ')}</small>}{item.expense_folio && <small data-testid={`expense-link-${item.folio}`}>Gasto {item.expense_folio} (validado)</small>}</td>
             <td role="cell" data-label="Acciones">{confirm
               ? <div className="inline-confirm" role="group" aria-label={`Confirmar ${confirm === 'pay' ? 'pago' : 'eliminación'} de ${item.folio}`}>
-                <span>{confirm === 'pay' ? `¿Pagar ${money(item.net_amount)}? No se puede revertir.` : `¿Eliminar el borrador ${item.folio}?`}</span>
+                <span>{confirm === 'pay' ? `¿Pagar ${money(item.net_amount)}? Se registrará como gasto validado de hoy y no se puede revertir.` : `¿Eliminar el borrador ${item.folio}?`}</span>
                 <button type="button" className="btn secondary" disabled={busy} onClick={() => setConfirming(null)}>Cancelar</button>
                 <button type="button" className={`btn${confirm === 'delete' ? ' danger' : ''}`} disabled={busy}
                   onClick={() => void (confirm === 'pay'
-                    ? run(() => apiJson(`/subcontracts/${contract.id}/estimations/${item.id}/status`, { method: 'PATCH', body: JSON.stringify({ state: 'pagado' }) }), `Estimación ${item.folio} pagada.${item.kind === 'finiquito' ? ' El subcontrato quedó finiquitado.' : ''}`)
+                    ? run(() => apiJson(`/subcontracts/${contract.id}/estimations/${item.id}/status`, { method: 'PATCH', body: JSON.stringify({ state: 'pagado' }) }), `Estimación ${item.folio} pagada; se registró el gasto validado.${item.kind === 'finiquito' ? ' El subcontrato quedó finiquitado.' : ''}`)
                     : run(() => apiFetch(`/subcontracts/${contract.id}/estimations/${item.id}`, { method: 'DELETE' }).then((response) => { if (!response.ok) throw new Error('No fue posible eliminar el borrador.'); }), `Borrador ${item.folio} eliminado.`))}>
                   {confirm === 'pay' ? 'Confirmar pago' : 'Eliminar'}</button>
               </div>

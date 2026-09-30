@@ -1,7 +1,8 @@
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Annotated, Any
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from fastapi import (
     APIRouter,
@@ -68,7 +69,12 @@ from app.models import (
 from app.services.ai_extraction import extract_csf, extract_receipt, jev_chat
 from app.services.cfdi import extract_cfdi
 from app.services.neodata import NeodataError, parse_neodata_workbook
-from app.services.reports import build_estimation_receipt, build_excel_report, build_pdf_report
+from app.services.reports import (
+    build_estimation_receipt,
+    build_excel_report,
+    build_payroll_excel,
+    build_pdf_report,
+)
 from app.services.repository import (
     attach_income_receipt,
     attach_receipt,
@@ -97,6 +103,7 @@ from app.services.repository import (
     list_work_expenses,
     list_works,
     pay_estimation,
+    payroll_rows,
     reconcile_incomes_batch,
     reopen_week,
     report_expenses,
@@ -635,6 +642,34 @@ def post_income_receipt(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> dict[str, Any]:
     return attach_income_receipt(settings, user, income_id, payload.path)
+
+
+@router.get("/works/{work_id}/subcontracts/payroll-export", tags=["subcontracts"])
+def export_subcontract_payroll(
+    work_id: UUID,
+    user: CurrentUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+    date_from: Annotated[date | None, Query(alias="from")] = None,
+    date_to: Annotated[date | None, Query(alias="to")] = None,
+) -> Response:
+    """Paid estimations by payment day (Mexico) as the weekly payroll Excel.
+
+    Without dates: the current week, Monday to Sunday."""
+    today = datetime.now(ZoneInfo("America/Mexico_City")).date()
+    start = date_from or (today - timedelta(days=today.weekday()))
+    end = date_to or (start + timedelta(days=6))
+    if end < start or (end - start).days > 366:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, "Rango de fechas inválido (máximo un año)"
+        )
+    work_name, rows = payroll_rows(settings, user, work_id, start, end)
+    return Response(
+        build_payroll_excel(work_name, start, end, rows),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f'attachment; filename="nomina-destajo-{start}-{end}.xlsx"'
+        },
+    )
 
 
 @router.get(

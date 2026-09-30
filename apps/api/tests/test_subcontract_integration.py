@@ -3,11 +3,14 @@
 Run with D89_RUN_FINANCIAL_INTEGRATION=1 (disposable Docker services, never .env).
 """
 
+import io
 import time
+from datetime import date
 from decimal import Decimal
 from uuid import uuid4
 
 import jwt
+import openpyxl
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
@@ -22,6 +25,7 @@ from app.core.config import Settings, get_settings
 from app.main import app
 
 MIGRATION = MIGRATIONS / "202610010001_subcontract_module.sql"
+BRIDGE = MIGRATIONS / "202610010002_estimation_expense_bridge.sql"
 D = Decimal
 
 
@@ -143,8 +147,44 @@ def test_subcontract_lifecycle_security_and_overview(isolated_services, installa
                 # An unpaid advance cannot be amortized yet.
                 assert post({"kind": "avance", "gross_amount": "4000",
                              "advance_amortization": "500"}).status_code == 422
+                expenses_before = connection.execute(
+                    "select count(*) from public.gasto where obra_id = %s", (ids["work"],)
+                ).fetchone()[0]
                 paid_advance = pay(advance.json()["id"])
                 assert paid_advance["state"] == "pagado" and paid_advance["paid_by"] == "Test admin"
+
+                # Financial bridge: the payment is one more validated expense, same transaction.
+                assert connection.execute(
+                    "select count(*) from public.gasto where obra_id = %s", (ids["work"],)
+                ).fetchone()[0] == expenses_before + 1
+                bridged = connection.execute(
+                    """select g.id, g.folio, g.estado::text, g.importe, g.subtotal, g.iva,
+                              g.proveedor_id, g.partida_gasto_id, g.subpartida_gasto_id,
+                              cag.nombre, g.concepto, g.fecha,
+                              (now() at time zone 'America/Mexico_City')::date, g.area_id,
+                              g.validado_por, (select count(*) from public.gasto_concepto c
+                                               where c.gasto_id = g.id)
+                       from public.gasto g
+                       join public.catalogo_categoria_gasto cag on cag.id = g.categoria_gasto_id
+                       where g.estimacion_subcontrato_id = %s""",
+                    (advance.json()["id"],),
+                ).fetchone()
+                assert bridged[2:10] == (
+                    "validado", D("1000"), D("1000"), D("0"), ids["supplier"], ids["item"],
+                    ids["subitem"], "MANO DE OBRA",
+                )
+                assert bridged[10] == f"Pago de Estimación EST-01 - Subcontrato {contract['folio']}"
+                assert bridged[11] == bridged[12]  # payment day in Mexico
+                assert bridged[13] is None and bridged[14] == ids["admin"] and bridged[15] == 1
+                assert paid_advance["expense_id"] == str(bridged[0])
+                assert paid_advance["expense_folio"] == bridged[1]
+                # Managed from Subcontratos only: the expense endpoints refuse it.
+                expense_url = f"/api/v1/expenses/{bridged[0]}"
+                assert api.post(f"{expense_url}/review", json={"action": "return_to_review",
+                                                          "reason": "Prueba de bloqueo"},
+                                headers=headers("admin")).status_code == 409
+                assert api.post(f"{expense_url}/cancel", json={"reason": "Prueba de bloqueo"},
+                                headers=headers("admin")).status_code == 409
 
                 progress = post({"kind": "avance", "gross_amount": "4000",
                                  "advance_amortization": "500", "additions": "200",
@@ -191,16 +231,18 @@ def test_subcontract_lifecycle_security_and_overview(isolated_services, installa
                         (sid, ids["admin"]),
                     )
 
-                # Overview: paid nets are validated spend; the contract is committed.
+                # Overview: the generated expenses are the validated spend (no double count);
+                # the contract adds to "comprometido" only what is still to be paid.
                 overview = api.get(
-                    f"/api/v1/works/{ids['work']}/overview", params={"to": "2026-09-30"},
-                    headers=headers("operativo"),
+                    f"/api/v1/works/{ids['work']}/overview", headers=headers("operativo"),
                 ).json()
                 totals = overview["totals"]
                 legacy_contract = D("5000.5") if installation == "upgrade" else D("0")
                 assert D(str(totals["subcontract_paid"])) == D("4400")
                 assert D(str(totals["validated"])) == D("125") + D("4400")
                 assert D(str(totals["subcontract_committed"])) == D("10100") + legacy_contract
+                # 125 legacy + 4400 paid expenses + (10100 − 4400) still owed + legacy contract.
+                assert D(str(totals["committed"])) == D("125") + D("10100") + legacy_contract
                 labor = {row["name"]: row for row in overview["by_category"]}["MANO DE OBRA"]
                 assert D(str(labor["validated"])) >= D("4400")
                 provider = {row["name"]: row for row in overview["by_provider"]}["Test"]
@@ -219,6 +261,23 @@ def test_subcontract_lifecycle_security_and_overview(isolated_services, installa
                 assert (final.json()["retention_amount"], final.json()["net_amount"]) == (
                     "300.0000", "5200.0000"
                 )
+                # A closed payment week blocks the payment and creates no expense.
+                close_id = connection.execute(
+                    """insert into public.cierre_semanal
+                         (obra_id, anio_iso, semana_iso, cerrado_por)
+                       select %s, extract(isoyear from d)::int, extract(week from d)::int, %s
+                       from (select (now() at time zone 'America/Mexico_City')::date as d) t
+                       returning id""",
+                    (ids["work"], ids["admin"]),
+                ).fetchone()[0]
+                blocked = api.patch(f"{est}/{final.json()['id']}/status", json={"state": "pagado"},
+                                    headers=headers("admin"))
+                assert blocked.status_code == 409 and "cerrada" in blocked.text
+                assert connection.execute(
+                    "select count(*) from public.gasto where estimacion_subcontrato_id = %s",
+                    (final.json()["id"],),
+                ).fetchone()[0] == 0
+                connection.execute("delete from public.cierre_semanal where id = %s", (close_id,))
                 pay(final.json()["id"])
                 settled = api.get(f"/api/v1/subcontracts/{sid}", headers=headers("operativo"))
                 detail = settled.json()
@@ -232,8 +291,7 @@ def test_subcontract_lifecycle_security_and_overview(isolated_services, installa
                 assert api.patch(f"/api/v1/subcontracts/{sid}", json={"description": "Nuevo"},
                                  headers=headers("admin")).status_code == 409
                 overview = api.get(
-                    f"/api/v1/works/{ids['work']}/overview", params={"to": "2026-09-30"},
-                    headers=headers("admin"),
+                    f"/api/v1/works/{ids['work']}/overview", headers=headers("admin"),
                 ).json()
                 # Settled: committed is the work actually valued (4000+200−100+6000).
                 assert D(str(overview["totals"]["subcontract_committed"])) == (
@@ -256,8 +314,7 @@ def test_subcontract_lifecycle_security_and_overview(isolated_services, installa
                                       headers=headers("admin"))
                 assert cancelled.status_code == 200 and cancelled.json()["state"] == "cancelado"
                 overview = api.get(
-                    f"/api/v1/works/{ids['work']}/overview", params={"to": "2026-09-30"},
-                    headers=headers("admin"),
+                    f"/api/v1/works/{ids['work']}/overview", headers=headers("admin"),
                 ).json()
                 assert D(str(overview["totals"]["subcontracted"])) == D("10000") + legacy_contract
 
@@ -269,9 +326,86 @@ def test_subcontract_lifecycle_security_and_overview(isolated_services, installa
                 assert {"crear", "editar", "pagar", "eliminar", "finiquitar", "cancelar"} <= set(
                     actions
                 )
+                # Weekly payroll (default: current week): worker, activity, folio, net + total.
+                payroll_url = f"/api/v1/works/{ids['work']}/subcontracts/payroll-export"
+                sheet_response = api.get(payroll_url, headers=headers("operativo"))
+                assert sheet_response.status_code == 200, sheet_response.text
+                assert sheet_response.headers["content-type"].startswith(
+                    "application/vnd.openxmlformats"
+                )
+                sheet = openpyxl.load_workbook(io.BytesIO(sheet_response.content)).active
+                values = [[cell.value for cell in row] for row in sheet.iter_rows()]
+                assert values[2] == [
+                    "Nombre del Trabajador", "Actividad Realizada", "Folio Pago", "Balance (Neto)"
+                ]
+                body_rows = values[3:-1]
+                assert [row[2] for row in body_rows] == ["EST-01", "EST-02", "EST-04"]
+                assert {row[0] for row in body_rows} == {"Test"}
+                assert body_rows[0][1] == "Colocación de block en muros perimetrales"
+                assert [D(str(row[3])) for row in body_rows] == [D("1000"), D("3400"), D("5200")]
+                assert values[-1][2] == "TOTAL DE LA SEMANA"
+                assert D(str(values[-1][3])) == D("9600")
+                empty = api.get(payroll_url, params={"from": "2020-01-06", "to": "2020-01-12"},
+                                headers=headers("admin"))
+                empty_values = [[c.value for c in r] for r in openpyxl.load_workbook(
+                    io.BytesIO(empty.content)).active.iter_rows()]
+                assert len(empty_values) == 4 and D(str(empty_values[-1][3])) == D("0")
+                assert api.get(payroll_url, params={"from": "2026-09-30", "to": "2026-09-01"},
+                               headers=headers("admin")).status_code == 422
+                assert api.get(payroll_url, headers=headers("outsider")).status_code == 403
+
                 dashboard = api.get("/api/v1/dashboard", headers=headers("admin")).json()
                 expected_paid = D("9600") + (D("1000") if installation == "upgrade" else D("0"))
                 assert D(str(dashboard["totals"]["subcontract_paid"])) == expected_paid
         finally:
             app.dependency_overrides.clear()
             app.dependency_overrides.update(previous)
+
+
+def test_bridge_migration_backfills_paid_estimations(isolated_services):  # noqa: F811
+    """Estimations paid before the bridge get their validated expense, exactly once."""
+    services = isolated_services
+    with psycopg.connect(services["dsn"], autocommit=True) as admin:
+        admin.execute("create database bridge_backfill")
+    dsn = services["dsn"].removesuffix("postgres") + "bridge_backfill"
+    with psycopg.connect(dsn, autocommit=True) as connection:
+        connection.execute(BOOTSTRAP)
+        for path in sorted(MIGRATIONS.glob("*.sql")):
+            if path == BRIDGE:
+                break
+            connection.execute(path.read_text())
+        ids = seed(connection)
+        labor = connection.execute(
+            "select id from public.catalogo_categoria_gasto where nombre = 'MANO DE OBRA'"
+        ).fetchone()[0]
+        contract = connection.execute(
+            """insert into public.subcontrato (obra_id, proveedor_id, partida_gasto_id,
+                 subpartida_gasto_id, categoria_gasto_id, descripcion, importe_contratado)
+               values (%s, %s, %s, %s, %s, 'Aplanados', 10000) returning id, folio""",
+            (ids["work"], ids["supplier"], ids["item"], ids["subitem"], labor),
+        ).fetchone()
+        for number, (state, net) in enumerate((("pagado", 2500), ("pagado", 0),
+                                               ("borrador", 700)), 1):
+            connection.execute(
+                """insert into public.estimacion_subcontrato (subcontrato_id, numero, folio,
+                     fecha, tipo, importe_bruto, importe_neto, estado, pagado_por, pagado_en,
+                     creado_por, amortizacion_anticipo)
+                   values (%s, %s, %s, '2026-09-20', 'avance', %s, %s, %s, %s,
+                           case when %s = 'pagado'
+                                then '2026-09-21 18:00+00'::timestamptz end, %s, %s)""",
+                (contract[0], number, f"EST-{number:02d}", max(net, 100), net, state,
+                 ids["admin"] if state == "pagado" else None, state, ids["admin"],
+                 max(net, 100) - net),
+            )
+        for _ in range(2):  # idempotent
+            connection.execute(BRIDGE.read_text())
+        rows = connection.execute(
+            """select e.folio, g.estado::text, g.importe, g.fecha, g.concepto
+               from public.gasto g join public.estimacion_subcontrato e
+                 on e.id = g.estimacion_subcontrato_id order by e.folio"""
+        ).fetchall()
+        # Only the paid estimation with money moved; drafts and zero nets create nothing.
+        assert rows == [(
+            "EST-01", "validado", D("2500"), date(2026, 9, 21),
+            f"Pago de Estimación EST-01 - Subcontrato {contract[1]}",
+        )]

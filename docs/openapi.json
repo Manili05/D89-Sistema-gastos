@@ -734,6 +734,29 @@
             "title": "Estimated On",
             "type": "string"
           },
+          "expense_folio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expense Folio"
+          },
+          "expense_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expense Id"
+          },
           "folio": {
             "title": "Folio",
             "type": "string"
@@ -8281,6 +8304,98 @@
           }
         },
         "summary": "Post Work Subcontract",
+        "tags": [
+          "subcontracts"
+        ]
+      }
+    },
+    "/api/v1/works/{work_id}/subcontracts/payroll-export": {
+      "get": {
+        "description": "Paid estimations by payment day (Mexico) as the weekly payroll Excel.\n\nWithout dates: the current week, Monday to Sunday.",
+        "operationId": "export_subcontract_payroll_api_v1_works__work_id__subcontracts_payroll_export_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Subcontract Payroll",
         "tags": [
           "subcontracts"
         ]

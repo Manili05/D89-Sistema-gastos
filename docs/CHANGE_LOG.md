@@ -180,6 +180,17 @@ alcance de monolito simple sin importación automática de Excel ni agente de IA
   formulario de estimación muestra en vivo la retención y el neto con la misma regla del
   servidor. "Pagar/Aprobar" (sólo administración) pide confirmación porque es
   irreversible.
+- **Puente financiero (2026-10-01, migración `202610010002`):** pagar una estimación crea,
+  en la misma transacción, un **gasto validado** vinculado (obra, proveedor, partida,
+  subpartida y MANO DE OBRA del subcontrato; importe = neto; fecha = día del pago;
+  concepto "Pago de Estimación EST-NN - Subcontrato SC-NNNN"). Ese gasto es la única fuente
+  del gasto validado del pago (el Resumen ya no suma aparte las estimaciones) y sólo se
+  gestiona desde Subcontratos. Si la semana del pago está cerrada, el pago se rechaza. La
+  migración genera el gasto de las estimaciones pagadas antes del cambio.
+- **Nómina por destajo:** "Exportar Nómina (Excel)" (`GET /works/{id}/subcontracts/
+  payroll-export?from&to`, por defecto la semana actual): estimaciones pagadas en el rango
+  (por día de pago) con Nombre del Trabajador, Actividad Realizada, Folio Pago y Balance
+  (Neto), más el total de la semana.
 - **Recibo PDF** por estimación (`GET …/estimations/{id}/receipt.pdf`, generado en el
   servidor con reportlab como los demás PDF): proveedor, folios, desglose
   Bruto + Aditivas − Deductivas − Amortización − Retención = Neto y espacio para la firma

@@ -4,7 +4,7 @@ from io import BytesIO
 from xml.sax.saxutils import escape
 
 from openpyxl import Workbook
-from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
@@ -179,4 +179,49 @@ def build_estimation_receipt(data: Mapping[str, object]) -> bytes:
     ]))
     story += [Spacer(1, 36), signatures]
     document.build(story)
+    return output.getvalue()
+
+
+PAYROLL_COLUMNS = ("Nombre del Trabajador", "Actividad Realizada", "Folio Pago", "Balance (Neto)")
+
+
+def build_payroll_excel(
+    work_name: str, date_from: object, date_to: object, rows: Iterable[Mapping[str, object]],
+) -> bytes:
+    """Weekly piecework payroll, as the printed format: worker, activity, payment folio
+    and net balance, with the total of the period at the end of the Balance column."""
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Nómina"
+    sheet.append([f"Nómina por destajo · {work_name}"])
+    sheet.append([f"Pagos del {date_from} al {date_to}"])
+    for row_index, size in ((1, 14), (2, 11)):
+        sheet.merge_cells(start_row=row_index, start_column=1, end_row=row_index,
+                          end_column=len(PAYROLL_COLUMNS))
+        sheet.cell(row=row_index, column=1).font = Font(size=size, bold=row_index == 1)
+    sheet.append(list(PAYROLL_COLUMNS))
+    for cell in sheet[3]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor="17233C")
+    first = sheet.max_row + 1
+    total = Decimal("0")
+    for row in rows:
+        net = Decimal(str(row["net"])).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        total += net
+        sheet.append([
+            _safe_excel_value(str(row["worker"])), _safe_excel_value(str(row["activity"])),
+            _safe_excel_value(str(row["folio"])), net,
+        ])
+    total_row = sheet.max_row + 1
+    sheet.cell(row=total_row, column=3, value="TOTAL DE LA SEMANA").font = Font(bold=True)
+    # The exact value, not a formula: viewers that do not recalculate still show it.
+    sheet.cell(row=total_row, column=4, value=total).font = Font(bold=True)
+    for row_index in range(first, total_row + 1):
+        sheet.cell(row=row_index, column=4).number_format = '"$"#,##0.00'
+    sheet.cell(row=total_row, column=4).border = Border(top=Side(style="medium"))
+    for index, width in enumerate((34, 48, 14, 18), 1):
+        sheet.column_dimensions[get_column_letter(index)].width = width
+    sheet.freeze_panes = "A4"
+    output = BytesIO()
+    workbook.save(output)
     return output.getvalue()

@@ -877,6 +877,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/works/{work_id}/subcontracts/payroll-export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export Subcontract Payroll
+         * @description Paid estimations by payment day (Mexico) as the weekly payroll Excel.
+         *
+         *     Without dates: the current week, Monday to Sunday.
+         */
+        get: operations["export_subcontract_payroll_api_v1_works__work_id__subcontracts_payroll_export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/works/{work_id}/weekly-closes": {
         parameters: {
             query?: never;
@@ -1142,6 +1164,10 @@ export interface components {
              * Format: date
              */
             estimated_on: string;
+            /** Expense Folio */
+            expense_folio?: string | null;
+            /** Expense Id */
+            expense_id?: string | null;
             /** Folio */
             folio: string;
             /** Gross Amount */
@@ -4450,6 +4476,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SubcontractResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_subcontract_payroll_api_v1_works__work_id__subcontracts_payroll_export_get: {
+        parameters: {
+            query?: {
+                from?: string | null;
+                to?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                work_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

@@ -6,9 +6,20 @@ import { SubcontractDetail } from '@/components/subcontract-detail';
 import { SubcontractForm } from '@/components/subcontract-form';
 import { SubcontractTable } from '@/components/subcontract-table';
 import type { WorkCatalog } from '@/components/work-expense-form';
-import { apiJson } from '@/lib/auth';
+import { apiFetch, apiJson } from '@/lib/auth';
 import type { Subcontract } from '@/lib/estimation';
 import { centsFromDecimal, displayCents } from '@/lib/money';
+
+/** Monday–Sunday of the current week, local dates (YYYY-MM-DD). */
+function currentWeek(): { from: string; to: string } {
+  const now = new Date();
+  const local = (value: Date) => new Date(value.getTime() - value.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - ((now.getDay() + 6) % 7));
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  return { from: local(monday), to: local(sunday) };
+}
 
 type FormState = { mode: 'create' } | { mode: 'edit'; item: Subcontract; locked: boolean } | null;
 
@@ -21,6 +32,31 @@ export function SubcontractPanel({ workId, canManage }: { workId: string; canMan
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const top = useRef<HTMLDivElement>(null);
+  const [payroll, setPayroll] = useState(currentWeek);
+  const [exporting, setExporting] = useState(false);
+
+  /** Weekly piecework payroll: paid estimations by payment day, as Excel. */
+  async function exportPayroll() {
+    setExporting(true); setError('');
+    try {
+      const params = new URLSearchParams({ from: payroll.from, to: payroll.to });
+      const response = await apiFetch(`/works/${workId}/subcontracts/payroll-export?${params}`);
+      if (!response.ok) {
+        const body = await response.json().catch(() => null) as { detail?: string } | null;
+        throw new Error(body?.detail || 'No fue posible exportar la nómina.');
+      }
+      const url = URL.createObjectURL(await response.blob());
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `nomina-destajo-${payroll.from}-${payroll.to}.xlsx`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'No fue posible exportar la nómina.');
+    } finally {
+      setExporting(false);
+    }
+  }
 
   const load = useCallback(async () => {
     try {
@@ -76,9 +112,16 @@ export function SubcontractPanel({ workId, canManage }: { workId: string; canMan
       onChanged={() => void load()} onClose={() => setViewingId(null)}
       onEdit={canManage ? (item) => void openEdit(item) : undefined} />}
     <section className="panel" aria-label="Subcontratos de la obra">
-      <div className="panel-header">
+      <div className="panel-header subcontracts-header">
         <div><h2>Subcontratos (destajos)</h2><p>Mano de obra y servicios · el material lo pone la constructora</p></div>
-        {canManage && !form && <button type="button" className="btn" disabled={!catalog} onClick={() => { setMessage(''); setViewingId(null); setForm({ mode: 'create' }); }}><PlusIcon />Nuevo subcontrato</button>}
+        <div className="header-actions payroll-actions">
+          <fieldset className="payroll-range" aria-label="Periodo de la nómina">
+            <label>Desde<input type="date" aria-label="Nómina desde" value={payroll.from} onChange={(event) => setPayroll((current) => ({ ...current, from: event.target.value }))} /></label>
+            <label>Hasta<input type="date" aria-label="Nómina hasta" value={payroll.to} onChange={(event) => setPayroll((current) => ({ ...current, to: event.target.value }))} /></label>
+          </fieldset>
+          <button type="button" className="btn secondary" disabled={exporting || !payroll.from || !payroll.to || payroll.to < payroll.from} onClick={() => void exportPayroll()}>{exporting ? 'Generando…' : 'Exportar Nómina (Excel)'}</button>
+          {canManage && !form && <button type="button" className="btn" disabled={!catalog} onClick={() => { setMessage(''); setViewingId(null); setForm({ mode: 'create' }); }}><PlusIcon />Nuevo subcontrato</button>}
+        </div>
       </div>
       {items ? <SubcontractTable items={items}
         onView={(item) => { setMessage(''); setForm(null); setViewingId(item.id); }}

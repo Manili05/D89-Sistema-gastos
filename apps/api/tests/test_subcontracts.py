@@ -2,6 +2,7 @@
 
 import random
 from contextlib import contextmanager
+from datetime import date
 from decimal import Decimal
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -270,3 +271,95 @@ def test_operativo_cannot_write_even_calling_repository(monkeypatch):
         )
     assert error.value.status_code == 403
     assert not any("insert into" in c.args[0] for c in connection.execute.call_args_list)
+
+
+# --- Financial bridge: paying an estimation creates one validated expense ------------
+
+def _pay_connection(contract_row, estimation_row, *, week_closed=False, other_drafts=False):
+    connection = MagicMock()
+
+    def execute(sql, params=None):
+        result = MagicMock()
+        if "from public.subcontrato where id = %s for update" in sql:
+            result.fetchone.return_value = contract_row
+        elif "select id, estado::text as estado, tipo::text as tipo" in sql:
+            result.fetchone.return_value = {"id": uuid4(), "estado": "borrador",
+                                            "tipo": estimation_row["tipo"]}
+        elif "estado = 'borrador' and id <> %s" in sql:
+            result.fetchone.return_value = {"x": 1} if other_drafts else None
+        elif "as today" in sql:
+            result.fetchone.return_value = {"today": date(2026, 9, 30)}
+        elif "from public.cierre_semanal c" in sql:
+            result.fetchone.return_value = {"locked": week_closed}
+        elif "select folio, importe_neto from public.estimacion_subcontrato" in sql:
+            result.fetchone.return_value = estimation_row
+        elif "insert into public.gasto (" in sql:
+            result.fetchone.return_value = {"id": uuid4(), "folio": "G-00009"}
+        else:
+            result.fetchone.return_value = None
+        return result
+
+    connection.execute.side_effect = execute
+    return connection
+
+
+def _paying_contract():
+    return {**_contract(), "folio": "SC-0007", "proveedor_id": uuid4(),
+            "partida_gasto_id": uuid4(), "subpartida_gasto_id": uuid4(),
+            "categoria_gasto_id": uuid4()}
+
+
+def _calls(connection, fragment):
+    return [c for c in connection.execute.call_args_list if fragment in c.args[0]]
+
+
+def test_paying_an_estimation_inserts_exactly_one_validated_expense(monkeypatch):
+    contract_row = _paying_contract()
+    connection = _pay_connection(contract_row, {"folio": "EST-03", "importe_neto": D("3400.00"),
+                                                "tipo": "avance"})
+    _patch(monkeypatch, connection)
+    estimation_id = uuid4()
+    repository.pay_estimation(Settings(_env_file=None), ADMIN, contract_row["id"], estimation_id)
+
+    [expense] = _calls(connection, "insert into public.gasto (")
+    assert "'validado'" in expense.args[0] and "estimacion_subcontrato_id" in expense.args[0]
+    concept = "Pago de Estimación EST-03 - Subcontrato SC-0007"
+    assert expense.args[1] == (
+        contract_row["obra_id"], contract_row["partida_gasto_id"],
+        contract_row["subpartida_gasto_id"], contract_row["categoria_gasto_id"],
+        contract_row["proveedor_id"], date(2026, 9, 30), concept, D("3400.00"), D("3400.00"),
+        ADMIN.id, ADMIN.id, estimation_id,
+    )
+    [line] = _calls(connection, "insert into public.gasto_concepto")
+    assert line.args[1][1:] == (concept, D("3400.00"), D("3400.00"))
+    # Same transaction: the estimation is paid before its expense exists.
+    sql = [c.args[0] for c in connection.execute.call_args_list]
+    paid = next(i for i, q in enumerate(sql) if "set estado = 'pagado'" in q)
+    inserted = next(i for i, q in enumerate(sql) if "insert into public.gasto (" in q)
+    assert paid < inserted
+
+
+@pytest.mark.parametrize(("kwargs", "status_code"), [
+    ({"week_closed": True}, 409),       # the payment week is closed
+    ({"other_drafts": True}, 409),      # finiquito with other drafts pending
+])
+def test_payment_rejections_create_no_expense(monkeypatch, kwargs, status_code):
+    kind = "finiquito" if kwargs.get("other_drafts") else "avance"
+    connection = _pay_connection(_paying_contract(), {"folio": "EST-03",
+                                                      "importe_neto": D("10"), "tipo": kind},
+                                 **kwargs)
+    _patch(monkeypatch, connection)
+    with pytest.raises(HTTPException) as error:
+        repository.pay_estimation(Settings(_env_file=None), ADMIN, uuid4(), uuid4())
+    assert error.value.status_code == status_code
+    assert not _calls(connection, "insert into public.gasto")
+    assert not _calls(connection, "set estado = 'pagado'")
+
+
+def test_zero_net_estimation_moves_no_money(monkeypatch):
+    connection = _pay_connection(_paying_contract(), {"folio": "EST-04",
+                                                      "importe_neto": D("0"), "tipo": "avance"})
+    _patch(monkeypatch, connection)
+    repository.pay_estimation(Settings(_env_file=None), ADMIN, uuid4(), uuid4())
+    assert _calls(connection, "set estado = 'pagado'")
+    assert not _calls(connection, "insert into public.gasto")

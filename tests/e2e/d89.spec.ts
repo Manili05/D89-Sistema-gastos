@@ -1519,7 +1519,7 @@ test('Ingresos: pestaña con listado, totales y comprobantes para ver o descarga
   const table = page.getByRole('table', { name: 'Ingresos de la obra' });
   await expect(table.getByRole('row')).toHaveCount(3);
   // The period filter does not apply to incomes, so it is not offered here.
-  await expect(page.getByLabel('Periodo')).toHaveCount(0);
+  await expect(page.getByLabel('Periodo', { exact: true })).toHaveCount(0);
   const reconciled = table.getByRole('row').filter({ hasText: 'I-00002' });
   // 120000.0050 rounds HALF_UP to $120,000.01 (no truncation).
   await expect(reconciled).toContainText('$120,000.01');
@@ -1732,7 +1732,7 @@ test('Validación: conciliar ingresos por renglón y por lote; sin comprobante n
   const selector = page.getByRole('radiogroup', { name: 'Qué validar' });
   await selector.getByRole('radio', { name: 'Conciliar ingresos' }).click();
   await expect(page.getByRole('heading', { name: 'Ingresos pendientes de conciliar' })).toBeVisible();
-  await expect(page.getByLabel('Periodo')).toHaveCount(0);
+  await expect(page.getByLabel('Periodo', { exact: true })).toHaveCount(0);
   const pendingTable = page.getByRole('table', { name: 'Ingresos pendientes de conciliar' });
   await expect(pendingTable.getByRole('row')).toHaveCount(5);
 
@@ -2283,7 +2283,7 @@ test('Subcontratos: alta de subcontrato y estimación con retención y neto calc
   await page.getByRole('navigation', { name: 'Secciones de la obra' }).getByRole('link', { name: 'Subcontratos', exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/obras/${workId}/subcontratos$`), { timeout: 30_000 });
   await expect(page.getByRole('heading', { name: 'Aún no hay subcontratos en esta obra' })).toBeVisible();
-  await expect(page.getByLabel('Periodo')).toHaveCount(0);
+  await expect(page.getByLabel('Periodo', { exact: true })).toHaveCount(0);
 
   await page.getByRole('button', { name: 'Nuevo subcontrato' }).click();
   const form = page.getByRole('form', { name: 'Nuevo subcontrato' });
@@ -2381,7 +2381,7 @@ test('Subcontratos: Pagar/Aprobar con confirmación y descarga del recibo PDF', 
   const patches: unknown[] = [];
   await page.route(`**/api/v1/works/${workId}/subcontracts`, async (route) => { await route.fulfill({ json: [subcontractRow()] }); });
   await page.route(`**/api/v1/subcontracts/${subcontractId}`, async (route) => {
-    const current = paid ? { ...draft, state: 'pagado', paid_by: 'Sergio Gómez', paid_at: '2026-09-30T12:00:00Z' } : draft;
+    const current = paid ? { ...draft, state: 'pagado', paid_by: 'Sergio Gómez', paid_at: '2026-09-30T12:00:00Z', expense_id: '8f8f8f8f-8f8f-4f8f-8f8f-8f8f8f8f8f8f', expense_folio: 'G-00042' } : draft;
     await route.fulfill({ json: subcontractRow({ estimations: [estimationRow(), current], paid_net: paid ? '4300.0000' : '1000.0000', retained: paid ? '200.0000' : '0.0000' }) });
   });
   await page.route(`**/api/v1/subcontracts/${subcontractId}/estimations/${draft.id}/status`, async (route) => {
@@ -2404,14 +2404,16 @@ test('Subcontratos: Pagar/Aprobar con confirmación y descarga del recibo PDF', 
   await expect(advanceRow).toContainText('Sergio Gómez');
   await row.getByRole('button', { name: 'Pagar estimación EST-02' }).click();
   const confirm = row.getByRole('group', { name: 'Confirmar pago de EST-02' });
-  await expect(confirm).toContainText('¿Pagar $3,300.00? No se puede revertir.');
+  await expect(confirm).toContainText('¿Pagar $3,300.00? Se registrará como gasto validado de hoy y no se puede revertir.');
   await confirm.getByRole('button', { name: 'Cancelar' }).click();
   expect(patches).toEqual([]);
   await row.getByRole('button', { name: 'Pagar estimación EST-02' }).click();
   await row.getByRole('button', { name: 'Confirmar pago' }).click();
-  await expect(page.getByRole('status').filter({ hasText: 'Estimación EST-02 pagada.' })).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: 'Estimación EST-02 pagada; se registró el gasto validado.' })).toBeVisible();
   expect(patches).toEqual([{ state: 'pagado' }]);
   await expect(row).toContainText('Pagado');
+  // Financial bridge: the payment shows the validated expense it created.
+  await expect(row.getByTestId('expense-link-EST-02')).toHaveText('Gasto G-00042 (validado)');
   await expect(page.getByTestId('sc-paid')).toHaveText('$4,300.00');
   await expect(page.getByTestId('sc-retained')).toHaveText('$200.00');
   const download = page.waitForEvent('download');
@@ -2436,4 +2438,47 @@ test('Subcontratos: operativo consulta y descarga recibos, sin registrar ni paga
   await expect(page.getByRole('button', { name: /Pagar estimación/ })).toHaveCount(0);
   await expect(page.getByRole('button', { name: /Cancelar subcontrato/ })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Descargar recibo de EST-02' })).toBeVisible();
+});
+
+test('Subcontratos: Exportar Nómina (Excel) de la semana actual o de un rango elegido', async ({ page }) => {
+  const requests: URLSearchParams[] = [];
+  await page.route(`**/api/v1/works/${workId}/subcontracts`, async (route) => { await route.fulfill({ json: [subcontractRow()] }); });
+  await page.route(`**/api/v1/works/${workId}/subcontracts/payroll-export**`, async (route) => {
+    requests.push(new URL(route.request().url()).searchParams);
+    await route.fulfill({ body: 'xlsx', contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  });
+  await login(page);
+  await page.goto(`/obras/${workId}/subcontratos`);
+  const from = page.getByLabel('Nómina desde');
+  const to = page.getByLabel('Nómina hasta');
+  // Default: the current week, Monday to Sunday.
+  const monday = await from.inputValue();
+  const sunday = await to.inputValue();
+  expect(new Date(`${monday}T12:00:00`).getDay()).toBe(1);
+  expect((Date.parse(`${sunday}T12:00:00`) - Date.parse(`${monday}T12:00:00`)) / 86_400_000).toBe(6);
+  const button = page.getByRole('button', { name: 'Exportar Nómina (Excel)' });
+  let download = page.waitForEvent('download');
+  await button.click();
+  expect((await download).suggestedFilename()).toBe(`nomina-destajo-${monday}-${sunday}.xlsx`);
+  expect(Object.fromEntries(requests[0]!)).toEqual({ from: monday, to: sunday });
+  await from.fill('2026-09-01');
+  await to.fill('2026-09-15');
+  download = page.waitForEvent('download');
+  await button.click();
+  await download;
+  expect(Object.fromEntries(requests[1]!)).toEqual({ from: '2026-09-01', to: '2026-09-15' });
+  // An inverted range cannot be exported.
+  await to.fill('2026-08-01');
+  await expect(button).toBeDisabled();
+});
+
+test('Subcontratos: un error al exportar la nómina se explica', async ({ page }) => {
+  await page.route(`**/api/v1/works/${workId}/subcontracts`, async (route) => { await route.fulfill({ json: [] }); });
+  await page.route(`**/api/v1/works/${workId}/subcontracts/payroll-export**`, async (route) => {
+    await route.fulfill({ status: 422, json: { detail: 'Rango de fechas inválido (máximo un año)' } });
+  });
+  await login(page);
+  await page.goto(`/obras/${workId}/subcontratos`);
+  await page.getByRole('button', { name: 'Exportar Nómina (Excel)' }).click();
+  await expect(page.locator('.notice.error')).toContainText('Rango de fechas inválido');
 });
