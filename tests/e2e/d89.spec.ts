@@ -2240,7 +2240,8 @@ function subcontractRow(overrides: Record<string, unknown> = {}) {
     expense_item_id: secondExpensePartidaId, expense_item: 'ALBANILERIA', expense_subitem_id: secondExpenseSubpartidaId,
     expense_subitem: 'FIRMES Y HORMIGONES', category: 'MANO DE OBRA', description: 'Colado de firmes',
     contracted_amount: '10000.0000', retention_percent: '5.00', state: 'activo', created_at: '2026-09-20T12:00:00Z',
-    estimated_gross: '0.0000', paid_net: '0.0000', retained: '0.0000', advances_paid: '0.0000',
+    estimated_gross: '0.0000', paid_net: '0.0000', retained: '0.0000', retention_returned: '0.0000',
+    retention_available: '0.0000', advances_paid: '0.0000',
     advance_pending_amortization: '0.0000', remaining_to_estimate: '10000.0000', estimations: [],
     ...overrides,
   };
@@ -2481,4 +2482,80 @@ test('Subcontratos: un error al exportar la nómina se explica', async ({ page }
   await page.goto(`/obras/${workId}/subcontratos`);
   await page.getByRole('button', { name: 'Exportar Nómina (Excel)' }).click();
   await expect(page.locator('.notice.error')).toContainText('Rango de fechas inválido');
+});
+
+test('Subcontratos: devolución del fondo de garantía tras el finiquito, con tope del fondo retenido', async ({ page }) => {
+  const posted: unknown[] = [];
+  const settledEstimations = [
+    estimationRow({ kind: 'avance', gross_amount: '4000.0000', retention_amount: '200.0000', net_amount: '3800.0000' }),
+    estimationRow({ id: '7a7a7a7a-7a7a-4a7a-8a7a-7a7a7a7a7a7a', number: 2, folio: 'EST-02', kind: 'finiquito', gross_amount: '6000.0000', retention_amount: '300.0000', net_amount: '5700.0000' }),
+  ];
+  let estimations = settledEstimations;
+  const settled = () => subcontractRow({ state: 'finiquitado', estimations, paid_net: '9500.0000', retained: '500.0000', retention_available: estimations.length > 2 ? '200.0000' : '500.0000', estimated_gross: '10000.0000', remaining_to_estimate: '0.0000' });
+  await page.route(`**/api/v1/works/${workId}/subcontracts`, async (route) => { await route.fulfill({ json: [settled()] }); });
+  await page.route(`**/api/v1/subcontracts/${subcontractId}`, async (route) => { await route.fulfill({ json: settled() }); });
+  await page.route(`**/api/v1/subcontracts/${subcontractId}/estimations`, async (route) => {
+    const body = route.request().postDataJSON();
+    posted.push(body);
+    const saved = estimationRow({ id: '7b7b7b7b-7b7b-4b7b-8b7b-7b7b7b7b7b7b', number: 3, folio: 'EST-03', kind: 'devolucion_fondo', gross_amount: '300.0000', net_amount: '300.0000', state: 'borrador', paid_at: null, paid_by: null, adjustment_notes: body.adjustment_notes });
+    estimations = [...settledEstimations, saved];
+    await route.fulfill({ status: 201, json: saved });
+  });
+  await login(page);
+  await page.goto(`/obras/${workId}/subcontratos`);
+  await page.getByRole('button', { name: 'Ver subcontrato SC-0001' }).click();
+  // Settled: no new estimations except returning the retention fund.
+  await expect(page.getByRole('button', { name: 'Nueva estimación' })).toHaveCount(0);
+  await expect(page.getByTestId('sc-retained')).toHaveText('$500.00');
+  await page.getByRole('button', { name: 'Devolver fondo de garantía' }).click();
+  const form = page.getByRole('form', { name: 'Nueva estimación' });
+  const kind = form.getByLabel('Tipo');
+  await expect(kind).toHaveValue('devolucion_fondo');
+  await expect(kind.locator('option[value="avance"]')).toHaveAttribute('disabled', '');
+  // Only the amount to return and the notes are captured.
+  await expect(form.getByLabel('Amortización de anticipo')).toHaveCount(0);
+  await expect(form.getByLabel('Aditivas')).toHaveCount(0);
+  await expect(form.getByLabel('Deductivas')).toHaveCount(0);
+  await expect(form.getByTestId('refund-available')).toHaveText('Fondo disponible para devolver: $500.00');
+  await expect(form.getByTestId('preview-retention')).toHaveCount(0);
+  const save = form.getByRole('button', { name: 'Registrar estimación' });
+  await form.getByLabel('Importe a devolver').fill('500.01');
+  await expect(form.getByRole('alert')).toContainText('excede el fondo de garantía disponible');
+  await expect(save).toBeDisabled();
+  await form.getByLabel('Importe a devolver').fill('300');
+  await expect(form.getByTestId('preview-net')).toHaveText('$300.00');
+  await form.getByLabel('Notas', { exact: true }).fill('Fin del periodo de garantía');
+  await save.click();
+  await expect(page.getByRole('status').filter({ hasText: 'Estimación EST-03 registrada como borrador.' })).toBeVisible();
+  expect(posted).toEqual([{ estimated_on: expect.any(String), kind: 'devolucion_fondo', gross_amount: '300', advance_amortization: '0', additions: '0', deductions: '0', adjustment_notes: 'Fin del periodo de garantía' }]);
+  // The refund draft can be paid although the contract is settled.
+  const row = page.getByRole('table', { name: 'Historial de estimaciones de SC-0001' }).getByRole('row').filter({ hasText: 'EST-03' });
+  await expect(row).toContainText('Devolución de fondo');
+  await expect(row.getByRole('button', { name: 'Pagar estimación EST-03' })).toBeVisible();
+  await expect(page.getByTestId('sc-retained')).toHaveText('$500.00');
+  await expect(page.getByText('Devuelto $0.00 · disponible $200.00')).toBeVisible();
+});
+
+test('Subcontratos: en un contrato activo la devolución cuenta los borradores ya solicitados', async ({ page }) => {
+  const estimations = [
+    estimationRow({ kind: 'avance', gross_amount: '4000.0000', retention_amount: '200.0000', net_amount: '3800.0000' }),
+    estimationRow({ id: '7c7c7c7c-7c7c-4c7c-8c7c-7c7c7c7c7c7c', number: 2, folio: 'EST-02', kind: 'devolucion_fondo', gross_amount: '150.0000', net_amount: '150.0000', state: 'borrador', paid_at: null, paid_by: null }),
+  ];
+  await page.route(`**/api/v1/works/${workId}/subcontracts`, async (route) => { await route.fulfill({ json: [subcontractRow()] }); });
+  await page.route(`**/api/v1/subcontracts/${subcontractId}`, async (route) => { await route.fulfill({ json: subcontractRow({ estimations, retained: '200.0000', retention_available: '50.0000' }) }); });
+  await login(page);
+  await page.goto(`/obras/${workId}/subcontratos`);
+  await page.getByRole('button', { name: 'Ver subcontrato SC-0001' }).click();
+  await page.getByRole('button', { name: 'Nueva estimación' }).click();
+  const form = page.getByRole('form', { name: 'Nueva estimación' });
+  await expect(form.getByLabel('Tipo')).toHaveValue('avance');
+  await form.getByLabel('Aditivas').fill('10');
+  await form.getByLabel('Tipo').selectOption('devolucion_fondo');
+  await expect(form.getByLabel('Aditivas')).toHaveCount(0);
+  await expect(form.getByTestId('refund-available')).toHaveText('Fondo disponible para devolver: $50.00');
+  await form.getByLabel('Importe a devolver').fill('50');
+  await expect(form.getByTestId('preview-net')).toHaveText('$50.00');
+  await expect(form.getByRole('button', { name: 'Registrar estimación' })).toBeEnabled();
+  await form.getByLabel('Importe a devolver').fill('50.01');
+  await expect(form.getByRole('button', { name: 'Registrar estimación' })).toBeDisabled();
 });

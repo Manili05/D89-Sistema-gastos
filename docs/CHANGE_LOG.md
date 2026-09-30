@@ -191,6 +191,13 @@ alcance de monolito simple sin importación automática de Excel ni agente de IA
   payroll-export?from&to`, por defecto la semana actual): estimaciones pagadas en el rango
   (por día de pago) con Nombre del Trabajador, Actividad Realizada, Folio Pago y Balance
   (Neto), más el total de la semana.
+- **Devolución del fondo de garantía (2026-10-02, migración `202610020001`):** nuevo tipo
+  de estimación `devolucion_fondo` (neto = bruto, sin retención, amortización ni ajustes;
+  CHECK en base de datos). No puede exceder lo retenido en estimaciones pagadas menos las
+  devoluciones ya solicitadas (los borradores reservan su importe). Se permite también en
+  subcontratos finiquitados o cancelados, no consume el importe contratado y al pagarse
+  genera su gasto validado por el puente financiero ("Devolución de Fondo de Garantía
+  EST-NN - Subcontrato SC-NNNN").
 - **Recibo PDF** por estimación (`GET …/estimations/{id}/receipt.pdf`, generado en el
   servidor con reportlab como los demás PDF): proveedor, folios, desglose
   Bruto + Aditivas − Deductivas − Amortización − Retención = Neto y espacio para la firma

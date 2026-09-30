@@ -1143,7 +1143,7 @@ export interface components {
          * EstimationKind
          * @enum {string}
          */
-        EstimationKind: "anticipo" | "avance" | "finiquito";
+        EstimationKind: "anticipo" | "avance" | "finiquito" | "devolucion_fondo";
         /** EstimationResponse */
         EstimationResponse: {
             /** Additions */
@@ -1826,8 +1826,12 @@ export interface components {
             remaining_to_estimate: string;
             /** Retained */
             retained: string;
+            /** Retention Available */
+            retention_available: string;
             /** Retention Percent */
             retention_percent: string;
+            /** Retention Returned */
+            retention_returned: string;
             state: components["schemas"]["SubcontractState"];
             /** Supplier Id */
             supplier_id: string | null;

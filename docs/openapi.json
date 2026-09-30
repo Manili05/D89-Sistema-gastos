@@ -691,7 +691,8 @@
         "enum": [
           "anticipo",
           "avance",
-          "finiquito"
+          "finiquito",
+          "devolucion_fondo"
         ],
         "title": "EstimationKind",
         "type": "string"
@@ -2674,9 +2675,19 @@
             "title": "Retained",
             "type": "string"
           },
+          "retention_available": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Retention Available",
+            "type": "string"
+          },
           "retention_percent": {
             "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
             "title": "Retention Percent",
+            "type": "string"
+          },
+          "retention_returned": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Retention Returned",
             "type": "string"
           },
           "state": {
@@ -2730,6 +2741,8 @@
           "estimated_gross",
           "paid_net",
           "retained",
+          "retention_returned",
+          "retention_available",
           "advances_paid",
           "advance_pending_amortization",
           "remaining_to_estimate"

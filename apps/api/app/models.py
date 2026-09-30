@@ -436,6 +436,8 @@ class EstimationKind(StrEnum):
     ANTICIPO = "anticipo"
     AVANCE = "avance"
     FINIQUITO = "finiquito"
+    # Returns retention (fondo de garantía) already withheld: net = gross, no adjustments.
+    DEVOLUCION_FONDO = "devolucion_fondo"
 
 
 class EstimationState(StrEnum):
@@ -500,10 +502,13 @@ class EstimationInput(BaseModel):
 
     @model_validator(mode="after")
     def consistent(self) -> "EstimationInput":
-        if self.kind is EstimationKind.ANTICIPO and any(
+        if self.kind in (EstimationKind.ANTICIPO, EstimationKind.DEVOLUCION_FONDO) and any(
             (self.advance_amortization, self.additions, self.deductions)
         ):
-            raise ValueError("Un anticipo no lleva amortización, aditivas ni deductivas")
+            raise ValueError(
+                "Un anticipo o una devolución de fondo no lleva amortización, aditivas ni "
+                "deductivas"
+            )
         if (self.additions or self.deductions) and len(self.adjustment_notes or "") < 5:
             raise ValueError("Justifica las aditivas o deductivas en notas (mínimo 5 caracteres)")
         return self
@@ -567,6 +572,9 @@ class SubcontractResponse(BaseModel):
     estimated_gross: Decimal
     paid_net: Decimal
     retained: Decimal
+    # Retention returned (paid refunds) and still available to return (drafts count).
+    retention_returned: Decimal
+    retention_available: Decimal
     advances_paid: Decimal
     advance_pending_amortization: Decimal
     remaining_to_estimate: Decimal

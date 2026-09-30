@@ -1441,7 +1441,8 @@ SUBCONTRACT_SELECT = """
            cag.nombre as category, coalesce(s.descripcion, s.alcance, s.concepto) as description,
            s.importe_contratado as contracted_amount, s.fondo_garantia_pct as retention_percent,
            s.estado::text as state, s.creado_en as created_at,
-           t.estimated_gross, t.paid_net, t.retained, t.advances_paid,
+           t.estimated_gross, t.paid_net, t.retained, t.retention_returned,
+           t.retained - t.retention_requested as retention_available, t.advances_paid,
            t.advances_paid - t.amortized_paid as advance_pending_amortization,
            s.importe_contratado - t.estimated_gross as remaining_to_estimate
     from public.subcontrato s
@@ -1451,9 +1452,14 @@ SUBCONTRACT_SELECT = """
     left join public.catalogo_categoria_gasto cag on cag.id = s.categoria_gasto_id
     cross join lateral (
       select
-        coalesce(sum(e.importe_bruto) filter (where e.tipo <> 'anticipo'), 0) as estimated_gross,
+        coalesce(sum(e.importe_bruto) filter (
+          where e.tipo in ('avance', 'finiquito')), 0) as estimated_gross,
         coalesce(sum(e.importe_neto) filter (where e.estado = 'pagado'), 0) as paid_net,
         coalesce(sum(e.retencion_garantia) filter (where e.estado = 'pagado'), 0) as retained,
+        coalesce(sum(e.importe_bruto) filter (
+          where e.estado = 'pagado' and e.tipo = 'devolucion_fondo'), 0) as retention_returned,
+        coalesce(sum(e.importe_bruto) filter (where e.tipo = 'devolucion_fondo'), 0)
+          as retention_requested,
         coalesce(sum(e.importe_bruto) filter (
           where e.estado = 'pagado' and e.tipo = 'anticipo'), 0) as advances_paid,
         coalesce(sum(e.amortizacion_anticipo) filter (where e.estado = 'pagado'), 0)
@@ -1505,7 +1511,11 @@ def _estimation_detail(connection: psycopg.Connection, estimation_id: UUID) -> d
     return row
 
 
-def _require_active(contract: dict[str, Any]) -> None:
+def _require_active(contract: dict[str, Any], *kinds: str) -> None:
+    """Estimations need an active contract, except returning the retention fund, which
+    usually happens after the finiquito (settled or even cancelled contracts)."""
+    if kinds and all(kind == EstimationKind.DEVOLUCION_FONDO.value for kind in kinds):
+        return
     if contract["estado"] != "activo":
         raise HTTPException(
             status.HTTP_409_CONFLICT, f"El subcontrato está {contract['estado']}"
@@ -1626,7 +1636,8 @@ def update_subcontract(
         usage = connection.execute(
             """select count(*) as total,
                       count(*) filter (where estado = 'borrador') as drafts,
-                      coalesce(sum(importe_bruto) filter (where tipo <> 'anticipo'), 0) as gross,
+                      coalesce(sum(importe_bruto) filter (
+                        where tipo in ('avance', 'finiquito')), 0) as gross,
                       coalesce(sum(importe_bruto) filter (where tipo = 'anticipo'), 0) as advances
                from public.estimacion_subcontrato where subcontrato_id = %s""",
             (subcontract_id,),
@@ -1693,7 +1704,12 @@ def _check_estimation(
     """Server-side rules shared by create and edit (the row lock is already held)."""
     others = connection.execute(
         """select
-             coalesce(sum(importe_bruto) filter (where tipo <> 'anticipo'), 0) as gross,
+             coalesce(sum(importe_bruto) filter (
+               where tipo in ('avance', 'finiquito')), 0) as gross,
+             coalesce(sum(retencion_garantia) filter (where estado = 'pagado'), 0)
+               as retained_paid,
+             coalesce(sum(importe_bruto) filter (where tipo = 'devolucion_fondo'), 0)
+               as refunds,
              coalesce(sum(importe_bruto) filter (where tipo = 'anticipo'), 0) as advances,
              coalesce(sum(importe_bruto) filter (
                where tipo = 'anticipo' and estado = 'pagado'), 0) as advances_paid,
@@ -1705,6 +1721,17 @@ def _check_estimation(
     ).fetchone()
     assert others is not None
     contracted = contract["importe_contratado"]
+    if payload.kind is EstimationKind.DEVOLUCION_FONDO:
+        # Only retention actually withheld (paid estimations) can be returned, once.
+        available = others["retained_paid"] - others["refunds"]
+        if payload.gross_amount > available:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"La devolución excede el fondo de garantía disponible ({available})",
+            )
+        return estimation_amounts(
+            payload.kind, payload.gross_amount, contract["fondo_garantia_pct"]
+        )
     if payload.kind is EstimationKind.ANTICIPO:
         if others["advances"] + payload.gross_amount > contracted:
             raise HTTPException(
@@ -1747,7 +1774,7 @@ def create_estimation(
     with transaction(settings) as connection:
         contract = _lock_subcontract(connection, user, subcontract_id)
         _require_admin(user, "Solo administración registra estimaciones")
-        _require_active(contract)
+        _require_active(contract, payload.kind.value)
         amounts = _check_estimation(connection, contract, payload)
         # Never reuse a folio: the counter survives deleted drafts (row lock held).
         number = connection.execute(
@@ -1796,8 +1823,8 @@ def update_estimation(
     with transaction(settings) as connection:
         contract = _lock_subcontract(connection, user, subcontract_id)
         _require_admin(user, "Solo administración modifica estimaciones")
-        _require_active(contract)
-        _locked_draft(connection, subcontract_id, estimation_id)
+        draft = _locked_draft(connection, subcontract_id, estimation_id)
+        _require_active(contract, draft["tipo"], payload.kind.value)
         amounts = _check_estimation(connection, contract, payload, exclude_id=estimation_id)
         connection.execute(
             """update public.estimacion_subcontrato set fecha = %s, tipo = %s,
@@ -1841,14 +1868,19 @@ def _expense_from_estimation(
     moves no money and creates no expense.
     """
     estimation = connection.execute(
-        "select folio, importe_neto from public.estimacion_subcontrato where id = %s",
+        """select folio, importe_neto, tipo::text as tipo
+           from public.estimacion_subcontrato where id = %s""",
         (estimation_id,),
     ).fetchone()
     assert estimation is not None
     net = estimation["importe_neto"]
     if net <= 0:
         return None
-    concept = f"Pago de Estimación {estimation['folio']} - Subcontrato {contract['folio']}"
+    label = (
+        "Devolución de Fondo de Garantía" if estimation.get("tipo") == "devolucion_fondo"
+        else "Pago de Estimación"
+    )
+    concept = f"{label} {estimation['folio']} - Subcontrato {contract['folio']}"
     row = connection.execute(
         """insert into public.gasto (
              obra_id, partida_gasto_id, subpartida_gasto_id, categoria_gasto_id, proveedor_id,
@@ -1903,7 +1935,10 @@ def payroll_rows(
         return work["nombre"], list(rows)
 
 
-ESTIMATION_KIND_LABEL = {"anticipo": "Anticipo", "avance": "Avance", "finiquito": "Finiquito"}
+ESTIMATION_KIND_LABEL = {
+    "anticipo": "Anticipo", "avance": "Avance", "finiquito": "Finiquito",
+    "devolucion_fondo": "Devolución de fondo de garantía",
+}
 
 
 def estimation_receipt(
@@ -1945,8 +1980,8 @@ def pay_estimation(
     with transaction(settings) as connection:
         contract = _lock_subcontract(connection, user, subcontract_id)
         _require_admin(user, "Solo administración paga estimaciones")
-        _require_active(contract)
         draft = _locked_draft(connection, subcontract_id, estimation_id)
+        _require_active(contract, draft["tipo"])
         if draft["tipo"] == "finiquito" and connection.execute(
             """select 1 from public.estimacion_subcontrato
                where subcontrato_id = %s and estado = 'borrador' and id <> %s""",
@@ -2058,7 +2093,8 @@ SUBCONTRACT_COMMITMENT = """
              coalesce(sum(e.aditivas - e.deductivas) filter (where e.estado = 'pagado'), 0)
                as adjustments,
              coalesce(sum(e.importe_bruto + e.aditivas - e.deductivas) filter (
-               where e.estado = 'pagado' and e.tipo <> 'anticipo'), 0) as work_value
+               where e.estado = 'pagado' and e.tipo in ('avance', 'finiquito')), 0)
+               as work_value
       from public.subcontrato s
       left join public.estimacion_subcontrato e
         on e.subcontrato_id = s.id

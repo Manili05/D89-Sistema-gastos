@@ -6,7 +6,7 @@ import { PlusIcon } from '@/components/icons';
 import { StatusPill } from '@/components/status-pill';
 import { SUBCONTRACT_STATE } from '@/components/subcontract-table';
 import { apiFetch, apiJson } from '@/lib/auth';
-import { type Estimation, KIND_LABEL, type Subcontract } from '@/lib/estimation';
+import { type Estimation, type EstimationKind, KIND_LABEL, type Subcontract } from '@/lib/estimation';
 import { formatDateTime } from '@/lib/incomes';
 import { centsFromDecimal, displayCents } from '@/lib/money';
 
@@ -37,7 +37,7 @@ export function SubcontractDetail({ subcontractId, canManage, onChanged, onClose
   onEdit?: (contract: Subcontract) => void;
 }) {
   const [contract, setContract] = useState<Subcontract | null>(null);
-  const [form, setForm] = useState<{ estimation?: Estimation } | null>(null);
+  const [form, setForm] = useState<{ estimation?: Estimation; kind?: EstimationKind } | null>(null);
   const [confirming, setConfirming] = useState<{ id: string; action: 'pay' | 'delete' } | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -88,11 +88,14 @@ export function SubcontractDetail({ subcontractId, canManage, onChanged, onClose
   const estimations = contract.estimations || [];
   const active = contract.state === 'activo';
   const drafts = estimations.some((item) => item.state === 'borrador');
+  const refundable = (centsFromDecimal(contract.retention_available) ?? 0n) > 0n;
+  // Drafts are managed while the contract is active; refund drafts also after it.
+  const manageable = (item: Estimation) => active || item.kind === 'devolucion_fondo';
   const state = SUBCONTRACT_STATE[contract.state];
   const cards: { label: string; value: string; foot: string; accent: string; testid: string }[] = [
     { label: 'Contratado', value: money(contract.contracted_amount), foot: `Garantía ${Number(contract.retention_percent)} %`, accent: '#17233c', testid: 'sc-contracted' },
     { label: 'Pagado (neto)', value: money(contract.paid_net), foot: 'Estimaciones pagadas', accent: '#1f8055', testid: 'sc-paid' },
-    { label: 'Retenido', value: money(contract.retained), foot: 'Fondo de garantía acumulado', accent: '#b78027', testid: 'sc-retained' },
+    { label: 'Retenido', value: money(contract.retained), foot: `Devuelto ${money(contract.retention_returned)} · disponible ${money(contract.retention_available)}`, accent: '#b78027', testid: 'sc-retained' },
     { label: 'Por estimar', value: money(contract.remaining_to_estimate), foot: `Anticipo por amortizar ${money(contract.advance_pending_amortization)}`, accent: '#c66a3d', testid: 'sc-remaining' },
   ];
 
@@ -119,9 +122,12 @@ export function SubcontractDetail({ subcontractId, canManage, onChanged, onClose
 
     <div className="panel-header subheader">
       <div><h3>Historial de estimaciones</h3><p>{estimations.length} registrada{estimations.length === 1 ? '' : 's'} · una estimación pagada ya no se modifica</p></div>
-      {canManage && active && !form && <button type="button" className="btn" onClick={() => { setMessage(''); setForm({}); }}><PlusIcon />Nueva estimación</button>}
+      <div className="header-actions">
+        {canManage && refundable && !form && <button type="button" className="btn secondary" onClick={() => { setMessage(''); setForm({ kind: 'devolucion_fondo' }); }}>Devolver fondo de garantía</button>}
+        {canManage && active && !form && <button type="button" className="btn" onClick={() => { setMessage(''); setForm({}); }}><PlusIcon />Nueva estimación</button>}
+      </div>
     </div>
-    {form && <div className="estimation-form-wrap"><EstimationForm key={form.estimation?.id || 'new'} contract={contract} estimations={estimations} initial={form.estimation}
+    {form && <div className="estimation-form-wrap"><EstimationForm key={form.estimation?.id || `new-${form.kind || ''}`} contract={contract} estimations={estimations} initial={form.estimation} initialKind={form.kind}
       onCancel={() => setForm(null)}
       onSaved={(_saved, text) => { setForm(null); setMessage(text); void load(); onChanged(); }} /></div>}
     {estimations.length === 0
@@ -153,8 +159,8 @@ export function SubcontractDetail({ subcontractId, canManage, onChanged, onClose
                   {confirm === 'pay' ? 'Confirmar pago' : 'Eliminar'}</button>
               </div>
               : <div className="row-actions">
-                {canManage && draft && active && <button type="button" className="text-action" disabled={busy} aria-label={`Pagar estimación ${item.folio}`} onClick={() => setConfirming({ id: item.id, action: 'pay' })}>Pagar/Aprobar</button>}
-                {canManage && draft && active && <button type="button" className="text-action" disabled={busy} aria-label={`Corregir estimación ${item.folio}`} onClick={() => { setMessage(''); setForm({ estimation: item }); }}>Corregir</button>}
+                {canManage && draft && manageable(item) && <button type="button" className="text-action" disabled={busy} aria-label={`Pagar estimación ${item.folio}`} onClick={() => setConfirming({ id: item.id, action: 'pay' })}>Pagar/Aprobar</button>}
+                {canManage && draft && manageable(item) && <button type="button" className="text-action" disabled={busy} aria-label={`Corregir estimación ${item.folio}`} onClick={() => { setMessage(''); setForm({ estimation: item }); }}>Corregir</button>}
                 {canManage && draft && <button type="button" className="text-action danger" disabled={busy} aria-label={`Eliminar estimación ${item.folio}`} onClick={() => setConfirming({ id: item.id, action: 'delete' })}>Eliminar</button>}
                 <button type="button" className="text-action" aria-label={`Descargar recibo de ${item.folio}`} onClick={() => void receipt(item)}>Descargar recibo</button>
               </div>}</td>

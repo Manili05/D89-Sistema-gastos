@@ -4,7 +4,7 @@ import { type FormEvent, useState } from 'react';
 import { apiJson } from '@/lib/auth';
 import {
   type Estimation, type EstimationDraft, type EstimationKind, KIND_LABEL, type Subcontract,
-  balances, previewEstimation,
+  balances, fullPayment, previewEstimation,
 } from '@/lib/estimation';
 import { displayCents, formatCents, trimDecimal } from '@/lib/money';
 
@@ -19,17 +19,19 @@ const money = (value: bigint | null) => (value === null ? '—' : displayCents(v
  * Register (POST) or correct a draft (PUT) estimation. Retention and net are shown live,
  * with the server's exact rule, so the admin knows what will be paid before saving.
  */
-export function EstimationForm({ contract, estimations, initial, onSaved, onCancel }: {
+export function EstimationForm({ contract, estimations, initial, initialKind, onSaved, onCancel }: {
   contract: Subcontract;
   estimations: Estimation[];
   initial?: Estimation;
+  /** Preselected type of a new estimation (e.g. a retention refund after the finiquito). */
+  initialKind?: EstimationKind;
   onSaved: (estimation: Estimation, message: string) => void;
   onCancel: () => void;
 }) {
   const hasFiniquito = estimations.some((item) => item.kind === 'finiquito' && item.id !== initial?.id);
   const [date, setDate] = useState(initial?.estimated_on || localDate());
   const [draft, setDraft] = useState<EstimationDraft>(() => ({
-    kind: initial?.kind || 'avance',
+    kind: initial?.kind || initialKind || (contract.state === 'activo' ? 'avance' : 'devolucion_fondo'),
     gross: initial ? trimDecimal(initial.gross_amount) : '',
     amortization: initial && Number(initial.advance_amortization) ? trimDecimal(initial.advance_amortization) : '',
     additions: initial && Number(initial.additions) ? trimDecimal(initial.additions) : '',
@@ -41,13 +43,16 @@ export function EstimationForm({ contract, estimations, initial, onSaved, onCanc
   const preview = previewEstimation(draft, contract, estimations, initial?.id);
   const pending = balances(contract, estimations, initial?.id);
   const advance = draft.kind === 'anticipo';
+  const refund = draft.kind === 'devolucion_fondo';
+  // After the finiquito (or a cancellation) only the retention fund can be returned.
+  const onlyRefund = contract.state !== 'activo';
   const set = (field: keyof EstimationDraft) => (value: string) => setDraft((current) => ({ ...current, [field]: value }));
 
   function changeKind(kind: EstimationKind) {
     setDraft((current) => ({
       ...current, kind,
-      // An anticipo carries no adjustments; a finiquito amortizes everything pending.
-      ...(kind === 'anticipo' ? { amortization: '', additions: '', deductions: '' } : {}),
+      // An anticipo or a refund carries no adjustments; a finiquito amortizes everything pending.
+      ...(fullPayment(kind) ? { amortization: '', additions: '', deductions: '' } : {}),
       ...(kind === 'finiquito' && pending.amortizable > 0n ? { amortization: trimDecimal(formatCents(pending.amortizable)) } : {}),
     }));
   }
@@ -80,21 +85,27 @@ export function EstimationForm({ contract, estimations, initial, onSaved, onCanc
     <fieldset disabled={busy} className="estimation-grid">
       <div className="estimation-inputs">
         <label className="field">Tipo<select aria-label="Tipo" value={draft.kind} onChange={(event) => changeKind(event.target.value as EstimationKind)}>
-          {(['anticipo', 'avance', 'finiquito'] as const).map((kind) => <option key={kind} value={kind} disabled={kind === 'finiquito' && hasFiniquito}>{KIND_LABEL[kind]}</option>)}
+          {(['anticipo', 'avance', 'finiquito', 'devolucion_fondo'] as const).map((kind) => <option key={kind} value={kind} disabled={(kind === 'finiquito' && hasFiniquito) || (onlyRefund && kind !== 'devolucion_fondo')}>{KIND_LABEL[kind]}</option>)}
         </select></label>
         <label className="field">Fecha<input type="date" aria-label="Fecha" value={date} onChange={(event) => setDate(event.target.value)} required /></label>
-        <label className="field">Importe bruto<input aria-label="Importe bruto" inputMode="decimal" placeholder="0.00" value={draft.gross} onChange={(event) => set('gross')(event.target.value)} required /></label>
+        {refund
+          ? <label className="field">Importe a devolver<input aria-label="Importe a devolver" inputMode="decimal" placeholder="0.00" value={draft.gross} onChange={(event) => set('gross')(event.target.value)} required aria-describedby="refund-hint" /><span id="refund-hint" className="field-hint" data-testid="refund-available">Fondo disponible para devolver: {displayCents(pending.retentionAvailable)}</span></label>
+          : <label className="field">Importe bruto<input aria-label="Importe bruto" inputMode="decimal" placeholder="0.00" value={draft.gross} onChange={(event) => set('gross')(event.target.value)} required /></label>}
+        {!refund && <>
         <label className="field">Amortización de anticipo<input aria-label="Amortización de anticipo" inputMode="decimal" placeholder="0.00" value={draft.amortization} disabled={advance} onChange={(event) => set('amortization')(event.target.value)} aria-describedby="amortizable-hint" /><span id="amortizable-hint" className="field-hint">Anticipo pagado pendiente: {displayCents(pending.amortizable)}</span></label>
         <label className="field">Aditivas<input aria-label="Aditivas" inputMode="decimal" placeholder="0.00" value={draft.additions} disabled={advance} onChange={(event) => set('additions')(event.target.value)} /></label>
         <label className="field">Deductivas<input aria-label="Deductivas" inputMode="decimal" placeholder="0.00" value={draft.deductions} disabled={advance} onChange={(event) => set('deductions')(event.target.value)} /></label>
-        <label className="field full">Notas de ajustes<textarea aria-label="Notas de ajustes" value={draft.notes} maxLength={2000} placeholder="Justifica aditivas (trabajos extra) o deductivas (daños, penalizaciones)" onChange={(event) => set('notes')(event.target.value)} /></label>
+        </>}
+        <label className="field full">{refund ? 'Notas' : 'Notas de ajustes'}<textarea aria-label={refund ? 'Notas' : 'Notas de ajustes'} value={draft.notes} maxLength={2000} placeholder={refund ? 'Ej. fin del periodo de garantía sin vicios ocultos' : 'Justifica aditivas (trabajos extra) o deductivas (daños, penalizaciones)'} onChange={(event) => set('notes')(event.target.value)} /></label>
       </div>
       <dl className="estimation-preview" aria-label="Cálculo del pago" aria-live="polite">
-        <div><dt>Importe bruto</dt><dd data-testid="preview-gross">{money(preview.gross)}</dd></div>
-        <div><dt>+ Aditivas</dt><dd data-testid="preview-additions">{money(preview.additions)}</dd></div>
-        <div><dt>− Deductivas</dt><dd data-testid="preview-deductions">{money(preview.deductions)}</dd></div>
-        <div><dt>− Amortización de anticipo</dt><dd data-testid="preview-amortization">{money(preview.amortization)}</dd></div>
-        <div><dt>− Retención de garantía ({Number(contract.retention_percent)} %)</dt><dd data-testid="preview-retention">{displayCents(preview.retention)}</dd></div>
+        <div><dt>{refund ? 'Importe a devolver' : 'Importe bruto'}</dt><dd data-testid="preview-gross">{money(preview.gross)}</dd></div>
+        {!refund && <>
+          <div><dt>+ Aditivas</dt><dd data-testid="preview-additions">{money(preview.additions)}</dd></div>
+          <div><dt>− Deductivas</dt><dd data-testid="preview-deductions">{money(preview.deductions)}</dd></div>
+          <div><dt>− Amortización de anticipo</dt><dd data-testid="preview-amortization">{money(preview.amortization)}</dd></div>
+          <div><dt>− Retención de garantía ({Number(contract.retention_percent)} %)</dt><dd data-testid="preview-retention">{displayCents(preview.retention)}</dd></div>
+        </>}
         <div className="net"><dt>= Neto a pagar</dt><dd data-testid="preview-net">{money(preview.net)}</dd></div>
       </dl>
     </fieldset>

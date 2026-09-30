@@ -183,9 +183,11 @@ def _contract(state="activo", amount="10000", percent="5"):
             "fondo_garantia_pct": D(percent)}
 
 
-def _others(gross="0", advances="0", advances_paid="0", amortized="0", finiquitos=0):
+def _others(gross="0", advances="0", advances_paid="0", amortized="0", finiquitos=0,
+            retained_paid="0", refunds="0"):
     return {"gross": D(gross), "advances": D(advances), "advances_paid": D(advances_paid),
-            "amortized": D(amortized), "finiquitos": finiquitos}
+            "amortized": D(amortized), "finiquitos": finiquitos,
+            "retained_paid": D(retained_paid), "refunds": D(refunds)}
 
 
 def _insert(connection):
@@ -291,7 +293,7 @@ def _pay_connection(contract_row, estimation_row, *, week_closed=False, other_dr
             result.fetchone.return_value = {"today": date(2026, 9, 30)}
         elif "from public.cierre_semanal c" in sql:
             result.fetchone.return_value = {"locked": week_closed}
-        elif "select folio, importe_neto from public.estimacion_subcontrato" in sql:
+        elif "select folio, importe_neto, tipo::text as tipo" in sql:
             result.fetchone.return_value = estimation_row
         elif "insert into public.gasto (" in sql:
             result.fetchone.return_value = {"id": uuid4(), "folio": "G-00009"}
@@ -363,3 +365,70 @@ def test_zero_net_estimation_moves_no_money(monkeypatch):
     repository.pay_estimation(Settings(_env_file=None), ADMIN, uuid4(), uuid4())
     assert _calls(connection, "set estado = 'pagado'")
     assert not _calls(connection, "insert into public.gasto")
+
+
+
+# --- Retention fund refund (devolución de fondo de garantía) -------------------------
+
+def refund(amount="300", **changes):
+    return estimation(kind="devolucion_fondo", gross_amount=amount, **changes)
+
+
+def test_refund_is_paid_in_full():
+    amounts = estimation_amounts(EstimationKind.DEVOLUCION_FONDO, D("300"), D("5"))
+    assert (amounts.retention, amounts.amortization, amounts.net) == (D("0"), D("0"), D("300"))
+    for adjustment in ({"additions": "1", "adjustment_notes": "Extra"},
+                       {"advance_amortization": "1"},
+                       {"deductions": "1", "adjustment_notes": "Daño"}):
+        with pytest.raises(ValidationError):
+            EstimationCreate.model_validate(refund(**adjustment))
+
+
+@pytest.mark.parametrize(("others", "amount", "status_code"), [
+    (_others(retained_paid="500"), "500.01", 422),                   # more than withheld
+    (_others(retained_paid="500", refunds="300"), "200.01", 422),    # drafts/paid refunds count
+    (_others(), "0.01", 422),                                         # nothing withheld yet
+])
+def test_refund_cannot_exceed_the_withheld_fund(monkeypatch, others, amount, status_code):
+    connection = _connection(_contract(state="finiquitado"), others)
+    _patch(monkeypatch, connection)
+    with pytest.raises(HTTPException) as error:
+        repository.create_estimation(Settings(_env_file=None), ADMIN, uuid4(),
+                                     EstimationCreate.model_validate(refund(amount)))
+    assert error.value.status_code == status_code
+    assert "fondo de garantía disponible" in error.value.detail
+    assert not _calls(connection, "insert into")
+
+
+@pytest.mark.parametrize("state", ["activo", "finiquitado", "cancelado"])
+def test_refund_is_allowed_after_the_finiquito(monkeypatch, state):
+    # Contract cap does not apply: the full contract was already estimated.
+    connection = _connection(_contract(state=state, amount="10000"),
+                             _others(gross="10000", retained_paid="500", refunds="300"))
+    _patch(monkeypatch, connection)
+    repository.create_estimation(Settings(_env_file=None), ADMIN, uuid4(),
+                                 EstimationCreate.model_validate(refund("200")))
+    assert _insert(connection)[4:11] == ("devolucion_fondo", D("200"), D("0"), D("0"), D("0"),
+                                         D("0"), D("200"))
+
+
+def test_other_estimations_still_need_an_active_contract(monkeypatch):
+    connection = _connection(_contract(state="finiquitado"), _others(retained_paid="500"))
+    _patch(monkeypatch, connection)
+    with pytest.raises(HTTPException) as error:
+        repository.create_estimation(Settings(_env_file=None), ADMIN, uuid4(),
+                                     EstimationCreate.model_validate(estimation()))
+    assert error.value.status_code == 409
+
+
+def test_paying_a_refund_creates_its_validated_expense(monkeypatch):
+    contract_row = {**_paying_contract(), "estado": "finiquitado"}
+    connection = _pay_connection(contract_row, {"folio": "EST-05", "importe_neto": D("300"),
+                                                "tipo": "devolucion_fondo"})
+    _patch(monkeypatch, connection)
+    repository.pay_estimation(Settings(_env_file=None), ADMIN, contract_row["id"], uuid4())
+    [expense] = _calls(connection, "insert into public.gasto (")
+    assert expense.args[1][6] == "Devolución de Fondo de Garantía EST-05 - Subcontrato SC-0007"
+    assert expense.args[1][7] == D("300")
+    # A refund does not settle anything: the contract state is untouched.
+    assert not _calls(connection, "estado = 'finiquitado'")

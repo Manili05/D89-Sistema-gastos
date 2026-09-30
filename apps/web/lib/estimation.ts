@@ -14,7 +14,11 @@ export type EstimationKind = Estimation['kind'];
 
 export const KIND_LABEL: Record<EstimationKind, string> = {
   anticipo: 'Anticipo', avance: 'Avance', finiquito: 'Finiquito',
+  devolucion_fondo: 'Devolución de fondo',
 };
+
+/** Paid in full (net = gross): no retention, amortization or adjustments. */
+export const fullPayment = (kind: EstimationKind) => kind === 'anticipo' || kind === 'devolucion_fondo';
 
 export type EstimationDraft = {
   kind: EstimationKind; gross: string; amortization: string; additions: string;
@@ -31,7 +35,7 @@ const cents = (value: string | number | null | undefined) => centsFromDecimal(va
 
 /** Retention in cents: gross × percent / 100, half up (0 for an anticipo). */
 export function retentionCents(kind: EstimationKind, grossCents: bigint, percent: string | number): bigint {
-  if (kind === 'anticipo') return 0n;
+  if (fullPayment(kind)) return 0n;
   const hundredths = toUnits(trimDecimal(percent) || '0', 2n) ?? 0n; // 5.25 % → 525
   return (grossCents * hundredths + 5000n) / 10000n;
 }
@@ -45,10 +49,13 @@ export function balances(contract: Subcontract, estimations: Estimation[], exclu
   const amortized = sum(others, (item) => cents(item.advance_amortization));
   return {
     contracted: cents(contract.contracted_amount),
-    grossEstimated: sum(others.filter((item) => item.kind !== 'anticipo'), (item) => cents(item.gross_amount)),
+    grossEstimated: sum(others.filter((item) => item.kind === 'avance' || item.kind === 'finiquito'), (item) => cents(item.gross_amount)),
     advances: sum(others.filter((item) => item.kind === 'anticipo'), (item) => cents(item.gross_amount)),
     amortizable: advancesPaid - amortized,
     hasFiniquito: others.some((item) => item.kind === 'finiquito'),
+    // Retention withheld by paid estimations minus refunds already requested (drafts too).
+    retentionAvailable: sum(others.filter((item) => item.state === 'pagado'), (item) => cents(item.retention_amount))
+      - sum(others.filter((item) => item.kind === 'devolucion_fondo'), (item) => cents(item.gross_amount)),
   };
 }
 
@@ -71,10 +78,12 @@ export function previewEstimation(
   const net = gross !== null && additions !== null && deductions !== null && amortization !== null
     ? gross + additions - deductions - retention - amortization : null;
   const b = balances(contract, estimations, excludeId);
-  if (draft.kind === 'anticipo' && ((amortization ?? 0n) || (additions ?? 0n) || (deductions ?? 0n))) {
-    errors.push('Un anticipo se paga íntegro: sin amortización, aditivas ni deductivas.');
+  if (fullPayment(draft.kind) && ((amortization ?? 0n) || (additions ?? 0n) || (deductions ?? 0n))) {
+    errors.push('Un anticipo o una devolución de fondo se paga íntegro: sin amortización, aditivas ni deductivas.');
   }
-  if (gross && gross > 0n) {
+  if (draft.kind === 'devolucion_fondo') {
+    if (gross && gross > b.retentionAvailable) errors.push('La devolución excede el fondo de garantía disponible.');
+  } else if (gross && gross > 0n) {
     if (draft.kind === 'anticipo' && b.advances + gross > b.contracted) errors.push('Los anticipos exceden el importe contratado.');
     if (draft.kind !== 'anticipo' && b.grossEstimated + gross > b.contracted) {
       errors.push('El bruto excede lo que queda por estimar del contrato; los trabajos extra van como aditivas.');

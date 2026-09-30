@@ -288,6 +288,51 @@ def test_subcontract_lifecycle_security_and_overview(isolated_services, installa
                 )
                 assert [e["folio"] for e in detail["estimations"]] == ["EST-01", "EST-02", "EST-04"]
                 assert post({"kind": "avance", "gross_amount": "1"}).status_code == 409
+
+                # Retention refund after the finiquito: never more than withheld (500).
+                assert detail["retention_available"] == "500.0000"
+                too_much = post({"kind": "devolucion_fondo", "gross_amount": "500.01"})
+                assert too_much.status_code == 422 and "fondo de garantía" in too_much.text
+                assert post({"kind": "devolucion_fondo", "gross_amount": "300",
+                             "deductions": "1", "adjustment_notes": "No aplica"}
+                            ).status_code == 422
+                refund = post({"kind": "devolucion_fondo", "gross_amount": "300"})
+                assert refund.status_code == 201, refund.text
+                r = refund.json()
+                assert (r["folio"], r["kind"], r["retention_amount"], r["net_amount"]) == (
+                    "EST-05", "devolucion_fondo", "0.0000", "300.0000"
+                )
+                # A draft already reserves its amount: only 200 remain.
+                assert post({"kind": "devolucion_fondo", "gross_amount": "200.01"}
+                            ).status_code == 422
+                expenses_before = connection.execute(
+                    "select count(*) from public.gasto where obra_id = %s", (ids["work"],)
+                ).fetchone()[0]
+                paid_refund = pay(r["id"])
+                assert paid_refund["expense_folio"]
+                assert connection.execute(
+                    "select count(*) from public.gasto where obra_id = %s", (ids["work"],)
+                ).fetchone()[0] == expenses_before + 1
+                refund_expense = connection.execute(
+                    """select estado::text, importe, concepto from public.gasto
+                       where estimacion_subcontrato_id = %s""",
+                    (r["id"],),
+                ).fetchone()
+                assert refund_expense == (
+                    "validado", D("300"),
+                    f"Devolución de Fondo de Garantía EST-05 - Subcontrato {contract['folio']}",
+                )
+                detail = api.get(f"/api/v1/subcontracts/{sid}", headers=headers("admin")).json()
+                assert (detail["state"], detail["retained"], detail["retention_returned"],
+                        detail["retention_available"], detail["paid_net"]) == (
+                    "finiquitado", "500.0000", "300.0000", "200.0000", "9900.0000"
+                )
+                with pytest.raises(psycopg.errors.CheckViolation):
+                    connection.execute(
+                        """update public.estimacion_subcontrato set importe_neto = 299,
+                             deductivas = 1 where id = %s""",
+                        (r["id"],),
+                    )
                 assert api.patch(f"/api/v1/subcontracts/{sid}", json={"description": "Nuevo"},
                                  headers=headers("admin")).status_code == 409
                 overview = api.get(
@@ -297,7 +342,7 @@ def test_subcontract_lifecycle_security_and_overview(isolated_services, installa
                 assert D(str(overview["totals"]["subcontract_committed"])) == (
                     D("10100") + legacy_contract
                 )
-                assert D(str(overview["totals"]["subcontract_paid"])) == D("9600")
+                assert D(str(overview["totals"]["subcontract_paid"])) == D("9900")
 
                 # Cancelling requires no drafts; afterwards only what was paid is committed.
                 other = api.post(base, json={**body, "contracted_amount": "3000"},
@@ -339,12 +384,14 @@ def test_subcontract_lifecycle_security_and_overview(isolated_services, installa
                     "Nombre del Trabajador", "Actividad Realizada", "Folio Pago", "Balance (Neto)"
                 ]
                 body_rows = values[3:-1]
-                assert [row[2] for row in body_rows] == ["EST-01", "EST-02", "EST-04"]
+                assert [row[2] for row in body_rows] == ["EST-01", "EST-02", "EST-04", "EST-05"]
                 assert {row[0] for row in body_rows} == {"Test"}
                 assert body_rows[0][1] == "Colocación de block en muros perimetrales"
-                assert [D(str(row[3])) for row in body_rows] == [D("1000"), D("3400"), D("5200")]
+                assert [D(str(row[3])) for row in body_rows] == [
+                    D("1000"), D("3400"), D("5200"), D("300")
+                ]
                 assert values[-1][2] == "TOTAL DE LA SEMANA"
-                assert D(str(values[-1][3])) == D("9600")
+                assert D(str(values[-1][3])) == D("9900")
                 empty = api.get(payroll_url, params={"from": "2020-01-06", "to": "2020-01-12"},
                                 headers=headers("admin"))
                 empty_values = [[c.value for c in r] for r in openpyxl.load_workbook(
@@ -355,7 +402,7 @@ def test_subcontract_lifecycle_security_and_overview(isolated_services, installa
                 assert api.get(payroll_url, headers=headers("outsider")).status_code == 403
 
                 dashboard = api.get("/api/v1/dashboard", headers=headers("admin")).json()
-                expected_paid = D("9600") + (D("1000") if installation == "upgrade" else D("0"))
+                expected_paid = D("9900") + (D("1000") if installation == "upgrade" else D("0"))
                 assert D(str(dashboard["totals"]["subcontract_paid"])) == expected_paid
         finally:
             app.dependency_overrides.clear()

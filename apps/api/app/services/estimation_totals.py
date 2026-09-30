@@ -3,8 +3,9 @@
     neto = bruto + aditivas − deductivas − retención − amortización
 
 The retention (fondo de garantía) is computed here from the contract percentage over
-the gross amount of avances and finiquito, rounded HALF_UP to cents; an anticipo is
-paid in full. The database repeats the equation as a CHECK constraint.
+the gross amount of avances and finiquito, rounded HALF_UP to cents; an anticipo and a
+devolución de fondo are paid in full (net = gross). The database repeats the equation
+as a CHECK constraint.
 """
 
 from dataclasses import dataclass
@@ -27,7 +28,7 @@ class EstimationAmounts:
 
 
 def retention_for(kind: EstimationKind, gross: Decimal, percent: Decimal) -> Decimal:
-    if kind is EstimationKind.ANTICIPO:
+    if kind in (EstimationKind.ANTICIPO, EstimationKind.DEVOLUCION_FONDO):
         return ZERO
     return (gross * percent / Decimal("100")).quantize(CENT, rounding=ROUND_HALF_UP)
 
@@ -42,8 +43,12 @@ def estimation_amounts(
     deductions: Decimal = ZERO,
 ) -> EstimationAmounts:
     """Compute retention and net; raise ValueError when the net would be negative."""
-    if kind is EstimationKind.ANTICIPO and (amortization or additions or deductions):
-        raise ValueError("Un anticipo no lleva amortización, aditivas ni deductivas")
+    if kind in (EstimationKind.ANTICIPO, EstimationKind.DEVOLUCION_FONDO) and (
+        amortization or additions or deductions
+    ):
+        raise ValueError(
+            "Un anticipo o una devolución de fondo no lleva amortización, aditivas ni deductivas"
+        )
     for value in (gross, amortization, additions, deductions, retention_percent):
         if value < 0:
             raise ValueError("Los importes no pueden ser negativos")
