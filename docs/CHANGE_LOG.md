@@ -49,6 +49,71 @@ alcance de monolito simple sin importación automática de Excel ni agente de IA
 - **WhatsApp:** se exponen exactamente diez tools de negocio. Importar presupuesto y eliminar
   gasto permanecen exclusivamente en la web.
 
+## Cambio 6 — Captura inteligente: extracción de CSF y comprobantes con IA (2026-09-27)
+- **Naturaleza:** cambio de alcance **funcional**, **acordado con el cliente**. No figuraba en
+  la sección 4 de `spec.md`.
+- **Qué incluye:**
+  - `POST /api/v1/suppliers/extract-csf` (sólo admin): lee la Constancia de Situación Fiscal
+    (PDF) y propone RFC, razón social, régimen fiscal y código postal.
+  - `POST /api/v1/expenses/extract-receipt`: lee la foto de un ticket o nota de remisión y
+    propone total, conceptos (cantidad, precio unitario, descripción) y la bandera
+    `requiere_validacion_humana`.
+  - `POST /api/v1/expenses/jev-chat` ("Árbitro Jev", alias `d89-documentos`, sólo texto):
+    aplica correcciones en lenguaje natural a la lectura del ticket. El formulario de gasto
+    muestra la lectura y el chat; el usuario decide si copia los valores o captura a mano, y
+    la foto se vincula como comprobante al guardar.
+- **Límites (constitution §3):**
+  - Las extracciones sólo **proponen**: no escriben proveedores ni gastos.
+  - FastAPI revalida el esquema y recalcula la suma de conceptos. La bandera de revisión humana
+    sólo puede endurecerse en el servidor, nunca relajarse.
+  - Cada llamada queda en `tool_call_log` (modelo, tokens, costo y resultado) sin el contenido
+    del documento.
+- **Modelos:** por alias configurable de LiteLLM.
+  - `d89-documentos` → `gemini-3.5-flash-lite`, con respaldo `gemini-3.6-flash` y luego
+    `claude-sonnet-5`.
+  - `d89-vision` → `gemini-3.8-flash`, con respaldo `gemini-3.6-flash` y luego
+    `claude-sonnet-5` (respaldo intermedio agregado el 2026-09-28 tras observar 503
+    "high demand" en `gemini-3.8-flash`).
+  - `claude-opus-5-5` queda registrado fuera de las cadenas automáticas por costo.
+- **Impacto operativo:**
+  - LiteLLM pasa a estar siempre encendido (antes sólo con el perfil `whatsapp`), con unos
+    512 MB de RAM en el VPS.
+  - Hermes y la extracción comparten **un solo** tope mensual de $1,000 MXN mediante un equipo
+    de LiteLLM con dos claves virtuales (`provision-litellm-budget.py`).
+  - Se requieren `GEMINI_API_KEY` y `ANTHROPIC_API_KEY`.
+- **Deuda técnica pagada en el mismo cambio:**
+  - `/gastos` usa ahora el mismo formulario que `/obras/[id]/gastos`, que no duplica gastos al
+    reintentar el comprobante.
+  - Vincular un comprobante exige que el archivo exista en Supabase Storage.
+
+## Cambio 7 — Gasto cabecera-detalle, folio automático y comprobantes múltiples (2026-09-28)
+- **Naturaleza:** cambio de alcance **funcional**, **acordado con el cliente** (nuevos
+  requerimientos de captura).
+- **Qué cambia:**
+  - Un gasto pasa de un solo concepto a **cabecera + N conceptos** (`gasto_concepto`:
+    cantidad, unidad, descripción, precio unitario, descuento e importe).
+  - Se agregan **N comprobantes por gasto** (`gasto_comprobante`: PDF, XML CFDI e imagen).
+  - **Folio automático** `G-00001` (secuencia global). El folio capturado del proveedor
+    pasa a `folio_proveedor`.
+- **Regla de IVA acordada:** los precios se capturan **con IVA incluido**.
+  - `importe` (total) = Σ conceptos.
+  - Sin IVA explícito: `subtotal = importe / 1.16`.
+  - Un IVA explícito (exento, frontera 8 %) se acepta entre 0 y el 16 % contenido en el total.
+  - El servidor calcula todos los totales; no acepta los del cliente.
+- **Migración de datos:** los gastos previos quedan con **IVA no desglosado**
+  (`subtotal = importe`, `iva = 0`, `iva_desglosado = false`), 1 concepto y folio asignado
+  por fecha de captura. `gasto.importe` sigue siendo el total, así que cierres, presupuesto
+  y reportes no cambian.
+- **Fase 2 (2026-09-28):**
+  - El formulario de gasto captura N conceptos con cálculo en vivo idéntico al servidor,
+    marca los conceptos exentos y adjunta varios comprobantes.
+  - Lector de **CFDI XML** sin IA (`POST /api/v1/expenses/extract-xml`): emisor, conceptos
+    e impuestos; propone los renglones del gasto y cruza el RFC con el directorio.
+  - **Alta rápida de proveedor** desde el gasto (sólo admin), asignado a la obra en la misma
+    transacción.
+  - PostgREST queda de **sólo lectura** para `gasto`, `gasto_concepto` y
+    `gasto_comprobante`: toda mutación pasa por FastAPI.
+
 ---
 *Cualquier desviación nueva de alcance detectada durante el desarrollo debe agregarse aquí,
 siguiendo el mismo formato: naturaleza del cambio, si fue acordado con el cliente o es decisión

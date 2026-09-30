@@ -1,6 +1,63 @@
 {
   "components": {
     "schemas": {
+      "Body_post_extract_cfdi_api_v1_expenses_extract_xml_post": {
+        "properties": {
+          "file": {
+            "description": "XML del CFDI (factura electrónica)",
+            "format": "binary",
+            "title": "File",
+            "type": "string"
+          },
+          "work_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Work Id"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_post_extract_cfdi_api_v1_expenses_extract_xml_post",
+        "type": "object"
+      },
+      "Body_post_extract_csf_api_v1_suppliers_extract_csf_post": {
+        "properties": {
+          "file": {
+            "description": "Constancia de Situación Fiscal del SAT (PDF)",
+            "format": "binary",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_post_extract_csf_api_v1_suppliers_extract_csf_post",
+        "type": "object"
+      },
+      "Body_post_extract_receipt_api_v1_expenses_extract_receipt_post": {
+        "properties": {
+          "file": {
+            "description": "Foto del ticket o nota de remisión",
+            "format": "binary",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_post_extract_receipt_api_v1_expenses_extract_receipt_post",
+        "type": "object"
+      },
       "Body_preview_neodata_api_v1_neodata_preview_post": {
         "properties": {
           "file": {
@@ -79,6 +136,470 @@
         "title": "Body_preview_neodata_api_v1_neodata_preview_post",
         "type": "object"
       },
+      "CfdiConceptOut": {
+        "properties": {
+          "amount": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Amount",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "discount": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Discount",
+            "type": "string"
+          },
+          "iva": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Iva",
+            "type": "string"
+          },
+          "product_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Code"
+          },
+          "quantity": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Quantity",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "unit_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit Code"
+          },
+          "unit_value": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Unit Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "product_code",
+          "quantity",
+          "unit_code",
+          "unit",
+          "description",
+          "unit_value",
+          "discount",
+          "amount",
+          "iva"
+        ],
+        "title": "CfdiConceptOut",
+        "type": "object"
+      },
+      "CfdiExpenseDraft": {
+        "description": "Ready-to-submit expense lines (prices WITH taxes) whose sum equals the CFDI.",
+        "properties": {
+          "amount": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Amount",
+            "type": "string"
+          },
+          "concept": {
+            "title": "Concept",
+            "type": "string"
+          },
+          "iva": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Iva",
+            "type": "string"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/ExpenseLineInput-Output"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "supplier_folio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supplier Folio"
+          }
+        },
+        "required": [
+          "supplier_folio",
+          "concept",
+          "lines",
+          "iva",
+          "amount"
+        ],
+        "title": "CfdiExpenseDraft",
+        "type": "object"
+      },
+      "CfdiExtractionResponse": {
+        "properties": {
+          "concepts": {
+            "items": {
+              "$ref": "#/components/schemas/CfdiConceptOut"
+            },
+            "title": "Concepts",
+            "type": "array"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "discount": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Discount",
+            "type": "string"
+          },
+          "expense": {
+            "$ref": "#/components/schemas/CfdiExpenseDraft"
+          },
+          "folio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Folio"
+          },
+          "issued_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issued At"
+          },
+          "issuer": {
+            "$ref": "#/components/schemas/CfdiIssuer"
+          },
+          "iva": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Iva",
+            "type": "string"
+          },
+          "receiver_rfc": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Receiver Rfc"
+          },
+          "requires_review": {
+            "title": "Requires Review",
+            "type": "boolean"
+          },
+          "series": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Series"
+          },
+          "subtotal": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Subtotal",
+            "type": "string"
+          },
+          "supplier": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CfdiSupplierMatch"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "total": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Total",
+            "type": "string"
+          },
+          "uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uuid"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          },
+          "voucher_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Voucher Type"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          },
+          "withholdings": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Withholdings",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "uuid",
+          "series",
+          "folio",
+          "issued_at",
+          "currency",
+          "voucher_type",
+          "issuer",
+          "receiver_rfc",
+          "concepts",
+          "subtotal",
+          "discount",
+          "iva",
+          "withholdings",
+          "total",
+          "supplier",
+          "expense",
+          "requires_review",
+          "warnings"
+        ],
+        "title": "CfdiExtractionResponse",
+        "type": "object"
+      },
+      "CfdiIssuer": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "rfc": {
+            "title": "Rfc",
+            "type": "string"
+          },
+          "tax_regime": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tax Regime"
+          }
+        },
+        "required": [
+          "rfc",
+          "name",
+          "tax_regime"
+        ],
+        "title": "CfdiIssuer",
+        "type": "object"
+      },
+      "CfdiSupplierMatch": {
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "assigned_to_work": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assigned To Work"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "active",
+          "assigned_to_work"
+        ],
+        "title": "CfdiSupplierMatch",
+        "type": "object"
+      },
+      "CsfExtraction": {
+        "properties": {
+          "codigo_postal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Codigo Postal"
+          },
+          "motivos_revision": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Motivos Revision",
+            "type": "array"
+          },
+          "razon_social": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Razon Social"
+          },
+          "regimen_fiscal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Regimen Fiscal"
+          },
+          "requiere_validacion_humana": {
+            "title": "Requiere Validacion Humana",
+            "type": "boolean"
+          },
+          "rfc": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rfc"
+          }
+        },
+        "required": [
+          "rfc",
+          "razon_social",
+          "regimen_fiscal",
+          "codigo_postal",
+          "requiere_validacion_humana",
+          "motivos_revision"
+        ],
+        "title": "CsfExtraction",
+        "type": "object"
+      },
+      "CsfExtractionResponse": {
+        "properties": {
+          "extraction": {
+            "$ref": "#/components/schemas/CsfExtraction"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "tool_call_log_id": {
+            "format": "uuid",
+            "title": "Tool Call Log Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "extraction",
+          "model",
+          "tool_call_log_id"
+        ],
+        "title": "CsfExtractionResponse",
+        "type": "object"
+      },
       "ExpenseBatchReview": {
         "properties": {
           "expense_ids": {
@@ -121,19 +642,6 @@
       },
       "ExpenseCreate": {
         "properties": {
-          "amount": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "type": "number"
-              },
-              {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d{0,4}0*$",
-                "type": "string"
-              }
-            ],
-            "title": "Amount"
-          },
           "area_id": {
             "format": "uuid",
             "title": "Area Id",
@@ -172,17 +680,30 @@
             "title": "Expense Subitem Id",
             "type": "string"
           },
-          "folio": {
+          "iva": {
             "anyOf": [
               {
-                "maxLength": 120,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,10}|(?=[\\d.]{1,15}0*$)\\d{0,10}\\.\\d{0,4}0*$)",
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Folio"
+            "title": "Iva"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/ExpenseLineInput-Input"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Lines",
+            "type": "array"
           },
           "spent_on": {
             "format": "date",
@@ -193,30 +714,22 @@
             "$ref": "#/components/schemas/ExpenseState",
             "default": "pendiente"
           },
-          "supplier_id": {
+          "supplier_folio": {
             "anyOf": [
               {
-                "format": "uuid",
+                "maxLength": 120,
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Supplier Id"
+            "title": "Supplier Folio"
           },
-          "supplier_name": {
-            "anyOf": [
-              {
-                "maxLength": 250,
-                "minLength": 2,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Supplier Name"
+          "supplier_id": {
+            "format": "uuid",
+            "title": "Supplier Id",
+            "type": "string"
           },
           "work_id": {
             "format": "uuid",
@@ -225,16 +738,292 @@
           }
         },
         "required": [
+          "lines",
           "work_id",
           "area_id",
           "expense_item_id",
           "expense_subitem_id",
           "expense_category_id",
+          "supplier_id",
           "spent_on",
-          "concept",
-          "amount"
+          "concept"
         ],
         "title": "ExpenseCreate",
+        "type": "object"
+      },
+      "ExpenseLine": {
+        "properties": {
+          "amount": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Amount",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "discount": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Discount",
+            "type": "string"
+          },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
+          "quantity": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Quantity",
+            "type": "string"
+          },
+          "unit": {
+            "title": "Unit",
+            "type": "string"
+          },
+          "unit_price": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Unit Price",
+            "type": "string"
+          }
+        },
+        "required": [
+          "position",
+          "quantity",
+          "unit",
+          "description",
+          "unit_price",
+          "discount",
+          "amount"
+        ],
+        "title": "ExpenseLine",
+        "type": "object"
+      },
+      "ExpenseLineInput-Input": {
+        "description": "One concept of an expense. Prices include IVA; the server computes the amount.",
+        "properties": {
+          "description": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "discount": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,10}|(?=[\\d.]{1,15}0*$)\\d{0,10}\\.\\d{0,4}0*$)",
+                "type": "string"
+              }
+            ],
+            "default": "0",
+            "title": "Discount"
+          },
+          "quantity": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,10}|(?=[\\d.]{1,15}0*$)\\d{0,10}\\.\\d{0,4}0*$)",
+                "type": "string"
+              }
+            ],
+            "title": "Quantity"
+          },
+          "unit": {
+            "maxLength": 40,
+            "minLength": 1,
+            "title": "Unit",
+            "type": "string"
+          },
+          "unit_price": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,10}|(?=[\\d.]{1,15}0*$)\\d{0,10}\\.\\d{0,4}0*$)",
+                "type": "string"
+              }
+            ],
+            "title": "Unit Price"
+          }
+        },
+        "required": [
+          "quantity",
+          "unit",
+          "description",
+          "unit_price"
+        ],
+        "title": "ExpenseLineInput",
+        "type": "object"
+      },
+      "ExpenseLineInput-Output": {
+        "description": "One concept of an expense. Prices include IVA; the server computes the amount.",
+        "properties": {
+          "description": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "discount": {
+            "default": "0",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,10}|(?=[\\d.]{1,15}0*$)\\d{0,10}\\.\\d{0,4}0*$)",
+            "title": "Discount",
+            "type": "string"
+          },
+          "quantity": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,10}|(?=[\\d.]{1,15}0*$)\\d{0,10}\\.\\d{0,4}0*$)",
+            "title": "Quantity",
+            "type": "string"
+          },
+          "unit": {
+            "maxLength": 40,
+            "minLength": 1,
+            "title": "Unit",
+            "type": "string"
+          },
+          "unit_price": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,10}|(?=[\\d.]{1,15}0*$)\\d{0,10}\\.\\d{0,4}0*$)",
+            "title": "Unit Price",
+            "type": "string"
+          }
+        },
+        "required": [
+          "quantity",
+          "unit",
+          "description",
+          "unit_price"
+        ],
+        "title": "ExpenseLineInput",
+        "type": "object"
+      },
+      "ExpenseReceipt": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "path",
+          "kind",
+          "created_at"
+        ],
+        "title": "ExpenseReceipt",
+        "type": "object"
+      },
+      "ExpenseResponse": {
+        "properties": {
+          "amount": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Amount",
+            "type": "string"
+          },
+          "concept": {
+            "title": "Concept",
+            "type": "string"
+          },
+          "folio": {
+            "title": "Folio",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "iva": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Iva",
+            "type": "string"
+          },
+          "iva_breakdown": {
+            "title": "Iva Breakdown",
+            "type": "boolean"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/ExpenseLine"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "receipts": {
+            "items": {
+              "$ref": "#/components/schemas/ExpenseReceipt"
+            },
+            "title": "Receipts",
+            "type": "array"
+          },
+          "spent_on": {
+            "format": "date",
+            "title": "Spent On",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "subtotal": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Subtotal",
+            "type": "string"
+          },
+          "supplier_folio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supplier Folio"
+          },
+          "work_id": {
+            "format": "uuid",
+            "title": "Work Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "folio",
+          "supplier_folio",
+          "work_id",
+          "spent_on",
+          "concept",
+          "subtotal",
+          "iva",
+          "amount",
+          "iva_breakdown",
+          "state",
+          "lines",
+          "receipts"
+        ],
+        "title": "ExpenseResponse",
         "type": "object"
       },
       "ExpenseReview": {
@@ -274,19 +1063,6 @@
       },
       "ExpenseUpdate": {
         "properties": {
-          "amount": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "type": "number"
-              },
-              {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d{0,4}0*$",
-                "type": "string"
-              }
-            ],
-            "title": "Amount"
-          },
           "area_id": {
             "format": "uuid",
             "title": "Area Id",
@@ -325,7 +1101,37 @@
             "title": "Expense Subitem Id",
             "type": "string"
           },
-          "folio": {
+          "iva": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,10}|(?=[\\d.]{1,15}0*$)\\d{0,10}\\.\\d{0,4}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Iva"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/ExpenseLineInput-Input"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Lines",
+            "type": "array"
+          },
+          "spent_on": {
+            "format": "date",
+            "title": "Spent On",
+            "type": "string"
+          },
+          "supplier_folio": {
             "anyOf": [
               {
                 "maxLength": 120,
@@ -335,47 +1141,23 @@
                 "type": "null"
               }
             ],
-            "title": "Folio"
-          },
-          "spent_on": {
-            "format": "date",
-            "title": "Spent On",
-            "type": "string"
+            "title": "Supplier Folio"
           },
           "supplier_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Supplier Id"
-          },
-          "supplier_name": {
-            "anyOf": [
-              {
-                "maxLength": 250,
-                "minLength": 2,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Supplier Name"
+            "format": "uuid",
+            "title": "Supplier Id",
+            "type": "string"
           }
         },
         "required": [
+          "lines",
           "area_id",
           "expense_item_id",
           "expense_subitem_id",
           "expense_category_id",
+          "supplier_id",
           "spent_on",
-          "concept",
-          "amount"
+          "concept"
         ],
         "title": "ExpenseUpdate",
         "type": "object"
@@ -512,6 +1294,60 @@
         "title": "IncomeCreate",
         "type": "object"
       },
+      "JevChatRequest": {
+        "properties": {
+          "extraction": {
+            "$ref": "#/components/schemas/ReceiptExtraction-Input"
+          },
+          "instruction": {
+            "maxLength": 1000,
+            "minLength": 2,
+            "title": "Instruction",
+            "type": "string"
+          }
+        },
+        "required": [
+          "extraction",
+          "instruction"
+        ],
+        "title": "JevChatRequest",
+        "type": "object"
+      },
+      "JevChatResponse": {
+        "properties": {
+          "extraction": {
+            "$ref": "#/components/schemas/ReceiptExtraction-Output"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "respuesta": {
+            "title": "Respuesta",
+            "type": "string"
+          },
+          "tool_call_log_id": {
+            "format": "uuid",
+            "title": "Tool Call Log Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "extraction",
+          "respuesta",
+          "model",
+          "tool_call_log_id"
+        ],
+        "title": "JevChatResponse",
+        "type": "object"
+      },
       "PreviewItemCorrection": {
         "properties": {
           "area": {
@@ -578,6 +1414,299 @@
           "unit"
         ],
         "title": "PreviewItemCorrection",
+        "type": "object"
+      },
+      "ReceiptConcept-Input": {
+        "properties": {
+          "cantidad": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cantidad"
+          },
+          "descripcion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Descripcion"
+          },
+          "importe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Importe"
+          },
+          "precio_unitario": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Precio Unitario"
+          },
+          "unidad": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unidad"
+          }
+        },
+        "required": [
+          "cantidad",
+          "precio_unitario",
+          "descripcion"
+        ],
+        "title": "ReceiptConcept",
+        "type": "object"
+      },
+      "ReceiptConcept-Output": {
+        "properties": {
+          "cantidad": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cantidad"
+          },
+          "descripcion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Descripcion"
+          },
+          "importe": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Importe"
+          },
+          "precio_unitario": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Precio Unitario"
+          },
+          "unidad": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unidad"
+          }
+        },
+        "required": [
+          "cantidad",
+          "precio_unitario",
+          "descripcion"
+        ],
+        "title": "ReceiptConcept",
+        "type": "object"
+      },
+      "ReceiptExtraction-Input": {
+        "properties": {
+          "conceptos": {
+            "items": {
+              "$ref": "#/components/schemas/ReceiptConcept-Input"
+            },
+            "title": "Conceptos",
+            "type": "array"
+          },
+          "motivos_revision": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Motivos Revision",
+            "type": "array"
+          },
+          "requiere_validacion_humana": {
+            "title": "Requiere Validacion Humana",
+            "type": "boolean"
+          },
+          "suma_conceptos": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suma Conceptos"
+          },
+          "total_detectado": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Detectado"
+          }
+        },
+        "required": [
+          "total_detectado",
+          "conceptos",
+          "suma_conceptos",
+          "requiere_validacion_humana",
+          "motivos_revision"
+        ],
+        "title": "ReceiptExtraction",
+        "type": "object"
+      },
+      "ReceiptExtraction-Output": {
+        "properties": {
+          "conceptos": {
+            "items": {
+              "$ref": "#/components/schemas/ReceiptConcept-Output"
+            },
+            "title": "Conceptos",
+            "type": "array"
+          },
+          "motivos_revision": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Motivos Revision",
+            "type": "array"
+          },
+          "requiere_validacion_humana": {
+            "title": "Requiere Validacion Humana",
+            "type": "boolean"
+          },
+          "suma_conceptos": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suma Conceptos"
+          },
+          "total_detectado": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Detectado"
+          }
+        },
+        "required": [
+          "total_detectado",
+          "conceptos",
+          "suma_conceptos",
+          "requiere_validacion_humana",
+          "motivos_revision"
+        ],
+        "title": "ReceiptExtraction",
+        "type": "object"
+      },
+      "ReceiptExtractionResponse": {
+        "properties": {
+          "extraction": {
+            "$ref": "#/components/schemas/ReceiptExtraction-Output"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "tool_call_log_id": {
+            "format": "uuid",
+            "title": "Tool Call Log Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "extraction",
+          "model",
+          "tool_call_log_id"
+        ],
+        "title": "ReceiptExtractionResponse",
         "type": "object"
       },
       "ReceiptUpdate": {
@@ -695,6 +1824,567 @@
           "amount"
         ],
         "title": "SubcontractPaymentCreate",
+        "type": "object"
+      },
+      "SupplierArchive": {
+        "properties": {
+          "reason": {
+            "maxLength": 500,
+            "minLength": 5,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "SupplierArchive",
+        "type": "object"
+      },
+      "SupplierCreate": {
+        "properties": {
+          "address": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address"
+          },
+          "contact_name": {
+            "anyOf": [
+              {
+                "maxLength": 180,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Name"
+          },
+          "coverage": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coverage"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "maxLength": 254,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "legal_name": {
+            "anyOf": [
+              {
+                "maxLength": 250,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Legal Name"
+          },
+          "name": {
+            "maxLength": 250,
+            "minLength": 2,
+            "title": "Name",
+            "type": "string"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "maxLength": 3000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "postal_code": {
+            "anyOf": [
+              {
+                "maxLength": 10,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Postal Code"
+          },
+          "specialty_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 30,
+            "title": "Specialty Ids",
+            "type": "array"
+          },
+          "tax_id": {
+            "anyOf": [
+              {
+                "maxLength": 20,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tax Id"
+          },
+          "tax_regime": {
+            "anyOf": [
+              {
+                "maxLength": 250,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tax Regime"
+          },
+          "whatsapp": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Whatsapp"
+          },
+          "work_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Work Id"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "SupplierCreate",
+        "type": "object"
+      },
+      "SupplierEvaluationCreate": {
+        "properties": {
+          "comment": {
+            "anyOf": [
+              {
+                "maxLength": 3000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          },
+          "communication": {
+            "maximum": 5.0,
+            "minimum": 1.0,
+            "title": "Communication",
+            "type": "integer"
+          },
+          "expense_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expense Id"
+          },
+          "quality": {
+            "maximum": 5.0,
+            "minimum": 1.0,
+            "title": "Quality",
+            "type": "integer"
+          },
+          "safety": {
+            "maximum": 5.0,
+            "minimum": 1.0,
+            "title": "Safety",
+            "type": "integer"
+          },
+          "service_date": {
+            "format": "date",
+            "title": "Service Date",
+            "type": "string"
+          },
+          "timeliness": {
+            "maximum": 5.0,
+            "minimum": 1.0,
+            "title": "Timeliness",
+            "type": "integer"
+          },
+          "value": {
+            "maximum": 5.0,
+            "minimum": 1.0,
+            "title": "Value",
+            "type": "integer"
+          },
+          "work_description": {
+            "maxLength": 1000,
+            "minLength": 3,
+            "title": "Work Description",
+            "type": "string"
+          },
+          "work_id": {
+            "format": "uuid",
+            "title": "Work Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "work_id",
+          "work_description",
+          "service_date",
+          "quality",
+          "timeliness",
+          "value",
+          "communication",
+          "safety"
+        ],
+        "title": "SupplierEvaluationCreate",
+        "type": "object"
+      },
+      "SupplierEvaluationUpdate": {
+        "properties": {
+          "comment": {
+            "anyOf": [
+              {
+                "maxLength": 3000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          },
+          "communication": {
+            "maximum": 5.0,
+            "minimum": 1.0,
+            "title": "Communication",
+            "type": "integer"
+          },
+          "expense_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expense Id"
+          },
+          "quality": {
+            "maximum": 5.0,
+            "minimum": 1.0,
+            "title": "Quality",
+            "type": "integer"
+          },
+          "safety": {
+            "maximum": 5.0,
+            "minimum": 1.0,
+            "title": "Safety",
+            "type": "integer"
+          },
+          "service_date": {
+            "format": "date",
+            "title": "Service Date",
+            "type": "string"
+          },
+          "timeliness": {
+            "maximum": 5.0,
+            "minimum": 1.0,
+            "title": "Timeliness",
+            "type": "integer"
+          },
+          "value": {
+            "maximum": 5.0,
+            "minimum": 1.0,
+            "title": "Value",
+            "type": "integer"
+          },
+          "work_description": {
+            "maxLength": 1000,
+            "minLength": 3,
+            "title": "Work Description",
+            "type": "string"
+          },
+          "work_id": {
+            "format": "uuid",
+            "title": "Work Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "work_id",
+          "work_description",
+          "service_date",
+          "quality",
+          "timeliness",
+          "value",
+          "communication",
+          "safety"
+        ],
+        "title": "SupplierEvaluationUpdate",
+        "type": "object"
+      },
+      "SupplierEvaluationVoid": {
+        "properties": {
+          "reason": {
+            "maxLength": 500,
+            "minLength": 5,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "SupplierEvaluationVoid",
+        "type": "object"
+      },
+      "SupplierSpecialtyCreate": {
+        "properties": {
+          "name": {
+            "maxLength": 120,
+            "minLength": 2,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "SupplierSpecialtyCreate",
+        "type": "object"
+      },
+      "SupplierSpecialtyUpdate": {
+        "properties": {
+          "active": {
+            "default": true,
+            "title": "Active",
+            "type": "boolean"
+          },
+          "name": {
+            "maxLength": 120,
+            "minLength": 2,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "SupplierSpecialtyUpdate",
+        "type": "object"
+      },
+      "SupplierUpdate": {
+        "properties": {
+          "address": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address"
+          },
+          "contact_name": {
+            "anyOf": [
+              {
+                "maxLength": 180,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact Name"
+          },
+          "coverage": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coverage"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "maxLength": 254,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "legal_name": {
+            "anyOf": [
+              {
+                "maxLength": 250,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Legal Name"
+          },
+          "name": {
+            "maxLength": 250,
+            "minLength": 2,
+            "title": "Name",
+            "type": "string"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "maxLength": 3000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "postal_code": {
+            "anyOf": [
+              {
+                "maxLength": 10,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Postal Code"
+          },
+          "specialty_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 30,
+            "title": "Specialty Ids",
+            "type": "array"
+          },
+          "tax_id": {
+            "anyOf": [
+              {
+                "maxLength": 20,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tax Id"
+          },
+          "tax_regime": {
+            "anyOf": [
+              {
+                "maxLength": 250,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tax Regime"
+          },
+          "whatsapp": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Whatsapp"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "SupplierUpdate",
         "type": "object"
       },
       "ToolDefinition": {
@@ -873,6 +2563,24 @@
           "confirmation_name"
         ],
         "title": "WorkDelete",
+        "type": "object"
+      },
+      "WorkSupplierAssignment": {
+        "properties": {
+          "notes": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          }
+        },
+        "title": "WorkSupplierAssignment",
         "type": "object"
       },
       "WorkUpdate": {
@@ -1090,9 +2798,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Post Expense Api V1 Expenses Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ExpenseResponse"
                 }
               }
             },
@@ -1110,6 +2816,186 @@
           }
         },
         "summary": "Post Expense",
+        "tags": [
+          "expenses"
+        ]
+      }
+    },
+    "/api/v1/expenses/extract-receipt": {
+      "post": {
+        "description": "Propose receipt lines from an image; the server recomputes totals before answering.",
+        "operationId": "post_extract_receipt_api_v1_expenses_extract_receipt_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_post_extract_receipt_api_v1_expenses_extract_receipt_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceiptExtractionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Extract Receipt",
+        "tags": [
+          "expenses"
+        ]
+      }
+    },
+    "/api/v1/expenses/extract-xml": {
+      "post": {
+        "description": "Read a CFDI 3.3/4.0 without AI: issuer, concepts, taxes and a ready expense draft.",
+        "operationId": "post_extract_cfdi_api_v1_expenses_extract_xml_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_post_extract_cfdi_api_v1_expenses_extract_xml_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CfdiExtractionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Extract Cfdi",
+        "tags": [
+          "expenses"
+        ]
+      }
+    },
+    "/api/v1/expenses/jev-chat": {
+      "post": {
+        "description": "Árbitro Jev: correct a receipt extraction in natural language; nothing is persisted.",
+        "operationId": "post_jev_chat_api_v1_expenses_jev_chat_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JevChatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JevChatResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Jev Chat",
         "tags": [
           "expenses"
         ]
@@ -1177,6 +3063,64 @@
       }
     },
     "/api/v1/expenses/{expense_id}": {
+      "get": {
+        "description": "Header, lines and receipts of one expense (edit form).",
+        "operationId": "get_expense_detail_api_v1_expenses__expense_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "expense_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Expense Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExpenseResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Expense Detail",
+        "tags": [
+          "expenses"
+        ]
+      },
       "patch": {
         "operationId": "patch_expense_api_v1_expenses__expense_id__patch",
         "parameters": [
@@ -1222,9 +3166,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Patch Expense Api V1 Expenses  Expense Id  Patch",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ExpenseResponse"
                 }
               }
             },
@@ -1364,9 +3306,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Patch Expense Receipt Api V1 Expenses  Expense Id  Receipt Patch",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ExpenseResponse"
                 }
               }
             },
@@ -2453,6 +4393,1195 @@
         ]
       }
     },
+    "/api/v1/supplier-specialties": {
+      "get": {
+        "operationId": "get_supplier_specialties_api_v1_supplier_specialties_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "include_inactive",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Inactive",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Get Supplier Specialties Api V1 Supplier Specialties Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Supplier Specialties",
+        "tags": [
+          "suppliers"
+        ]
+      },
+      "post": {
+        "operationId": "post_supplier_specialty_api_v1_supplier_specialties_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupplierSpecialtyCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Post Supplier Specialty Api V1 Supplier Specialties Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Supplier Specialty",
+        "tags": [
+          "suppliers"
+        ]
+      }
+    },
+    "/api/v1/supplier-specialties/{specialty_id}": {
+      "patch": {
+        "operationId": "patch_supplier_specialty_api_v1_supplier_specialties__specialty_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "specialty_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Specialty Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupplierSpecialtyUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Patch Supplier Specialty Api V1 Supplier Specialties  Specialty Id  Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Patch Supplier Specialty",
+        "tags": [
+          "suppliers"
+        ]
+      }
+    },
+    "/api/v1/suppliers": {
+      "get": {
+        "operationId": "get_suppliers_api_v1_suppliers_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "specialty_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Specialty Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_rating",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 5.0,
+                  "minimum": 1.0,
+                  "type": "number"
+                },
+                {
+                  "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Rating"
+            }
+          },
+          {
+            "in": "query",
+            "name": "active",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": true,
+              "title": "Active"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_archived",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Archived",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "work_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Work Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "name",
+              "pattern": "^(name|rating|jobs|spend)$",
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Suppliers Api V1 Suppliers Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Suppliers",
+        "tags": [
+          "suppliers"
+        ]
+      },
+      "post": {
+        "operationId": "post_supplier_api_v1_suppliers_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupplierCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Post Supplier Api V1 Suppliers Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Supplier",
+        "tags": [
+          "suppliers"
+        ]
+      }
+    },
+    "/api/v1/suppliers/analytics": {
+      "get": {
+        "operationId": "get_supplier_analytics_api_v1_suppliers_analytics_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Supplier Analytics Api V1 Suppliers Analytics Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Supplier Analytics",
+        "tags": [
+          "suppliers"
+        ]
+      }
+    },
+    "/api/v1/suppliers/extract-csf": {
+      "post": {
+        "description": "Propose supplier fiscal data from a CSF; nothing is persisted besides tool_call_log.",
+        "operationId": "post_extract_csf_api_v1_suppliers_extract_csf_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_post_extract_csf_api_v1_suppliers_extract_csf_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CsfExtractionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Extract Csf",
+        "tags": [
+          "suppliers"
+        ]
+      }
+    },
+    "/api/v1/suppliers/{supplier_id}": {
+      "delete": {
+        "operationId": "delete_supplier_api_v1_suppliers__supplier_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "supplier_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Supplier Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupplierArchive"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Delete Supplier Api V1 Suppliers  Supplier Id  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Supplier",
+        "tags": [
+          "suppliers"
+        ]
+      },
+      "get": {
+        "operationId": "get_supplier_detail_api_v1_suppliers__supplier_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "supplier_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Supplier Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Supplier Detail Api V1 Suppliers  Supplier Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Supplier Detail",
+        "tags": [
+          "suppliers"
+        ]
+      },
+      "patch": {
+        "operationId": "patch_supplier_api_v1_suppliers__supplier_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "supplier_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Supplier Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupplierUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Patch Supplier Api V1 Suppliers  Supplier Id  Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Patch Supplier",
+        "tags": [
+          "suppliers"
+        ]
+      }
+    },
+    "/api/v1/suppliers/{supplier_id}/evaluations": {
+      "post": {
+        "operationId": "post_supplier_evaluation_api_v1_suppliers__supplier_id__evaluations_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "supplier_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Supplier Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupplierEvaluationCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Post Supplier Evaluation Api V1 Suppliers  Supplier Id  Evaluations Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Supplier Evaluation",
+        "tags": [
+          "suppliers"
+        ]
+      }
+    },
+    "/api/v1/suppliers/{supplier_id}/evaluations/{evaluation_id}": {
+      "delete": {
+        "operationId": "delete_supplier_evaluation_api_v1_suppliers__supplier_id__evaluations__evaluation_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "supplier_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Supplier Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "evaluation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Evaluation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupplierEvaluationVoid"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Delete Supplier Evaluation Api V1 Suppliers  Supplier Id  Evaluations  Evaluation Id  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Supplier Evaluation",
+        "tags": [
+          "suppliers"
+        ]
+      },
+      "patch": {
+        "operationId": "patch_supplier_evaluation_api_v1_suppliers__supplier_id__evaluations__evaluation_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "supplier_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Supplier Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "evaluation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Evaluation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupplierEvaluationUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Patch Supplier Evaluation Api V1 Suppliers  Supplier Id  Evaluations  Evaluation Id  Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Patch Supplier Evaluation",
+        "tags": [
+          "suppliers"
+        ]
+      }
+    },
+    "/api/v1/suppliers/{supplier_id}/restore": {
+      "post": {
+        "operationId": "post_supplier_restore_api_v1_suppliers__supplier_id__restore_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "supplier_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Supplier Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Post Supplier Restore Api V1 Suppliers  Supplier Id  Restore Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Supplier Restore",
+        "tags": [
+          "suppliers"
+        ]
+      }
+    },
+    "/api/v1/suppliers/{supplier_id}/works/{work_id}": {
+      "delete": {
+        "operationId": "delete_supplier_work_api_v1_suppliers__supplier_id__works__work_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "supplier_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Supplier Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Delete Supplier Work Api V1 Suppliers  Supplier Id  Works  Work Id  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Supplier Work",
+        "tags": [
+          "suppliers"
+        ]
+      },
+      "put": {
+        "operationId": "put_supplier_work_api_v1_suppliers__supplier_id__works__work_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "supplier_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Supplier Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkSupplierAssignment"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Put Supplier Work Api V1 Suppliers  Supplier Id  Works  Work Id  Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Supplier Work",
+        "tags": [
+          "suppliers"
+        ]
+      }
+    },
     "/api/v1/weekly-closes": {
       "post": {
         "operationId": "post_weekly_close_api_v1_weekly_closes_post",
@@ -3279,6 +6408,89 @@
           }
         },
         "summary": "Get Weekly Closes",
+        "tags": [
+          "closes"
+        ]
+      }
+    },
+    "/api/v1/works/{work_id}/weekly-closes/preview": {
+      "get": {
+        "operationId": "get_weekly_close_preview_api_v1_works__work_id__weekly_closes_preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "iso_year",
+            "required": true,
+            "schema": {
+              "maximum": 2200,
+              "minimum": 2000,
+              "title": "Iso Year",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "iso_week",
+            "required": true,
+            "schema": {
+              "maximum": 53,
+              "minimum": 1,
+              "title": "Iso Week",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Weekly Close Preview Api V1 Works  Work Id  Weekly Closes Preview Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Weekly Close Preview",
         "tags": [
           "closes"
         ]

@@ -1,11 +1,19 @@
 import Link from 'next/link';
-import { BuildingIcon, GridIcon, LockIcon, ReceiptIcon, UploadIcon } from './icons';
+import {
+  BuildingIcon,
+  GridIcon,
+  LockIcon,
+  ReceiptIcon,
+  SuppliersIcon,
+  UploadIcon,
+} from './icons';
 import { AuthBoundary } from './auth-boundary';
 import { SessionControls } from './session-controls';
 
 const nav = [
   { href: '/', label: 'Resumen', icon: GridIcon },
   { href: '/gastos', label: 'Gastos', icon: ReceiptIcon },
+  { href: '/proveedores', label: 'Proveedores', icon: SuppliersIcon },
   { href: '/admin/importar', label: 'Importar', icon: UploadIcon },
   { href: '/cierres', label: 'Cierres', icon: LockIcon },
 ] as const;

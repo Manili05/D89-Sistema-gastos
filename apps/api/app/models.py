@@ -3,7 +3,7 @@ from decimal import Decimal
 from enum import StrEnum
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class Role(StrEnum):
@@ -48,6 +48,127 @@ class WorkUpdate(BaseModel):
         return self
 
 
+def normalize_rfc(value: str) -> str:
+    """Uppercase alphanumeric RFC; personas morales use 12 characters, físicas 13."""
+    cleaned = "".join(character for character in value.upper() if character.isalnum())
+    if len(cleaned) not in {12, 13}:
+        raise ValueError("El RFC debe contener 12 o 13 caracteres")
+    return cleaned
+
+
+class SupplierProfile(BaseModel):
+    name: str = Field(min_length=2, max_length=250)
+    legal_name: str | None = Field(default=None, max_length=250)
+    tax_id: str | None = Field(default=None, max_length=20)
+    tax_regime: str | None = Field(default=None, max_length=250)
+    postal_code: str | None = Field(default=None, max_length=10)
+    contact_name: str | None = Field(default=None, max_length=180)
+    phone: str | None = Field(default=None, max_length=40)
+    whatsapp: str | None = Field(default=None, max_length=40)
+    email: str | None = Field(default=None, max_length=254)
+    address: str | None = Field(default=None, max_length=500)
+    coverage: str | None = Field(default=None, max_length=300)
+    notes: str | None = Field(default=None, max_length=3000)
+    specialty_ids: list[UUID] = Field(default_factory=list, max_length=30)
+
+    @field_validator(
+        "name",
+        "legal_name",
+        "tax_id",
+        "tax_regime",
+        "postal_code",
+        "contact_name",
+        "phone",
+        "whatsapp",
+        "email",
+        "address",
+        "coverage",
+        "notes",
+        mode="before",
+    )
+    @classmethod
+    def strip_supplier_text(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        stripped = value.strip()
+        return stripped or None
+
+    @model_validator(mode="after")
+    def validate_supplier_identity(self) -> "SupplierProfile":
+        self.name = self.name.strip()
+        if self.tax_id:
+            self.tax_id = normalize_rfc(self.tax_id)
+        if self.postal_code and not (
+            len(self.postal_code) == 5 and self.postal_code.isascii() and self.postal_code.isdigit()
+        ):
+            raise ValueError("El código postal debe tener 5 dígitos")
+        if self.email and (
+            "@" not in self.email or self.email.startswith("@") or self.email.endswith("@")
+        ):
+            raise ValueError("Correo electrónico inválido")
+        self.specialty_ids = list(dict.fromkeys(self.specialty_ids))
+        return self
+
+
+class SupplierCreate(SupplierProfile):
+    # Quick creation from an expense: also assign the supplier to this work atomically.
+    work_id: UUID | None = None
+
+
+class SupplierUpdate(SupplierProfile):
+    pass
+
+
+class SupplierArchive(BaseModel):
+    reason: str = Field(min_length=5, max_length=500)
+
+
+class SupplierSpecialtyCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=120)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def strip_name(cls, value: str) -> str:
+        return value.strip()
+
+
+class SupplierSpecialtyUpdate(SupplierSpecialtyCreate):
+    active: bool = True
+
+
+class WorkSupplierAssignment(BaseModel):
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class SupplierEvaluationCreate(BaseModel):
+    work_id: UUID
+    expense_id: UUID | None = None
+    work_description: str = Field(min_length=3, max_length=1000)
+    service_date: date
+    quality: int = Field(ge=1, le=5)
+    timeliness: int = Field(ge=1, le=5)
+    value: int = Field(ge=1, le=5)
+    communication: int = Field(ge=1, le=5)
+    safety: int = Field(ge=1, le=5)
+    comment: str | None = Field(default=None, max_length=3000)
+
+    @field_validator("work_description", "comment", mode="before")
+    @classmethod
+    def strip_evaluation_text(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        stripped = value.strip()
+        return stripped or None
+
+
+class SupplierEvaluationUpdate(SupplierEvaluationCreate):
+    pass
+
+
+class SupplierEvaluationVoid(BaseModel):
+    reason: str = Field(min_length=5, max_length=500)
+
+
 class WeeklyCloseCreate(BaseModel):
     work_id: UUID
     iso_year: int = Field(ge=2000, le=2200)
@@ -58,52 +179,91 @@ class WeeklyReopen(BaseModel):
     reason: str = Field(min_length=10, max_length=500)
 
 
-class ExpenseCreate(BaseModel):
+class ExpenseLineInput(BaseModel):
+    """One concept of an expense. Prices include IVA; the server computes the amount."""
+
+    quantity: Decimal = Field(gt=0, max_digits=14, decimal_places=4)
+    unit: str = Field(min_length=1, max_length=40)
+    description: str = Field(min_length=1, max_length=500)
+    unit_price: Decimal = Field(ge=0, max_digits=14, decimal_places=4)
+    discount: Decimal = Field(default=Decimal(0), ge=0, max_digits=14, decimal_places=4)
+
+    @field_validator("unit", "description", mode="before")
+    @classmethod
+    def strip_text(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
+
+    @model_validator(mode="after")
+    def discount_within_gross(self) -> "ExpenseLineInput":
+        if self.discount > self.quantity * self.unit_price:
+            raise ValueError("El descuento no puede superar cantidad × precio unitario")
+        return self
+
+
+class ExpenseLinesPayload(BaseModel):
+    """Shared by create and update: the edit replaces every line."""
+
+    supplier_folio: str | None = Field(default=None, max_length=120)
+    lines: list[ExpenseLineInput] = Field(min_length=1, max_length=200)
+    iva: Decimal | None = Field(default=None, ge=0, max_digits=14, decimal_places=4)
+
+
+class ExpenseCreate(ExpenseLinesPayload):
     work_id: UUID
     area_id: UUID
     expense_item_id: UUID
     expense_subitem_id: UUID
     expense_category_id: UUID
     budget_item_id: UUID | None = None
-    supplier_id: UUID | None = None
-    supplier_name: str | None = Field(default=None, min_length=2, max_length=250)
+    supplier_id: UUID
     spent_on: date
     concept: str = Field(min_length=3, max_length=500)
-    folio: str | None = Field(default=None, max_length=120)
-    amount: Decimal = Field(gt=0, decimal_places=4)
+    # Accepted for backwards compatibility and ignored: new expenses are always pending.
     state: ExpenseState = ExpenseState.PENDIENTE
 
-    @model_validator(mode="after")
-    def require_one_supplier(self) -> "ExpenseCreate":
-        if (self.supplier_id is None) == (self.supplier_name is None):
-            raise ValueError("Indica un proveedor existente o el nombre de uno nuevo")
-        if self.supplier_name is not None:
-            self.supplier_name = self.supplier_name.strip()
-            if len(self.supplier_name) < 2:
-                raise ValueError("El nombre del proveedor es demasiado corto")
-        return self
 
-
-class ExpenseUpdate(BaseModel):
+class ExpenseUpdate(ExpenseLinesPayload):
     area_id: UUID
     expense_item_id: UUID
     expense_subitem_id: UUID
     expense_category_id: UUID
     budget_item_id: UUID | None = None
-    supplier_id: UUID | None = None
-    supplier_name: str | None = Field(default=None, min_length=2, max_length=250)
+    supplier_id: UUID
     spent_on: date
     concept: str = Field(min_length=3, max_length=500)
-    folio: str | None = Field(default=None, max_length=120)
-    amount: Decimal = Field(gt=0, decimal_places=4)
 
-    @model_validator(mode="after")
-    def require_one_supplier(self) -> "ExpenseUpdate":
-        if (self.supplier_id is None) == (self.supplier_name is None):
-            raise ValueError("Indica un proveedor existente o el nombre de uno nuevo")
-        if self.supplier_name is not None:
-            self.supplier_name = self.supplier_name.strip()
-        return self
+
+class ExpenseLine(BaseModel):
+    position: int
+    quantity: Decimal
+    unit: str
+    description: str
+    unit_price: Decimal
+    discount: Decimal
+    amount: Decimal
+
+
+class ExpenseReceipt(BaseModel):
+    id: UUID
+    path: str
+    kind: str
+    created_at: datetime
+
+
+class ExpenseResponse(BaseModel):
+    id: UUID
+    folio: str
+    supplier_folio: str | None
+    work_id: UUID
+    spent_on: date
+    concept: str
+    subtotal: Decimal
+    iva: Decimal
+    amount: Decimal
+    iva_breakdown: bool
+    state: str
+    lines: list[ExpenseLine]
+    receipts: list[ExpenseReceipt]
 
 
 class ExpenseReview(BaseModel):
@@ -193,3 +353,168 @@ class ToolDefinition(BaseModel):
     mutates: bool
     requires_confirmation: bool = False
     description: str
+
+
+class CsfModelOutput(BaseModel):
+    """Strict schema the model must return for a Constancia de Situación Fiscal."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    rfc: str | None
+    razon_social: str | None
+    regimen_fiscal: str | None
+    codigo_postal: str | None
+    requiere_validacion_humana: bool
+    motivos_revision: list[str]
+
+
+class ReceiptConceptOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    cantidad: float | None
+    unidad: str | None
+    precio_unitario: float | None
+    importe: float | None
+    descripcion: str | None
+
+
+class ReceiptModelOutput(BaseModel):
+    """Strict schema the model must return for a ticket or nota de remisión."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    total_detectado: float | None
+    conceptos: list[ReceiptConceptOutput]
+    requiere_validacion_humana: bool
+    motivos_revision: list[str]
+
+
+class CsfExtraction(BaseModel):
+    rfc: str | None
+    razon_social: str | None
+    regimen_fiscal: str | None
+    codigo_postal: str | None
+    requiere_validacion_humana: bool
+    motivos_revision: list[str]
+
+
+class ReceiptConcept(BaseModel):
+    cantidad: Decimal | None
+    unidad: str | None = None
+    precio_unitario: Decimal | None
+    importe: Decimal | None = None
+    descripcion: str | None
+
+
+class ReceiptExtraction(BaseModel):
+    total_detectado: Decimal | None
+    conceptos: list[ReceiptConcept]
+    suma_conceptos: Decimal | None
+    requiere_validacion_humana: bool
+    motivos_revision: list[str]
+
+
+class CsfExtractionResponse(BaseModel):
+    extraction: CsfExtraction
+    model: str | None
+    tool_call_log_id: UUID
+
+
+class ReceiptExtractionResponse(BaseModel):
+    extraction: ReceiptExtraction
+    model: str | None
+    tool_call_log_id: UUID
+
+
+class JevModelOutput(BaseModel):
+    """Strict schema for the Árbitro Jev: the corrected receipt plus a short reply."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    total_detectado: float | None
+    conceptos: list[ReceiptConceptOutput]
+    requiere_validacion_humana: bool
+    motivos_revision: list[str]
+    respuesta: str
+
+
+class JevChatRequest(BaseModel):
+    extraction: ReceiptExtraction
+    instruction: str = Field(min_length=2, max_length=1000)
+
+    @model_validator(mode="after")
+    def bound_prompt_size(self) -> "JevChatRequest":
+        self.instruction = self.instruction.strip()
+        if len(self.instruction) < 2:
+            raise ValueError("Escribe la corrección que necesitas")
+        if len(self.extraction.conceptos) > 100:
+            raise ValueError("El comprobante no puede tener más de 100 conceptos")
+        if any(len(item.descripcion or "") > 500 for item in self.extraction.conceptos):
+            raise ValueError("Cada descripción debe tener como máximo 500 caracteres")
+        if len(self.extraction.motivos_revision) > 50:
+            raise ValueError("Demasiados motivos de revisión")
+        return self
+
+
+class JevChatResponse(BaseModel):
+    extraction: ReceiptExtraction
+    respuesta: str
+    model: str | None
+    tool_call_log_id: UUID
+
+
+class CfdiIssuer(BaseModel):
+    rfc: str
+    name: str | None
+    tax_regime: str | None
+
+
+class CfdiConceptOut(BaseModel):
+    product_code: str | None
+    quantity: Decimal
+    unit_code: str | None
+    unit: str | None
+    description: str
+    unit_value: Decimal  # ValorUnitario: sin impuestos
+    discount: Decimal
+    amount: Decimal  # Importe: cantidad × valor unitario, sin impuestos
+    iva: Decimal
+
+
+class CfdiSupplierMatch(BaseModel):
+    id: UUID
+    name: str
+    active: bool
+    assigned_to_work: bool | None
+
+
+class CfdiExpenseDraft(BaseModel):
+    """Ready-to-submit expense lines (prices WITH taxes) whose sum equals the CFDI."""
+
+    supplier_folio: str | None
+    concept: str
+    lines: list[ExpenseLineInput]
+    iva: Decimal
+    amount: Decimal
+
+
+class CfdiExtractionResponse(BaseModel):
+    version: str
+    uuid: str | None
+    series: str | None
+    folio: str | None
+    issued_at: str | None
+    currency: str | None
+    voucher_type: str | None
+    issuer: CfdiIssuer
+    receiver_rfc: str | None
+    concepts: list[CfdiConceptOut]
+    subtotal: Decimal
+    discount: Decimal
+    iva: Decimal
+    withholdings: Decimal
+    total: Decimal
+    supplier: CfdiSupplierMatch | None
+    expense: CfdiExpenseDraft
+    requires_review: bool
+    warnings: list[str]

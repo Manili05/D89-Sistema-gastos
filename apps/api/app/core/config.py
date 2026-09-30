@@ -17,6 +17,19 @@ class Settings(BaseSettings):
     neodata_max_bytes: int = 10 * 1024 * 1024
     hmac_tolerance_seconds: int = 300
     hermes_sandbox_mode: bool = True
+    # AI extraction goes through the LiteLLM proxy with a budgeted virtual key.
+    # Model names are LiteLLM aliases so the provider stays swappable by config.
+    litellm_base_url: str = "http://litellm:4000/v1"
+    litellm_api_key: str = ""
+    ai_csf_model: str = "d89-documentos"
+    ai_receipt_model: str = "d89-vision"
+    # Text-only reasoning over an existing extraction; no vision needed.
+    ai_jev_model: str = "d89-documentos"
+    # Covers the LiteLLM fallback chain (up to 3 models × 30 s); Nginx allows 120 s.
+    ai_timeout_seconds: float = 100
+    ai_max_upload_bytes: int = 10 * 1024 * 1024
+    # A CFDI is a few KB; the cap bounds parsing work on untrusted XML.
+    cfdi_max_bytes: int = 2 * 1024 * 1024
 
 
 @lru_cache

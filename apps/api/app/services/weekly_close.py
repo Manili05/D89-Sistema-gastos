@@ -1,5 +1,5 @@
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from enum import StrEnum
 from uuid import UUID, uuid4
@@ -30,6 +30,8 @@ class WeeklyClose:
     reopened_by: UUID | None = None
     reopened_at: datetime | None = None
     reopen_reason: str | None = None
+    revision: int = 1
+    previous: "WeeklyClose | None" = None
 
 
 def close_week(
@@ -39,10 +41,12 @@ def close_week(
     admin_id: UUID,
     expenses: tuple[CloseExpenseSnapshot, ...],
 ) -> WeeklyClose:
-    if not 1 <= iso_week <= 53:
-        raise ValueError("semana ISO inválida")
-    if not expenses:
-        raise ValueError("el cierre debe incluir al menos un gasto")
+    try:
+        date.fromisocalendar(iso_year, iso_week, 1)
+    except ValueError as exc:
+        raise ValueError("semana ISO inválida") from exc
+    if any(expense.state != "validado" for expense in expenses):
+        raise ValueError("el cierre sólo incluye gastos validados")
     return WeeklyClose(
         id=uuid4(),
         work_id=work_id,
@@ -68,3 +72,12 @@ def reopen_week(close: WeeklyClose, admin_id: UUID, reason: str) -> WeeklyClose:
         reopened_at=datetime.now(UTC),
         reopen_reason=normalized_reason,
     )
+
+
+def reclose_week(
+    close: WeeklyClose, admin_id: UUID, expenses: tuple[CloseExpenseSnapshot, ...]
+) -> WeeklyClose:
+    if close.state is not CloseState.REOPENED:
+        raise ValueError("solo se puede volver a cerrar una semana reabierta")
+    next_close = close_week(close.work_id, close.iso_year, close.iso_week, admin_id, expenses)
+    return replace(next_close, id=close.id, revision=close.revision + 1, previous=close)

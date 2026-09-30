@@ -2,7 +2,7 @@ import hashlib
 from collections import Counter
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -27,6 +27,7 @@ from app.models import (
     WorkDelete,
     WorkUpdate,
 )
+from app.services.expense_totals import ExpenseTotals, ExpenseTotalsError, compute_totals
 from app.services.neodata import normalized_text
 
 
@@ -154,8 +155,12 @@ def update_work(
             returning id, nombre, ubicacion, fecha_inicio, fecha_fin, estado::text as estado
             """,
             (
-                payload.name.strip(), payload.location, payload.start_date,
-                payload.end_date, payload.state, work_id,
+                payload.name.strip(),
+                payload.location,
+                payload.start_date,
+                payload.end_date,
+                payload.state,
+                work_id,
             ),
         ).fetchone()
         if row is None:
@@ -235,8 +240,9 @@ def delete_work(
         assert counts is not None
         receipt_rows = connection.execute(
             """
-            select comprobante_path from public.gasto
-            where obra_id = %s and comprobante_path is not null
+            select k.ruta as comprobante_path
+            from public.gasto_comprobante k join public.gasto g on g.id = k.gasto_id
+            where g.obra_id = %s
             """,
             (work_id,),
         ).fetchall()
@@ -325,7 +331,14 @@ def work_catalog(settings: Settings, user: UserContext, work_id: UUID) -> dict[s
             (work_id,),
         ).fetchall()
         suppliers = connection.execute(
-            "select id, nombre from public.catalogo_proveedor where activo order by nombre"
+            """
+            select p.id, p.nombre
+            from public.catalogo_proveedor p
+            join public.obra_proveedor op on op.proveedor_id = p.id
+            where op.obra_id = %s and op.activo and p.activo
+            order by p.nombre
+            """,
+            (work_id,),
         ).fetchall()
         expense_partidas = connection.execute(
             """
@@ -355,14 +368,116 @@ def work_catalog(settings: Settings, user: UserContext, work_id: UUID) -> dict[s
             "expense_subitems": list(expense_subitems),
             "expense_categories": list(expense_categories),
             "suppliers": list(suppliers),
+            # Quick supplier creation from the expense form is an admin action.
+            "permissions": {"can_manage_suppliers": user.role is Role.ADMIN},
         }
 
 
-def create_expense(
-    settings: Settings, user: UserContext, payload: ExpenseCreate
+def _totals_or_422(payload: ExpenseCreate | ExpenseUpdate) -> ExpenseTotals:
+    try:
+        return compute_totals(list(payload.lines), payload.iva)
+    except ExpenseTotalsError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+
+
+def _insert_lines(
+    connection: psycopg.Connection[dict[str, Any]],
+    expense_id: UUID,
+    payload: ExpenseCreate | ExpenseUpdate,
+    totals: ExpenseTotals,
+) -> None:
+    with connection.cursor() as cursor:
+        cursor.executemany(
+            """
+            insert into public.gasto_concepto
+              (gasto_id, posicion, cantidad, unidad, descripcion,
+               precio_unitario, descuento, importe_concepto)
+            values (%s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            [
+                (
+                    expense_id,
+                    position,
+                    line.quantity,
+                    line.unit,
+                    line.description,
+                    line.unit_price,
+                    line.discount,
+                    amount,
+                )
+                for position, (line, amount) in enumerate(
+                    zip(payload.lines, totals.line_amounts, strict=True), start=1
+                )
+            ],
+        )
+
+
+def _expense_detail(
+    connection: psycopg.Connection[dict[str, Any]], expense_id: UUID
 ) -> dict[str, Any]:
+    """Header + lines + receipts, shaped as models.ExpenseResponse."""
+    row = connection.execute(
+        """
+        select g.id, g.folio, g.folio_proveedor as supplier_folio, g.obra_id as work_id,
+               g.fecha as spent_on, g.concepto as concept, g.subtotal, g.iva,
+               g.importe as amount, g.iva_desglosado as iva_breakdown,
+               g.estado::text as state,
+               coalesce((
+                 select jsonb_agg(jsonb_build_object(
+                   -- numeric as text: JSON numbers would come back as float.
+                   'position', c.posicion, 'quantity', c.cantidad::text, 'unit', c.unidad,
+                   'description', c.descripcion, 'unit_price', c.precio_unitario::text,
+                   'discount', c.descuento::text, 'amount', c.importe_concepto::text)
+                   order by c.posicion)
+                 from public.gasto_concepto c where c.gasto_id = g.id), '[]'::jsonb) as lines,
+               coalesce((
+                 select jsonb_agg(jsonb_build_object(
+                   'id', k.id, 'path', k.ruta, 'kind', k.tipo, 'created_at', k.creado_en)
+                   order by k.creado_en, k.id)
+                 from public.gasto_comprobante k where k.gasto_id = g.id), '[]'::jsonb)
+                 as receipts
+        from public.gasto g where g.id = %s
+        """,
+        (expense_id,),
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Gasto inexistente")
+    return row
+
+
+RECEIPT_KINDS = {"pdf": "pdf", "xml": "xml", "jpg": "imagen", "jpeg": "imagen",
+                 "png": "imagen", "webp": "imagen"}
+
+
+def _receipt_kind(path: str) -> str:
+    extension = path.rsplit(".", 1)[-1].lower() if "." in path else ""
+    kind = RECEIPT_KINDS.get(extension)
+    if kind is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "El comprobante debe ser PDF, XML (CFDI) o imagen JPEG, PNG o WebP",
+        )
+    return kind
+
+
+def get_expense(settings: Settings, user: UserContext, expense_id: UUID) -> dict[str, Any]:
+    with transaction(settings) as connection:
+        target = connection.execute(
+            "select obra_id from public.gasto where id = %s and eliminado_en is null",
+            (expense_id,),
+        ).fetchone()
+        if target is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Gasto inexistente")
+        require_work_access(connection, user, target["obra_id"])
+        return _expense_detail(connection, expense_id)
+
+
+def create_expense(settings: Settings, user: UserContext, payload: ExpenseCreate) -> dict[str, Any]:
+    totals = _totals_or_422(payload)
     with transaction(settings) as connection:
         require_work_access(connection, user, payload.work_id)
+        if _expense_locked(connection, payload.work_id, payload.spent_on):
+            raise HTTPException(status.HTTP_409_CONFLICT, "La semana del gasto está cerrada")
         area = connection.execute(
             """select id from public.area
                where id = %s and obra_id = %s and vigente and seleccionable""",
@@ -414,38 +529,33 @@ def create_expense(
             budget_class_id = budget["clase_id"]
             budget_category_id = budget["categoria_id"]
 
-        if payload.supplier_id is not None:
-            supplier = connection.execute(
-                "select id from public.catalogo_proveedor where id = %s and activo",
-                (payload.supplier_id,),
-            ).fetchone()
-            if supplier is None:
-                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Proveedor inactivo")
-            supplier_id = supplier["id"]
-        else:
-            supplier = connection.execute(
-                """
-                insert into public.catalogo_proveedor (nombre, creado_por)
-                values (%s, %s)
-                on conflict (nombre_normalizado)
-                do update set nombre = excluded.nombre, activo = true
-                returning id
-                """,
-                (payload.supplier_name, user.id),
-            ).fetchone()
-            assert supplier is not None
-            supplier_id = supplier["id"]
+        supplier = connection.execute(
+            """
+            select p.id
+            from public.catalogo_proveedor p
+            join public.obra_proveedor op on op.proveedor_id = p.id
+            where p.id = %s and p.activo and op.obra_id = %s and op.activo
+            """,
+            (payload.supplier_id, payload.work_id),
+        ).fetchone()
+        if supplier is None:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "El proveedor no está activo o asignado a la obra",
+            )
+        supplier_id = supplier["id"]
 
         row = connection.execute(
             """
             insert into public.gasto (
               obra_id, area_id, clase_id, categoria_id, partida_id,
               partida_gasto_id, subpartida_gasto_id, categoria_gasto_id, proveedor_id,
-              fecha, concepto, folio, importe, estado, origen, creado_por
-            ) values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'web', %s)
-            returning id, obra_id, area_id, partida_gasto_id, subpartida_gasto_id,
-                      categoria_gasto_id, partida_id, proveedor_id, fecha, concepto, folio,
-                      importe, estado::text as estado, creado_en
+              fecha, concepto, folio_proveedor, importe, subtotal, iva, iva_desglosado,
+              estado, origen, creado_por
+            ) values (
+              %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, true, %s, 'web', %s
+            )
+            returning id, folio
             """,
             (
                 payload.work_id,
@@ -459,13 +569,16 @@ def create_expense(
                 supplier_id,
                 payload.spent_on,
                 payload.concept,
-                payload.folio,
-                payload.amount,
-                payload.state.value,
+                payload.supplier_folio,
+                totals.amount,
+                totals.subtotal,
+                totals.iva,
+                "pendiente",  # Never trust the client to perform administrative validation.
                 user.id,
             ),
         ).fetchone()
         assert row is not None
+        _insert_lines(connection, row["id"], payload, totals)
         connection.execute(
             """
             insert into public.audit_log_negocio
@@ -477,7 +590,11 @@ def create_expense(
                 user.id,
                 Jsonb(
                     {
-                        "importe": str(payload.amount),
+                        "folio": row["folio"],
+                        "importe": str(totals.amount),
+                        "subtotal": str(totals.subtotal),
+                        "iva": str(totals.iva),
+                        "conceptos": len(payload.lines),
                         "partida_gasto_id": str(payload.expense_item_id),
                         "subpartida_gasto_id": str(payload.expense_subitem_id),
                         "categoria_gasto_id": str(payload.expense_category_id),
@@ -486,18 +603,17 @@ def create_expense(
                 ),
             ),
         )
-        return row
+        return _expense_detail(connection, row["id"])
 
 
-def list_expenses(
-    settings: Settings, user: UserContext, work_id: UUID
-) -> list[dict[str, Any]]:
+def list_expenses(settings: Settings, user: UserContext, work_id: UUID) -> list[dict[str, Any]]:
     with transaction(settings) as connection:
         require_work_access(connection, user, work_id)
         return list(
             connection.execute(
                 """
-                select g.id, g.fecha, g.concepto, g.folio, g.importe,
+                select g.id, g.fecha, g.concepto, g.folio, g.folio_proveedor,
+                       g.subtotal, g.iva, g.importe, g.iva_desglosado,
                        g.estado::text as estado, a.nombre as area,
                        coalesce(cpg.nombre, cc.nombre, '') as partida,
                        coalesce(csg.nombre, '') as subpartida,
@@ -528,7 +644,7 @@ def attach_receipt(
     with transaction(settings) as connection:
         expense = connection.execute(
             """select obra_id, creado_por, fecha, estado::text as estado
-               from public.gasto where id = %s and eliminado_en is null""",
+               from public.gasto where id = %s and eliminado_en is null for update""",
             (expense_id,),
         ).fetchone()
         if expense is None:
@@ -539,26 +655,52 @@ def attach_receipt(
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_ENTITY, "Ruta de comprobante inválida"
             )
+        kind = _receipt_kind(path)
         if user.role is not Role.ADMIN and expense["creado_por"] != user.id:
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Solo el autor adjunta el comprobante")
         if expense["estado"] == "validado":
             raise HTTPException(status.HTTP_409_CONFLICT, "El gasto validado está bloqueado")
         if _expense_locked(connection, expense["obra_id"], expense["fecha"]):
             raise HTTPException(status.HTTP_409_CONFLICT, "La semana del gasto está cerrada")
-        row = connection.execute(
-            """
-            update public.gasto set comprobante_path = %s, editado_por = %s, editado_en = now()
-            where id = %s returning id, comprobante_path
-            """,
-            (path, user.id, expense_id),
+        stored = connection.execute(
+            """select exists(select 1 from storage.objects
+                 where bucket_id = 'comprobantes' and name = %s) as receipt_exists""",
+            (path,),
         ).fetchone()
-        assert row is not None
-        return row
+        if not stored or not stored["receipt_exists"]:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY, "El comprobante no existe en Storage"
+            )
+        # Appends one more file (PDF, XML CFDI or image); the same path is idempotent.
+        added = connection.execute(
+            """
+            insert into public.gasto_comprobante (gasto_id, ruta, tipo, creado_por)
+            values (%s, %s, %s, %s)
+            on conflict (ruta) do nothing
+            returning id
+            """,
+            (expense_id, path, kind, user.id),
+        ).fetchone()
+        if added is not None:
+            connection.execute(
+                "update public.gasto set editado_por = %s, editado_en = now() where id = %s",
+                (user.id, expense_id),
+            )
+            _audit_expense(
+                connection, expense_id, user, "adjuntar_comprobante", {"tipo": kind, "ruta": path}
+            )
+        return _expense_detail(connection, expense_id)
+
+
+def _lock_work_expenses(connection: psycopg.Connection, work_id: UUID) -> None:
+    # Shared by expense mutations and closes, including weeks without a close row.
+    connection.execute("select pg_advisory_xact_lock(hashtextextended(%s, 0))", (str(work_id),))
 
 
 def _expense_locked(
     connection: psycopg.Connection[dict[str, Any]], work_id: UUID, spent_on: date
 ) -> bool:
+    _lock_work_expenses(connection, work_id)
     row = connection.execute(
         """
         select exists (
@@ -623,11 +765,12 @@ def list_work_expenses(
             params.append(area_id)
         if query:
             clauses.append(
-                "(g.concepto ilike %s or coalesce(g.folio, '') ilike %s "
+                "(g.concepto ilike %s or g.folio ilike %s "
+                "or coalesce(g.folio_proveedor, '') ilike %s "
                 "or coalesce(prov.nombre, '') ilike %s)"
             )
             wildcard = f"%{query.strip()}%"
-            params.extend([wildcard, wildcard, wildcard])
+            params.extend([wildcard, wildcard, wildcard, wildcard])
         where = " and ".join(clauses)
         total = connection.execute(
             f"""select count(*) as total from public.gasto g
@@ -637,8 +780,19 @@ def list_work_expenses(
         ).fetchone()
         rows = connection.execute(
             f"""
-            select g.id, g.fecha, g.concepto, g.folio, g.importe,
-                   g.estado::text as estado, g.comprobante_path,
+            select g.id, g.fecha, g.concepto, g.folio, g.folio_proveedor,
+                   g.subtotal, g.iva, g.importe, g.iva_desglosado,
+                   g.estado::text as estado,
+                   (select count(*) from public.gasto_concepto c where c.gasto_id = g.id)
+                     as line_count,
+                   coalesce((
+                     select jsonb_agg(jsonb_build_object('id', k.id, 'path', k.ruta, 'kind', k.tipo)
+                       order by k.creado_en, k.id)
+                     from public.gasto_comprobante k where k.gasto_id = g.id), '[]'::jsonb)
+                     as comprobantes,
+                   -- Compatibility for the current UI: first receipt of the expense.
+                   (select k.ruta from public.gasto_comprobante k where k.gasto_id = g.id
+                    order by k.creado_en, k.id limit 1) as comprobante_path,
                    g.motivo_revision, g.creado_por, g.creado_en,
                    exists (
                      select 1 from public.cierre_semanal c
@@ -687,9 +841,7 @@ def list_work_expenses(
             )
             item["can_edit"] = can_change
             item["can_cancel"] = can_change
-            item["can_resubmit"] = (
-                can_change and item["estado"] == "rechazado"
-            )
+            item["can_resubmit"] = can_change and item["estado"] == "rechazado"
             items.append(item)
         return {
             "items": items,
@@ -705,6 +857,7 @@ def update_expense(
     expense_id: UUID,
     payload: ExpenseUpdate,
 ) -> dict[str, Any]:
+    totals = _totals_or_422(payload)
     with transaction(settings) as connection:
         expense = connection.execute(
             "select * from public.gasto where id = %s and eliminado_en is null for update",
@@ -719,6 +872,9 @@ def update_expense(
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Solo el autor corrige este gasto")
         if _expense_locked(connection, expense["obra_id"], expense["fecha"]):
             raise HTTPException(status.HTTP_409_CONFLICT, "La semana del gasto está cerrada")
+
+        if _expense_locked(connection, expense["obra_id"], payload.spent_on):
+            raise HTTPException(status.HTTP_409_CONFLICT, "La semana de destino está cerrada")
 
         area = connection.execute(
             """select id from public.area
@@ -755,41 +911,69 @@ def update_expense(
             budget_class_id = budget["clase_id"]
             budget_category_id = budget["categoria_id"]
 
-        if payload.supplier_id:
-            supplier = connection.execute(
-                "select id from public.catalogo_proveedor where id = %s and activo",
-                (payload.supplier_id,),
-            ).fetchone()
-        else:
-            supplier = connection.execute(
-                """insert into public.catalogo_proveedor(nombre, creado_por) values (%s, %s)
-                   on conflict (nombre_normalizado) do update
-                   set nombre = excluded.nombre, activo = true
-                   returning id""",
-                (payload.supplier_name, user.id),
-            ).fetchone()
+        supplier = connection.execute(
+            """
+            select p.id
+            from public.catalogo_proveedor p
+            left join public.obra_proveedor op
+              on op.proveedor_id = p.id and op.obra_id = %s and op.activo
+            where p.id = %s and p.activo
+              and (op.id is not null or p.id = %s)
+            """,
+            (expense["obra_id"], payload.supplier_id, expense["proveedor_id"]),
+        ).fetchone()
         if supplier is None:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Proveedor inválido")
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "El proveedor no está activo o asignado a la obra",
+            )
 
         row = connection.execute(
             """
             update public.gasto set area_id = %s, clase_id = %s, categoria_id = %s,
               partida_id = %s, partida_gasto_id = %s, subpartida_gasto_id = %s,
               categoria_gasto_id = %s, proveedor_id = %s, fecha = %s, concepto = %s,
-              folio = %s, importe = %s, editado_por = %s, editado_en = now()
+              folio_proveedor = %s, importe = %s, subtotal = %s, iva = %s,
+              iva_desglosado = true, editado_por = %s, editado_en = now()
             where id = %s
-            returning id, obra_id, fecha, concepto, folio, importe, estado::text as estado
+            returning id
             """,
             (
-                payload.area_id, budget_class_id, budget_category_id, budget_partida_id,
-                payload.expense_item_id, payload.expense_subitem_id,
-                payload.expense_category_id, supplier["id"], payload.spent_on,
-                payload.concept, payload.folio, payload.amount, user.id, expense_id,
+                payload.area_id,
+                budget_class_id,
+                budget_category_id,
+                budget_partida_id,
+                payload.expense_item_id,
+                payload.expense_subitem_id,
+                payload.expense_category_id,
+                supplier["id"],
+                payload.spent_on,
+                payload.concept,
+                payload.supplier_folio,
+                totals.amount,
+                totals.subtotal,
+                totals.iva,
+                user.id,
+                expense_id,
             ),
         ).fetchone()
         assert row is not None
-        _audit_expense(connection, expense_id, user, "editar", {"importe": str(payload.amount)})
-        return row
+        connection.execute("delete from public.gasto_concepto where gasto_id = %s", (expense_id,))
+        _insert_lines(connection, expense_id, payload, totals)
+        _audit_expense(
+            connection,
+            expense_id,
+            user,
+            "editar",
+            {
+                "importe_anterior": str(expense["importe"]),
+                "importe": str(totals.amount),
+                "subtotal": str(totals.subtotal),
+                "iva": str(totals.iva),
+                "conceptos": len(payload.lines),
+            },
+        )
+        return _expense_detail(connection, expense_id)
 
 
 def review_expense(
@@ -801,10 +985,11 @@ def review_expense(
 ) -> dict[str, Any]:
     with transaction(settings) as connection:
         expense = connection.execute(
-            """select g.*, exists(select 1 from storage.objects so
-                 where so.bucket_id = 'comprobantes'
-                   and so.name = g.comprobante_path) as receipt_exists
-                 from public.gasto g where g.id = %s and g.eliminado_en is null for update""",
+            """select g.*, exists(select 1 from public.gasto_comprobante k
+                 join storage.objects so on so.bucket_id = 'comprobantes' and so.name = k.ruta
+                 where k.gasto_id = g.id) as receipt_exists
+                 from public.gasto g where g.id = %s and g.eliminado_en is null
+                 for update of g""",
             (expense_id,),
         ).fetchone()
         if expense is None:
@@ -863,11 +1048,11 @@ def validate_expenses_batch(
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Solo administración valida gastos")
         unique_ids = list(dict.fromkeys(expense_ids))
         rows = connection.execute(
-            """select g.*, exists(select 1 from storage.objects so
-                 where so.bucket_id = 'comprobantes'
-                   and so.name = g.comprobante_path) as receipt_exists
+            """select g.*, exists(select 1 from public.gasto_comprobante k
+                 join storage.objects so on so.bucket_id = 'comprobantes' and so.name = k.ruta
+                 where k.gasto_id = g.id) as receipt_exists
                  from public.gasto g where g.obra_id = %s and g.id = any(%s)
-                   and g.eliminado_en is null for update""",
+                   and g.eliminado_en is null for update of g""",
             (work_id, unique_ids),
         ).fetchall()
         if len(rows) != len(unique_ids):
@@ -924,9 +1109,7 @@ def cancel_expense(
         return row
 
 
-def list_incomes(
-    settings: Settings, user: UserContext, work_id: UUID
-) -> list[dict[str, Any]]:
+def list_incomes(settings: Settings, user: UserContext, work_id: UUID) -> list[dict[str, Any]]:
     with transaction(settings) as connection:
         require_work_access(connection, user, work_id)
         return list(
@@ -941,9 +1124,7 @@ def list_incomes(
         )
 
 
-def create_income(
-    settings: Settings, user: UserContext, payload: IncomeCreate
-) -> dict[str, Any]:
+def create_income(settings: Settings, user: UserContext, payload: IncomeCreate) -> dict[str, Any]:
     with transaction(settings) as connection:
         require_work_access(connection, user, payload.work_id)
         if user.role is not Role.ADMIN:
@@ -970,9 +1151,7 @@ def create_income(
         return row
 
 
-def list_subcontracts(
-    settings: Settings, user: UserContext, work_id: UUID
-) -> list[dict[str, Any]]:
+def list_subcontracts(settings: Settings, user: UserContext, work_id: UUID) -> list[dict[str, Any]]:
     with transaction(settings) as connection:
         require_work_access(connection, user, work_id)
         return list(
@@ -1139,7 +1318,9 @@ def work_overview(
               count(*) filter (where g.estado = 'pendiente') as pending_count,
               coalesce(sum(g.importe) filter (where g.estado = 'rechazado'), 0) as rejected,
               count(*) filter (where g.estado = 'rechazado') as rejected_count,
-              count(*) filter (where g.estado = 'pendiente' and g.comprobante_path is null)
+              count(*) filter (
+                where g.estado = 'pendiente' and not exists (
+                  select 1 from public.gasto_comprobante k where k.gasto_id = g.id))
                 as missing_receipts
             from public.gasto g
             where g.obra_id = %(work)s and g.eliminado_en is null
@@ -1191,7 +1372,8 @@ def work_overview(
         for row in area_rows:
             row["available"] = row["budget"] - row["validated"]
             row["execution_percent"] = (
-                Decimal("0") if not row["budget"]
+                Decimal("0")
+                if not row["budget"]
                 else row["validated"] / row["budget"] * Decimal("100")
             )
 
@@ -1246,17 +1428,83 @@ def list_weekly_closes(
             connection.execute(
                 """
                 select c.id, c.anio_iso, c.semana_iso, c.estado::text as estado,
-                       c.cerrado_en, c.reabierto_en, c.motivo_reapertura,
+                       c.cerrado_en, c.reabierto_en, c.motivo_reapertura, c.revision,
                        count(cg.gasto_id) as expense_count,
                        coalesce(sum(cg.importe_al_cierre), 0) as amount
                 from public.cierre_semanal c
-                left join public.cierre_semanal_gasto cg on cg.cierre_id = c.id
+                left join public.cierre_semanal_gasto cg
+                  on cg.cierre_id = c.id and cg.revision = c.revision
                 where c.obra_id = %s group by c.id
                 order by c.anio_iso desc, c.semana_iso desc
                 """,
                 (work_id,),
             ).fetchall()
         )
+
+
+def weekly_close_preview(
+    settings: Settings, user: UserContext, work_id: UUID, iso_year: int, iso_week: int
+) -> dict[str, Any]:
+    try:
+        start = date.fromisocalendar(iso_year, iso_week, 1)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Semana ISO inválida") from exc
+    end = start + timedelta(days=6)
+    with transaction(settings) as connection:
+        require_work_access(connection, user, work_id)
+        _lock_work_expenses(connection, work_id)
+        expenses = connection.execute(
+            """select id, fecha, concepto, importe, estado::text as estado,
+                      origen::text as origen
+               from public.gasto where obra_id = %s and eliminado_en is null
+                 and fecha between %s and %s order by fecha, creado_en, id""",
+            (work_id, start, end),
+        ).fetchall()
+        close = connection.execute(
+            """select id, estado::text as estado, revision, cerrado_en, reabierto_en,
+                      motivo_reapertura from public.cierre_semanal
+               where obra_id = %s and anio_iso = %s and semana_iso = %s""",
+            (work_id, iso_year, iso_week),
+        ).fetchone()
+        history = []
+        revisions = []
+        if close:
+            history = connection.execute(
+                """select a.accion, a.creado_en, a.detalle_json, p.nombre as autor
+                   from public.audit_log_negocio a
+                   join public.perfil_usuario p on p.id = a.usuario_id
+                   where a.entidad = 'cierre_semanal' and a.entidad_id = %s
+                   order by a.creado_en, a.id""",
+                (close["id"],),
+            ).fetchall()
+            revisions = connection.execute(
+                """select revision, count(*) as expense_count,
+                          sum(importe_al_cierre) as amount
+                   from public.cierre_semanal_gasto where cierre_id = %s
+                   group by revision order by revision""",
+                (close["id"],),
+            ).fetchall()
+        summary: dict[str, Any] = {"count": len(expenses)}
+        for state in ("pendiente", "validado", "rechazado"):
+            selected = [expense for expense in expenses if expense["estado"] == state]
+            summary[state] = {
+                "count": len(selected),
+                "amount": sum((row["importe"] for row in selected), Decimal(0)),
+            }
+        summary["amount"] = summary["pendiente"]["amount"] + summary["validado"]["amount"]
+        return {
+            "work_id": work_id,
+            "iso_year": iso_year,
+            "iso_week": iso_week,
+            "date_from": start,
+            "date_to": end,
+            "summary": summary,
+            "expenses": list(expenses),
+            "close": close,
+            "history": list(history),
+            "revisions": list(revisions),
+            "permissions": {"can_manage": user.role is Role.ADMIN},
+        }
 
 
 def report_expenses(
@@ -1276,7 +1524,8 @@ def report_expenses(
                    coalesce(csg.nombre, '') as "Subpartida",
                    coalesce(cag.nombre, cat.nombre, '') as "Categoría",
                    coalesce(prov.nombre, '') as "Proveedor", g.concepto as "Concepto",
-                   coalesce(g.folio, '') as "Folio", g.importe as "Importe",
+                   g.folio as "Folio", coalesce(g.folio_proveedor, '') as "Folio proveedor",
+                   g.subtotal as "Subtotal", g.iva as "IVA", g.importe as "Importe",
                    g.estado::text as "Estado"
             from public.gasto g
             join public.area a on a.id = g.area_id
@@ -1294,9 +1543,7 @@ def report_expenses(
         return work["nombre"], list(rows)
 
 
-def close_week(
-    settings: Settings, user: UserContext, payload: WeeklyCloseCreate
-) -> dict[str, Any]:
+def close_week(settings: Settings, user: UserContext, payload: WeeklyCloseCreate) -> dict[str, Any]:
     with transaction(settings) as connection:
         require_work_access(connection, user, payload.work_id)
         if user.role is not Role.ADMIN:
@@ -1307,6 +1554,7 @@ def close_week(
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_ENTITY, "Semana ISO inválida"
             ) from exc
+        _lock_work_expenses(connection, payload.work_id)
         existing = connection.execute(
             """
             select id, estado::text as estado from public.cierre_semanal
@@ -1314,8 +1562,8 @@ def close_week(
             """,
             (payload.work_id, payload.iso_year, payload.iso_week),
         ).fetchone()
-        if existing is not None:
-            raise HTTPException(status.HTTP_409_CONFLICT, "La semana ya tiene cierre")
+        if existing is not None and existing["estado"] == "cerrado":
+            raise HTTPException(status.HTTP_409_CONFLICT, "La semana ya está cerrada")
         pending = connection.execute(
             """
             select count(*) as total from public.gasto g
@@ -1335,7 +1583,12 @@ def close_week(
             insert into public.cierre_semanal
               (obra_id, anio_iso, semana_iso, cerrado_por)
             values (%s, %s, %s, %s)
-            returning id, obra_id, anio_iso, semana_iso, estado::text as estado, cerrado_en
+            on conflict (obra_id, anio_iso, semana_iso) do update
+              set estado = 'cerrado', cerrado_por = excluded.cerrado_por, cerrado_en = now(),
+                  revision = cierre_semanal.revision + 1,
+                  reabierto_por = null, reabierto_en = null, motivo_reapertura = null
+            returning id, obra_id, anio_iso, semana_iso, estado::text as estado,
+                      cerrado_en, revision
             """,
             (payload.work_id, payload.iso_year, payload.iso_week, user.id),
         ).fetchone()
@@ -1343,19 +1596,20 @@ def close_week(
         connection.execute(
             """
             insert into public.cierre_semanal_gasto
-              (cierre_id, gasto_id, importe_al_cierre, estado_al_cierre)
-            select %s, g.id, g.importe, g.estado
+              (cierre_id, revision, gasto_id, importe_al_cierre, estado_al_cierre)
+            select %s, %s, g.id, g.importe, g.estado
             from public.gasto g
             where g.obra_id = %s and g.eliminado_en is null
               and g.estado = 'validado'
               and extract(isoyear from g.fecha)::integer = %s
               and extract(week from g.fecha)::integer = %s
             """,
-            (close["id"], payload.work_id, payload.iso_year, payload.iso_week),
+            (close["id"], close["revision"], payload.work_id, payload.iso_year, payload.iso_week),
         )
         count = connection.execute(
-            "select count(*) as total from public.cierre_semanal_gasto where cierre_id = %s",
-            (close["id"],),
+            "select count(*) as total from public.cierre_semanal_gasto "
+            "where cierre_id = %s and revision = %s",
+            (close["id"], close["revision"]),
         ).fetchone()
         close["expense_count"] = count["total"] if count else 0
         connection.execute(
@@ -1364,7 +1618,17 @@ def close_week(
               (entidad, entidad_id, accion, usuario_id, canal, detalle_json)
             values ('cierre_semanal', %s, 'cerrar_lote', %s, 'web', %s)
             """,
-            (close["id"], user.id, Jsonb({"gastos": close["expense_count"]})),
+            (
+                close["id"],
+                user.id,
+                Jsonb(
+                    {
+                        "gastos": close["expense_count"],
+                        "revision": close["revision"],
+                        "transicion": "reabierto_cerrado" if existing else "inicial_cerrado",
+                    }
+                ),
+            ),
         )
         return close
 
@@ -1376,6 +1640,16 @@ def reopen_week(
         require_active_profile(connection, user)
         if user.role is not Role.ADMIN:
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Solo administración reabre semanas")
+        reason = reason.strip()
+        if len(reason) < 10:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Motivo insuficiente")
+        target = connection.execute(
+            "select obra_id from public.cierre_semanal where id = %s", (close_id,)
+        ).fetchone()
+        if target is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Cierre inexistente")
+        require_work_access(connection, user, target["obra_id"])
+        _lock_work_expenses(connection, target["obra_id"])
         row = connection.execute(
             """
             update public.cierre_semanal
@@ -1383,7 +1657,7 @@ def reopen_week(
                 motivo_reapertura = %s
             where id = %s and estado = 'cerrado'
             returning id, obra_id, anio_iso, semana_iso, estado::text as estado,
-                      reabierto_en, motivo_reapertura
+                      reabierto_en, motivo_reapertura, revision
             """,
             (user.id, reason, close_id),
         ).fetchone()
@@ -1395,7 +1669,7 @@ def reopen_week(
               (entidad, entidad_id, accion, usuario_id, canal, detalle_json)
             values ('cierre_semanal', %s, 'reabrir', %s, 'web', %s)
             """,
-            (close_id, user.id, Jsonb({"motivo": reason})),
+            (close_id, user.id, Jsonb({"motivo": reason, "revision": row["revision"]})),
         )
         return row
 
@@ -1637,9 +1911,7 @@ def _consolidate_preview_items(items: list[dict[str, Any]]) -> list[dict[str, An
         target["quantity"] = str(
             Decimal(str(target["quantity"])) + Decimal(str(source["quantity"]))
         )
-        target["amount"] = str(
-            Decimal(str(target["amount"])) + Decimal(str(source["amount"]))
-        )
+        target["amount"] = str(Decimal(str(target["amount"])) + Decimal(str(source["amount"])))
 
     for item in consolidated.values():
         quantity = Decimal(str(item["quantity"]))

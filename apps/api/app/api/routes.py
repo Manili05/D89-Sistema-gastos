@@ -1,4 +1,5 @@
 from datetime import UTC, date, datetime
+from decimal import Decimal
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -19,25 +20,42 @@ from fastapi.responses import Response
 from app.core.config import Settings, get_settings
 from app.core.security import AdminUser, CurrentUser, HermesSignature
 from app.models import (
+    CfdiExtractionResponse,
+    CsfExtractionResponse,
     ExpenseBatchReview,
     ExpenseCancel,
     ExpenseCreate,
+    ExpenseResponse,
     ExpenseReview,
     ExpenseUpdate,
     HealthResponse,
     ImportConfirm,
     ImportPreviewUpdate,
     IncomeCreate,
+    JevChatRequest,
+    JevChatResponse,
+    ReceiptExtractionResponse,
     ReceiptUpdate,
     SubcontractCreate,
     SubcontractPaymentCreate,
+    SupplierArchive,
+    SupplierCreate,
+    SupplierEvaluationCreate,
+    SupplierEvaluationUpdate,
+    SupplierEvaluationVoid,
+    SupplierSpecialtyCreate,
+    SupplierSpecialtyUpdate,
+    SupplierUpdate,
     ToolDefinition,
     WeeklyCloseCreate,
     WeeklyReopen,
     WorkCreate,
     WorkDelete,
+    WorkSupplierAssignment,
     WorkUpdate,
 )
+from app.services.ai_extraction import extract_csf, extract_receipt, jev_chat
+from app.services.cfdi import extract_cfdi
 from app.services.neodata import NeodataError, parse_neodata_workbook
 from app.services.reports import build_excel_report, build_pdf_report
 from app.services.repository import (
@@ -52,6 +70,7 @@ from app.services.repository import (
     create_work,
     dashboard,
     delete_work,
+    get_expense,
     get_work,
     list_expenses,
     list_incomes,
@@ -67,8 +86,26 @@ from app.services.repository import (
     update_import_preview,
     update_work,
     validate_expenses_batch,
+    weekly_close_preview,
     work_catalog,
     work_overview,
+)
+from app.services.suppliers import (
+    archive_supplier,
+    assign_supplier_to_work,
+    create_supplier,
+    create_supplier_evaluation,
+    create_supplier_specialty,
+    get_supplier,
+    list_supplier_specialties,
+    list_suppliers,
+    restore_supplier,
+    supplier_analytics,
+    unassign_supplier_from_work,
+    update_supplier,
+    update_supplier_evaluation,
+    update_supplier_specialty,
+    void_supplier_evaluation,
 )
 from app.services.tools import WHATSAPP_TOOLS
 
@@ -146,6 +183,185 @@ def get_dashboard(
     return dashboard(settings, user)
 
 
+@router.get("/supplier-specialties", tags=["suppliers"])
+def get_supplier_specialties(
+    user: CurrentUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+    include_inactive: bool = False,
+) -> list[dict[str, Any]]:
+    return list_supplier_specialties(settings, user, include_inactive)
+
+
+@router.post("/supplier-specialties", status_code=status.HTTP_201_CREATED, tags=["suppliers"])
+def post_supplier_specialty(
+    payload: SupplierSpecialtyCreate,
+    user: AdminUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    return create_supplier_specialty(settings, user, payload)
+
+
+@router.patch("/supplier-specialties/{specialty_id}", tags=["suppliers"])
+def patch_supplier_specialty(
+    specialty_id: UUID,
+    payload: SupplierSpecialtyUpdate,
+    user: AdminUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    return update_supplier_specialty(settings, user, specialty_id, payload)
+
+
+@router.get("/suppliers/analytics", tags=["suppliers"])
+def get_supplier_analytics(
+    user: CurrentUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    return supplier_analytics(settings, user)
+
+
+@router.get("/suppliers", tags=["suppliers"])
+def get_suppliers(
+    user: CurrentUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+    q: str | None = None,
+    specialty_id: UUID | None = None,
+    min_rating: Annotated[Decimal | None, Query(ge=1, le=5)] = None,
+    active: bool | None = True,
+    include_archived: bool = False,
+    work_id: UUID | None = None,
+    sort: Annotated[str, Query(pattern="^(name|rating|jobs|spend)$")] = "name",
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 25,
+) -> dict[str, Any]:
+    return list_suppliers(
+        settings,
+        user,
+        query=q,
+        specialty_id=specialty_id,
+        min_rating=min_rating,
+        active=None if include_archived else active,
+        work_id=work_id,
+        sort=sort,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.post("/suppliers", status_code=status.HTTP_201_CREATED, tags=["suppliers"])
+def post_supplier(
+    payload: SupplierCreate,
+    user: AdminUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    return create_supplier(settings, user, payload)
+
+
+@router.get("/suppliers/{supplier_id}", tags=["suppliers"])
+def get_supplier_detail(
+    supplier_id: UUID,
+    user: CurrentUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    return get_supplier(settings, user, supplier_id)
+
+
+@router.patch("/suppliers/{supplier_id}", tags=["suppliers"])
+def patch_supplier(
+    supplier_id: UUID,
+    payload: SupplierUpdate,
+    user: AdminUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    return update_supplier(settings, user, supplier_id, payload)
+
+
+@router.delete("/suppliers/{supplier_id}", tags=["suppliers"])
+def delete_supplier(
+    supplier_id: UUID,
+    payload: SupplierArchive,
+    user: AdminUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    return archive_supplier(settings, user, supplier_id, payload)
+
+
+@router.post("/suppliers/extract-csf", response_model=CsfExtractionResponse, tags=["suppliers"])
+async def post_extract_csf(
+    admin: AdminUser,
+    file: Annotated[UploadFile, File(description="Constancia de Situación Fiscal del SAT (PDF)")],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> CsfExtractionResponse:
+    """Propose supplier fiscal data from a CSF; nothing is persisted besides tool_call_log."""
+    content = await file.read(settings.ai_max_upload_bytes + 1)
+    return await extract_csf(settings, admin, content, file.content_type)
+
+
+@router.post("/suppliers/{supplier_id}/restore", tags=["suppliers"])
+def post_supplier_restore(
+    supplier_id: UUID,
+    user: AdminUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    return restore_supplier(settings, user, supplier_id)
+
+
+@router.put("/suppliers/{supplier_id}/works/{work_id}", tags=["suppliers"])
+def put_supplier_work(
+    supplier_id: UUID,
+    work_id: UUID,
+    payload: WorkSupplierAssignment,
+    user: AdminUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    return assign_supplier_to_work(settings, user, supplier_id, work_id, payload)
+
+
+@router.delete("/suppliers/{supplier_id}/works/{work_id}", tags=["suppliers"])
+def delete_supplier_work(
+    supplier_id: UUID,
+    work_id: UUID,
+    user: AdminUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    return unassign_supplier_from_work(settings, user, supplier_id, work_id)
+
+
+@router.post(
+    "/suppliers/{supplier_id}/evaluations",
+    status_code=status.HTTP_201_CREATED,
+    tags=["suppliers"],
+)
+def post_supplier_evaluation(
+    supplier_id: UUID,
+    payload: SupplierEvaluationCreate,
+    user: AdminUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    return create_supplier_evaluation(settings, user, supplier_id, payload)
+
+
+@router.patch("/suppliers/{supplier_id}/evaluations/{evaluation_id}", tags=["suppliers"])
+def patch_supplier_evaluation(
+    supplier_id: UUID,
+    evaluation_id: UUID,
+    payload: SupplierEvaluationUpdate,
+    user: AdminUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    return update_supplier_evaluation(settings, user, supplier_id, evaluation_id, payload)
+
+
+@router.delete("/suppliers/{supplier_id}/evaluations/{evaluation_id}", tags=["suppliers"])
+def delete_supplier_evaluation(
+    supplier_id: UUID,
+    evaluation_id: UUID,
+    payload: SupplierEvaluationVoid,
+    user: AdminUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    return void_supplier_evaluation(settings, user, supplier_id, evaluation_id, payload.reason)
+
+
 @router.get("/works/{work_id}/overview", tags=["dashboard"])
 def get_work_overview(
     work_id: UUID,
@@ -173,9 +389,16 @@ def get_work_expenses(
     page_size: Annotated[int, Query(ge=1, le=100)] = 25,
 ) -> dict[str, Any]:
     return list_work_expenses(
-        settings, user, work_id, date_from=date_from, date_to=date_to,
-        expense_state=expense_state, area_id=area_id, query=q,
-        page=page, page_size=page_size,
+        settings,
+        user,
+        work_id,
+        date_from=date_from,
+        date_to=date_to,
+        expense_state=expense_state,
+        area_id=area_id,
+        query=q,
+        page=page,
+        page_size=page_size,
     )
 
 
@@ -188,7 +411,12 @@ def get_expenses(
     return list_expenses(settings, user, work_id)
 
 
-@router.post("/expenses", status_code=status.HTTP_201_CREATED, tags=["expenses"])
+@router.post(
+    "/expenses",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ExpenseResponse,
+    tags=["expenses"],
+)
 def post_expense(
     payload: ExpenseCreate,
     user: CurrentUser,
@@ -197,7 +425,9 @@ def post_expense(
     return create_expense(settings, user, payload)
 
 
-@router.patch("/expenses/{expense_id}/receipt", tags=["expenses"])
+@router.patch(
+    "/expenses/{expense_id}/receipt", response_model=ExpenseResponse, tags=["expenses"]
+)
 def patch_expense_receipt(
     expense_id: UUID,
     payload: ReceiptUpdate,
@@ -207,7 +437,17 @@ def patch_expense_receipt(
     return attach_receipt(settings, user, expense_id, payload.path)
 
 
-@router.patch("/expenses/{expense_id}", tags=["expenses"])
+@router.get("/expenses/{expense_id}", response_model=ExpenseResponse, tags=["expenses"])
+def get_expense_detail(
+    expense_id: UUID,
+    user: CurrentUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    """Header, lines and receipts of one expense (edit form)."""
+    return get_expense(settings, user, expense_id)
+
+
+@router.patch("/expenses/{expense_id}", response_model=ExpenseResponse, tags=["expenses"])
 def patch_expense(
     expense_id: UUID,
     payload: ExpenseUpdate,
@@ -215,6 +455,43 @@ def patch_expense(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> dict[str, Any]:
     return update_expense(settings, user, expense_id, payload)
+
+
+@router.post(
+    "/expenses/extract-receipt", response_model=ReceiptExtractionResponse, tags=["expenses"]
+)
+async def post_extract_receipt(
+    user: CurrentUser,
+    file: Annotated[UploadFile, File(description="Foto del ticket o nota de remisión")],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> ReceiptExtractionResponse:
+    """Propose receipt lines from an image; the server recomputes totals before answering."""
+    content = await file.read(settings.ai_max_upload_bytes + 1)
+    return await extract_receipt(settings, user, content, file.content_type)
+
+
+@router.post(
+    "/expenses/extract-xml", response_model=CfdiExtractionResponse, tags=["expenses"]
+)
+async def post_extract_cfdi(
+    user: CurrentUser,
+    file: Annotated[UploadFile, File(description="XML del CFDI (factura electrónica)")],
+    settings: Annotated[Settings, Depends(get_settings)],
+    work_id: Annotated[UUID | None, Form()] = None,
+) -> dict[str, Any]:
+    """Read a CFDI 3.3/4.0 without AI: issuer, concepts, taxes and a ready expense draft."""
+    content = await file.read(settings.cfdi_max_bytes + 1)
+    return extract_cfdi(settings, user, content, file.content_type, file.filename, work_id)
+
+
+@router.post("/expenses/jev-chat", response_model=JevChatResponse, tags=["expenses"])
+async def post_jev_chat(
+    payload: JevChatRequest,
+    user: CurrentUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> JevChatResponse:
+    """Árbitro Jev: correct a receipt extraction in natural language; nothing is persisted."""
+    return await jev_chat(settings, user, payload)
 
 
 @router.post("/expenses/{expense_id}/review", tags=["expenses"])
@@ -358,6 +635,17 @@ def get_weekly_closes(
     return list_weekly_closes(settings, user, work_id)
 
 
+@router.get("/works/{work_id}/weekly-closes/preview", tags=["closes"])
+def get_weekly_close_preview(
+    work_id: UUID,
+    user: CurrentUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+    iso_year: Annotated[int, Query(ge=2000, le=2200)],
+    iso_week: Annotated[int, Query(ge=1, le=53)],
+) -> dict[str, Any]:
+    return weekly_close_preview(settings, user, work_id, iso_year, iso_week)
+
+
 @router.post("/weekly-closes/{close_id}/reopen", tags=["closes"])
 def post_weekly_reopen(
     close_id: UUID,
@@ -404,8 +692,7 @@ async def invoke_hermes_tool(
         "tool": tool_name,
         "persisted": False,
         "message": (
-            "Validación de schema, HMAC y confirmación completada; "
-            "sin escritura en sandbox."
+            "Validación de schema, HMAC y confirmación completada; sin escritura en sandbox."
         ),
     }
 
