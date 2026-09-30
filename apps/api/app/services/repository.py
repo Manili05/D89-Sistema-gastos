@@ -14,6 +14,10 @@ from psycopg.types.json import Jsonb
 
 from app.core.config import Settings
 from app.models import (
+    EstimationCreate,
+    EstimationInput,
+    EstimationKind,
+    EstimationUpdate,
     ExpenseCreate,
     ExpenseUpdate,
     ImportPreviewUpdate,
@@ -25,13 +29,15 @@ from app.models import (
     LegacyIncomeCreate,
     Role,
     SubcontractCreate,
-    SubcontractPaymentCreate,
+    SubcontractState,
+    SubcontractUpdate,
     UserContext,
     WeeklyCloseCreate,
     WorkCreate,
     WorkDelete,
     WorkUpdate,
 )
+from app.services.estimation_totals import EstimationAmounts, estimation_amounts
 from app.services.expense_totals import ExpenseTotals, ExpenseTotalsError, compute_totals
 from app.services.neodata import normalized_text
 
@@ -283,6 +289,11 @@ def delete_work(
             )
             """,
             {"work_id": work_id},
+        )
+        connection.execute(
+            """delete from public.estimacion_subcontrato e using public.subcontrato s
+               where s.id = e.subcontrato_id and s.obra_id = %s""",
+            (work_id,),
         )
         connection.execute("delete from public.subcontrato where obra_id = %s", (work_id,))
         connection.execute("delete from public.cierre_semanal where obra_id = %s", (work_id,))
@@ -1407,82 +1418,438 @@ def create_legacy_income(
     }
 
 
-def list_subcontracts(settings: Settings, user: UserContext, work_id: UUID) -> list[dict[str, Any]]:
-    with transaction(settings) as connection:
-        require_work_access(connection, user, work_id)
-        return list(
-            connection.execute(
-                """
-                select s.id, s.subcontratista, s.concepto, s.alcance, s.monto_contratado,
-                       coalesce(sum(p.monto), 0) as pagado
-                from public.subcontrato s
-                left join public.subcontrato_pago p on p.subcontrato_id = s.id
-                where s.obra_id = %s
-                group by s.id order by s.creado_en
-                """,
-                (work_id,),
-            ).fetchall()
+SUBCONTRACT_SELECT = """
+    select s.id, s.obra_id as work_id, s.folio, s.proveedor_id as supplier_id,
+           coalesce(prov.nombre, s.subcontratista) as supplier_name,
+           s.partida_gasto_id as expense_item_id, cpg.nombre as expense_item,
+           s.subpartida_gasto_id as expense_subitem_id, csg.nombre as expense_subitem,
+           cag.nombre as category, coalesce(s.descripcion, s.alcance, s.concepto) as description,
+           s.importe_contratado as contracted_amount, s.fondo_garantia_pct as retention_percent,
+           s.estado::text as state, s.creado_en as created_at,
+           t.estimated_gross, t.paid_net, t.retained, t.advances_paid,
+           t.advances_paid - t.amortized_paid as advance_pending_amortization,
+           s.importe_contratado - t.estimated_gross as remaining_to_estimate
+    from public.subcontrato s
+    left join public.catalogo_proveedor prov on prov.id = s.proveedor_id
+    left join public.catalogo_partida_gasto cpg on cpg.id = s.partida_gasto_id
+    left join public.catalogo_subpartida_gasto csg on csg.id = s.subpartida_gasto_id
+    left join public.catalogo_categoria_gasto cag on cag.id = s.categoria_gasto_id
+    cross join lateral (
+      select
+        coalesce(sum(e.importe_bruto) filter (where e.tipo <> 'anticipo'), 0) as estimated_gross,
+        coalesce(sum(e.importe_neto) filter (where e.estado = 'pagado'), 0) as paid_net,
+        coalesce(sum(e.retencion_garantia) filter (where e.estado = 'pagado'), 0) as retained,
+        coalesce(sum(e.importe_bruto) filter (
+          where e.estado = 'pagado' and e.tipo = 'anticipo'), 0) as advances_paid,
+        coalesce(sum(e.amortizacion_anticipo) filter (where e.estado = 'pagado'), 0)
+          as amortized_paid
+      from public.estimacion_subcontrato e where e.subcontrato_id = s.id
+    ) t
+"""
+
+ESTIMATION_SELECT = """
+    select e.id, e.subcontrato_id as subcontract_id, e.numero as number, e.folio,
+           e.fecha as estimated_on, e.tipo::text as kind, e.importe_bruto as gross_amount,
+           e.amortizacion_anticipo as advance_amortization,
+           e.retencion_garantia as retention_amount, e.aditivas as additions,
+           e.deductivas as deductions, e.importe_neto as net_amount,
+           e.notas_ajustes as adjustment_notes, e.estado::text as state,
+           e.pagado_en as paid_at, pu.nombre as paid_by, e.creado_en as created_at
+    from public.estimacion_subcontrato e
+    left join public.perfil_usuario pu on pu.id = e.pagado_por
+"""
+
+
+def _audit_subcontract(connection, entity: str, entity_id: UUID, user: UserContext,
+                       action: str, detail: dict) -> None:
+    connection.execute(
+        """insert into public.audit_log_negocio
+           (entidad, entidad_id, accion, usuario_id, canal, detalle_json)
+           values (%s, %s, %s, %s, 'web', %s)""",
+        (entity, entity_id, action, user.id, Jsonb(detail)),
+    )
+
+
+def _subcontract_detail(connection: psycopg.Connection, subcontract_id: UUID) -> dict[str, Any]:
+    row = connection.execute(SUBCONTRACT_SELECT + " where s.id = %s", (subcontract_id,)).fetchone()
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Subcontrato inexistente")
+    row["estimations"] = list(connection.execute(
+        ESTIMATION_SELECT + " where e.subcontrato_id = %s order by e.numero",
+        (subcontract_id,),
+    ).fetchall())
+    return row
+
+
+def _estimation_detail(connection: psycopg.Connection, estimation_id: UUID) -> dict[str, Any]:
+    row = connection.execute(ESTIMATION_SELECT + " where e.id = %s", (estimation_id,)).fetchone()
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Estimación inexistente")
+    return row
+
+
+def _require_active(contract: dict[str, Any]) -> None:
+    if contract["estado"] != "activo":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, f"El subcontrato está {contract['estado']}"
         )
 
 
+def _require_admin(user: UserContext, message: str) -> None:
+    if user.role is not Role.ADMIN:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, message)
+
+
+def _validate_subcontract_refs(
+    connection: psycopg.Connection, work_id: UUID, supplier_id: UUID | None,
+    item_id: UUID | None, subitem_id: UUID | None,
+) -> None:
+    if supplier_id is not None and connection.execute(
+        """select 1 from public.catalogo_proveedor p
+           join public.obra_proveedor op on op.proveedor_id = p.id
+           where p.id = %s and p.activo and op.obra_id = %s and op.activo""",
+        (supplier_id, work_id),
+    ).fetchone() is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, "El proveedor no está activo o asignado a la obra"
+        )
+    if item_id is not None and connection.execute(
+        """select 1 from public.catalogo_subpartida_gasto cs
+           join public.catalogo_partida_gasto cp on cp.id = cs.partida_gasto_id and cp.activo
+           where cs.id = %s and cs.partida_gasto_id = %s and cs.activo""",
+        (subitem_id, item_id),
+    ).fetchone() is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Partida y subpartida no forman una clasificación válida",
+        )
+
+
+def _labor_category(connection: psycopg.Connection) -> UUID:
+    """Piecework is labor/services only: the category is always MANO DE OBRA."""
+    row = connection.execute(
+        """select id from public.catalogo_categoria_gasto
+           where nombre_normalizado = public.normalizar_texto('MANO DE OBRA') and activo"""
+    ).fetchone()
+    if row is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, "El catálogo no tiene la categoría MANO DE OBRA"
+        )
+    return row["id"]
+
+
+def list_subcontracts(settings: Settings, user: UserContext, work_id: UUID) -> list[dict[str, Any]]:
+    with transaction(settings) as connection:
+        require_work_access(connection, user, work_id)
+        return list(connection.execute(
+            SUBCONTRACT_SELECT + " where s.obra_id = %s order by s.creado_en, s.folio",
+            (work_id,),
+        ).fetchall())
+
+
+def get_subcontract(settings: Settings, user: UserContext, subcontract_id: UUID) -> dict[str, Any]:
+    with transaction(settings) as connection:
+        detail = _subcontract_detail(connection, subcontract_id)
+        require_work_access(connection, user, detail["work_id"])
+        return detail
+
+
 def create_subcontract(
-    settings: Settings, user: UserContext, payload: SubcontractCreate
+    settings: Settings, user: UserContext, work_id: UUID, payload: SubcontractCreate,
 ) -> dict[str, Any]:
     with transaction(settings) as connection:
-        require_work_access(connection, user, payload.work_id)
-        if user.role is not Role.ADMIN:
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "Solo administración crea subcontratos")
+        require_work_access(connection, user, work_id)
+        _require_admin(user, "Solo administración crea subcontratos")
+        _validate_subcontract_refs(
+            connection, work_id, payload.supplier_id,
+            payload.expense_item_id, payload.expense_subitem_id,
+        )
         row = connection.execute(
-            """
-            insert into public.subcontrato
-              (obra_id, subcontratista, concepto, alcance, monto_contratado)
-            values (%s, %s, %s, %s, %s)
-            returning id, obra_id, subcontratista, concepto, alcance, monto_contratado
-            """,
-            (
-                payload.work_id,
-                payload.subcontractor,
-                payload.concept,
-                payload.scope,
-                payload.contracted_amount,
-            ),
+            """insert into public.subcontrato
+               (obra_id, proveedor_id, partida_gasto_id, subpartida_gasto_id,
+                categoria_gasto_id, descripcion, importe_contratado, fondo_garantia_pct,
+                creado_por)
+               values (%s, %s, %s, %s, %s, %s, %s, %s, %s) returning id""",
+            (work_id, payload.supplier_id, payload.expense_item_id, payload.expense_subitem_id,
+             _labor_category(connection), payload.description, payload.contracted_amount,
+             payload.retention_percent, user.id),
         ).fetchone()
         assert row is not None
-        return row
+        _audit_subcontract(connection, "subcontrato", row["id"], user, "crear", {
+            "importe_contratado": str(payload.contracted_amount),
+            "fondo_garantia_pct": str(payload.retention_percent),
+        })
+        return _subcontract_detail(connection, row["id"])
 
 
-def create_subcontract_payment(
-    settings: Settings,
-    user: UserContext,
-    subcontract_id: UUID,
-    payload: SubcontractPaymentCreate,
+def _lock_subcontract(
+    connection: psycopg.Connection, user: UserContext, subcontract_id: UUID,
+) -> dict[str, Any]:
+    """Row lock: serializes estimation numbering and the contract/advance balances."""
+    row = connection.execute(
+        """select id, obra_id, estado::text as estado, importe_contratado,
+                  fondo_garantia_pct, proveedor_id, partida_gasto_id, subpartida_gasto_id,
+                  descripcion
+           from public.subcontrato where id = %s for update""",
+        (subcontract_id,),
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Subcontrato inexistente")
+    require_work_access(connection, user, row["obra_id"])
+    return row
+
+
+def update_subcontract(
+    settings: Settings, user: UserContext, subcontract_id: UUID, payload: SubcontractUpdate,
 ) -> dict[str, Any]:
     with transaction(settings) as connection:
-        subcontract = connection.execute(
-            "select obra_id from public.subcontrato where id = %s", (subcontract_id,)
+        current = _lock_subcontract(connection, user, subcontract_id)
+        _require_admin(user, "Solo administración modifica subcontratos")
+        _require_active(current)
+        usage = connection.execute(
+            """select count(*) as total,
+                      count(*) filter (where estado = 'borrador') as drafts,
+                      coalesce(sum(importe_bruto) filter (where tipo <> 'anticipo'), 0) as gross,
+                      coalesce(sum(importe_bruto) filter (where tipo = 'anticipo'), 0) as advances
+               from public.estimacion_subcontrato where subcontrato_id = %s""",
+            (subcontract_id,),
         ).fetchone()
-        if subcontract is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Subcontrato inexistente")
-        require_work_access(connection, user, subcontract["obra_id"])
-        if user.role is not Role.ADMIN:
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "Solo administración registra pagos")
+        assert usage is not None
+        locked_fields = {"supplier_id", "expense_item_id", "retention_percent"}
+        if usage["total"] and any(
+            getattr(payload, name) is not None for name in locked_fields & payload.model_fields_set
+        ):
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "Con estimaciones registradas no se cambia proveedor, clasificación "
+                "ni % de garantía",
+            )
+        if payload.contracted_amount is not None and payload.contracted_amount < max(
+            usage["gross"], usage["advances"]
+        ):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"El importe contratado no puede ser menor a lo ya estimado "
+                f"({max(usage['gross'], usage['advances'])})",
+            )
+        if payload.state is SubcontractState.CANCELADO and usage["drafts"]:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "Elimina o paga las estimaciones en borrador antes de cancelar",
+            )
+        _validate_subcontract_refs(
+            connection, current["obra_id"], payload.supplier_id,
+            payload.expense_item_id, payload.expense_subitem_id,
+        )
+        columns = {
+            "supplier_id": "proveedor_id", "expense_item_id": "partida_gasto_id",
+            "expense_subitem_id": "subpartida_gasto_id", "description": "descripcion",
+            "contracted_amount": "importe_contratado", "retention_percent": "fondo_garantia_pct",
+        }
+        changes: dict[str, Any] = {}
+        for field, column in columns.items():
+            value = getattr(payload, field)
+            if value is not None and value != current[column]:
+                changes[column] = value
+        if payload.state is SubcontractState.CANCELADO:
+            changes["estado"] = "cancelado"
+        if changes:
+            assignments = ", ".join(f"{column} = %({column})s" for column in changes)
+            connection.execute(
+                f"update public.subcontrato set {assignments}, actualizado_en = now() "
+                "where id = %(id)s",
+                {**changes, "id": subcontract_id},
+            )
+            _audit_subcontract(
+                connection, "subcontrato", subcontract_id, user,
+                "cancelar" if "estado" in changes else "editar",
+                {"antes": {c: str(current.get(c, "activo")) for c in changes},
+                 "despues": {c: str(v) for c, v in changes.items()}},
+            )
+        return _subcontract_detail(connection, subcontract_id)
+
+
+def _check_estimation(
+    connection: psycopg.Connection, contract: dict[str, Any], payload: EstimationInput,
+    exclude_id: UUID | None = None,
+) -> EstimationAmounts:
+    """Server-side rules shared by create and edit (the row lock is already held)."""
+    others = connection.execute(
+        """select
+             coalesce(sum(importe_bruto) filter (where tipo <> 'anticipo'), 0) as gross,
+             coalesce(sum(importe_bruto) filter (where tipo = 'anticipo'), 0) as advances,
+             coalesce(sum(importe_bruto) filter (
+               where tipo = 'anticipo' and estado = 'pagado'), 0) as advances_paid,
+             coalesce(sum(amortizacion_anticipo), 0) as amortized,
+             count(*) filter (where tipo = 'finiquito') as finiquitos
+           from public.estimacion_subcontrato
+           where subcontrato_id = %s and (%s::uuid is null or id <> %s)""",
+        (contract["id"], exclude_id, exclude_id),
+    ).fetchone()
+    assert others is not None
+    contracted = contract["importe_contratado"]
+    if payload.kind is EstimationKind.ANTICIPO:
+        if others["advances"] + payload.gross_amount > contracted:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY, "Los anticipos exceden el importe contratado"
+            )
+    elif others["gross"] + payload.gross_amount > contracted:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "El avance excede el importe contratado "
+            f"(por estimar: {contracted - others['gross']}); "
+            "los trabajos extra van como aditivas",
+        )
+    if payload.kind is EstimationKind.FINIQUITO and others["finiquitos"]:
+        raise HTTPException(status.HTTP_409_CONFLICT, "El subcontrato ya tiene finiquito")
+    # Only paid advances can be amortized, and never twice across estimations.
+    available = others["advances_paid"] - others["amortized"]
+    if payload.advance_amortization > available:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"La amortización excede el anticipo pendiente de amortizar ({available})",
+        )
+    if payload.kind is EstimationKind.FINIQUITO and payload.advance_amortization != available:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"El finiquito debe amortizar todo el anticipo pendiente ({available})",
+        )
+    try:
+        return estimation_amounts(
+            payload.kind, payload.gross_amount, contract["fondo_garantia_pct"],
+            amortization=payload.advance_amortization, additions=payload.additions,
+            deductions=payload.deductions,
+        )
+    except ValueError as error:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(error)) from error
+
+
+def create_estimation(
+    settings: Settings, user: UserContext, subcontract_id: UUID, payload: EstimationCreate,
+) -> dict[str, Any]:
+    with transaction(settings) as connection:
+        contract = _lock_subcontract(connection, user, subcontract_id)
+        _require_admin(user, "Solo administración registra estimaciones")
+        _require_active(contract)
+        amounts = _check_estimation(connection, contract, payload)
+        # Never reuse a folio: the counter survives deleted drafts (row lock held).
+        number = connection.execute(
+            """update public.subcontrato set estimaciones_emitidas = estimaciones_emitidas + 1
+               where id = %s returning estimaciones_emitidas as n""",
+            (subcontract_id,),
+        ).fetchone()["n"]
         row = connection.execute(
-            """
-            insert into public.subcontrato_pago
-              (subcontrato_id, fecha, monto, gasto_id_vinculado, creado_por)
-            values (%s, %s, %s, %s, %s)
-            returning id, subcontrato_id, fecha, monto, gasto_id_vinculado
-            """,
-            (
-                subcontract_id,
-                payload.spent_on,
-                payload.amount,
-                payload.linked_expense_id,
-                user.id,
-            ),
+            """insert into public.estimacion_subcontrato
+               (subcontrato_id, numero, folio, fecha, tipo, importe_bruto,
+                amortizacion_anticipo, retencion_garantia, aditivas, deductivas,
+                importe_neto, notas_ajustes, creado_por)
+               values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) returning id""",
+            (subcontract_id, number, f"EST-{number:02d}", payload.estimated_on,
+             payload.kind.value, amounts.gross, amounts.amortization, amounts.retention,
+             amounts.additions, amounts.deductions, amounts.net, payload.adjustment_notes,
+             user.id),
         ).fetchone()
         assert row is not None
-        return row
+        _audit_subcontract(connection, "estimacion_subcontrato", row["id"], user, "crear", {
+            "subcontrato_id": str(subcontract_id), "tipo": payload.kind.value,
+            "importe_neto": str(amounts.net),
+        })
+        return _estimation_detail(connection, row["id"])
+
+
+def _locked_draft(
+    connection: psycopg.Connection, subcontract_id: UUID, estimation_id: UUID,
+) -> dict[str, Any]:
+    row = connection.execute(
+        """select id, estado::text as estado, tipo::text as tipo from public.estimacion_subcontrato
+           where id = %s and subcontrato_id = %s""",
+        (estimation_id, subcontract_id),
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Estimación inexistente")
+    if row["estado"] != "borrador":
+        raise HTTPException(status.HTTP_409_CONFLICT, "La estimación pagada no se modifica")
+    return row
+
+
+def update_estimation(
+    settings: Settings, user: UserContext, subcontract_id: UUID, estimation_id: UUID,
+    payload: EstimationUpdate,
+) -> dict[str, Any]:
+    with transaction(settings) as connection:
+        contract = _lock_subcontract(connection, user, subcontract_id)
+        _require_admin(user, "Solo administración modifica estimaciones")
+        _require_active(contract)
+        _locked_draft(connection, subcontract_id, estimation_id)
+        amounts = _check_estimation(connection, contract, payload, exclude_id=estimation_id)
+        connection.execute(
+            """update public.estimacion_subcontrato set fecha = %s, tipo = %s,
+                 importe_bruto = %s, amortizacion_anticipo = %s, retencion_garantia = %s,
+                 aditivas = %s, deductivas = %s, importe_neto = %s, notas_ajustes = %s,
+                 actualizado_en = now()
+               where id = %s""",
+            (payload.estimated_on, payload.kind.value, amounts.gross, amounts.amortization,
+             amounts.retention, amounts.additions, amounts.deductions, amounts.net,
+             payload.adjustment_notes, estimation_id),
+        )
+        _audit_subcontract(connection, "estimacion_subcontrato", estimation_id, user, "editar", {
+            "tipo": payload.kind.value, "importe_neto": str(amounts.net),
+        })
+        return _estimation_detail(connection, estimation_id)
+
+
+def delete_estimation(
+    settings: Settings, user: UserContext, subcontract_id: UUID, estimation_id: UUID,
+) -> None:
+    with transaction(settings) as connection:
+        _lock_subcontract(connection, user, subcontract_id)
+        _require_admin(user, "Solo administración elimina estimaciones")
+        draft = _locked_draft(connection, subcontract_id, estimation_id)
+        connection.execute(
+            "delete from public.estimacion_subcontrato where id = %s", (estimation_id,)
+        )
+        _audit_subcontract(connection, "estimacion_subcontrato", estimation_id, user, "eliminar", {
+            "subcontrato_id": str(subcontract_id), "tipo": draft["tipo"],
+        })
+
+
+def pay_estimation(
+    settings: Settings, user: UserContext, subcontract_id: UUID, estimation_id: UUID,
+) -> dict[str, Any]:
+    """borrador → pagado (irreversible). A paid finiquito settles the subcontract."""
+    with transaction(settings) as connection:
+        contract = _lock_subcontract(connection, user, subcontract_id)
+        _require_admin(user, "Solo administración paga estimaciones")
+        _require_active(contract)
+        draft = _locked_draft(connection, subcontract_id, estimation_id)
+        if draft["tipo"] == "finiquito" and connection.execute(
+            """select 1 from public.estimacion_subcontrato
+               where subcontrato_id = %s and estado = 'borrador' and id <> %s""",
+            (subcontract_id, estimation_id),
+        ).fetchone():
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "Paga o elimina las demás estimaciones antes del finiquito",
+            )
+        connection.execute(
+            """update public.estimacion_subcontrato
+               set estado = 'pagado', pagado_por = %s, pagado_en = now(), actualizado_en = now()
+               where id = %s""",
+            (user.id, estimation_id),
+        )
+        _audit_subcontract(connection, "estimacion_subcontrato", estimation_id, user, "pagar", {
+            "subcontrato_id": str(subcontract_id), "tipo": draft["tipo"],
+        })
+        if draft["tipo"] == "finiquito":
+            connection.execute(
+                """update public.subcontrato set estado = 'finiquitado', actualizado_en = now()
+                   where id = %s""",
+                (subcontract_id,),
+            )
+            _audit_subcontract(connection, "subcontrato", subcontract_id, user, "finiquitar", {
+                "estimacion_id": str(estimation_id),
+            })
+        return _estimation_detail(connection, estimation_id)
 
 
 def dashboard(settings: Settings, user: UserContext) -> dict[str, Any]:
@@ -1511,9 +1878,13 @@ def dashboard(settings: Settings, user: UserContext) -> dict[str, Any]:
                      where i.obra_id = o.id and i.estado = 'conciliado'), 0) as cobrado
                    ,coalesce((select sum(i.importe) from public.ingreso i
                      where i.obra_id = o.id and i.estado = 'pendiente'), 0) as por_cobrar
-                   ,coalesce((select sum(s.monto_contratado) from public.subcontrato s
-                     where s.obra_id = o.id), 0) as subcontratado
-                   ,coalesce((select sum(sp.monto) from public.subcontrato_pago sp
+                   ,coalesce((select sum(s.importe_contratado) from public.subcontrato s
+                     where s.obra_id = o.id and s.estado <> 'cancelado'), 0) as subcontratado
+                   -- Paid estimations (net) plus payments of the initial schema.
+                   ,coalesce((select sum(e.importe_neto) from public.estimacion_subcontrato e
+                     join public.subcontrato s on s.id = e.subcontrato_id
+                     where s.obra_id = o.id and e.estado = 'pagado'), 0)
+                    + coalesce((select sum(sp.monto) from public.subcontrato_pago sp
                      join public.subcontrato s on s.id = sp.subcontrato_id
                      where s.obra_id = o.id), 0) as pagado_subcontratos
             from public.obra o where {access_clause}
@@ -1545,6 +1916,33 @@ def dashboard(settings: Settings, user: UserContext) -> dict[str, Any]:
         }
 
 
+SUBCONTRACT_COMMITMENT = """
+    with contract as (
+      select s.estado::text as estado, s.importe_contratado,
+             coalesce(sum(e.importe_neto) filter (where e.estado = 'pagado'), 0) as paid,
+             coalesce(sum(e.aditivas - e.deductivas) filter (where e.estado = 'pagado'), 0)
+               as adjustments,
+             coalesce(sum(e.importe_bruto + e.aditivas - e.deductivas) filter (
+               where e.estado = 'pagado' and e.tipo <> 'anticipo'), 0) as work_value
+      from public.subcontrato s
+      left join public.estimacion_subcontrato e
+        on e.subcontrato_id = s.id and e.fecha <= %(to)s
+      where s.obra_id = %(work)s and s.creado_en::date <= %(to)s
+      group by s.id
+    )
+    select coalesce(sum(paid), 0) as paid,
+           -- Active: contract + paid adjustments. Settled: the work actually valued.
+           -- Cancelled: only what was paid. Never below what was paid.
+           coalesce(sum(case estado
+             when 'cancelado' then paid
+             when 'finiquitado' then greatest(work_value, paid)
+             else greatest(importe_contratado + adjustments, paid) end), 0) as committed,
+           coalesce(sum(importe_contratado) filter (where estado <> 'cancelado'), 0)
+             as contracted
+    from contract
+"""
+
+
 def _spend_breakdown(
     connection: psycopg.Connection, work_id: UUID, end_date: date, total_validated: Decimal,
 ) -> dict[str, list[dict[str, Any]]]:
@@ -1573,25 +1971,52 @@ def _spend_breakdown(
         left join public.catalogo_partida_gasto cpg on cpg.id = g.partida_gasto_id
         left join public.catalogo_subpartida_gasto csg on csg.id = g.subpartida_gasto_id
         left join public.catalogo_categoria_gasto cag on cag.id = g.categoria_gasto_id
-        where g.obra_id = %s and g.eliminado_en is null and g.fecha <= %s
+        where g.obra_id = %(work)s and g.eliminado_en is null and g.fecha <= %(to)s
           and g.estado in ('validado', 'pendiente')
         group by 1, 2, 3, 4, 5, 6, 7, 8, 9
+        union all
+        -- Paid subcontract estimations: validated labor spend of their partida/proveedor.
+        select s.partida_gasto_id, coalesce(cpg.nombre, 'Sin partida'), coalesce(cpg.orden, 999),
+               s.subpartida_gasto_id, coalesce(csg.nombre, 'Sin subpartida'),
+               coalesce(csg.orden, 999), s.categoria_gasto_id,
+               coalesce(cag.nombre, 'Sin categoría'), coalesce(cag.orden, 999),
+               sum(e.importe_neto), 0, count(*)
+        from public.estimacion_subcontrato e
+        join public.subcontrato s on s.id = e.subcontrato_id
+        left join public.catalogo_partida_gasto cpg on cpg.id = s.partida_gasto_id
+        left join public.catalogo_subpartida_gasto csg on csg.id = s.subpartida_gasto_id
+        left join public.catalogo_categoria_gasto cag on cag.id = s.categoria_gasto_id
+        where s.obra_id = %(work)s and e.estado = 'pagado' and e.fecha <= %(to)s
+        group by 1, 2, 3, 4, 5, 6, 7, 8, 9
         """,
-        (work_id, end_date),
+        {"work": work_id, "to": end_date},
     ).fetchall()
     supplier_rows = connection.execute(
         """
-        select g.proveedor_id as id, coalesce(p.nombre, 'Sin proveedor') as name,
-               coalesce(sum(g.importe) filter (where g.estado = 'validado'), 0) as validated,
-               coalesce(sum(g.importe) filter (where g.estado = 'pendiente'), 0) as pending,
-               count(*) as expense_count
-        from public.gasto g
-        left join public.catalogo_proveedor p on p.id = g.proveedor_id
-        where g.obra_id = %s and g.eliminado_en is null and g.fecha <= %s
-          and g.estado in ('validado', 'pendiente')
+        select id, name, sum(validated) as validated, sum(pending) as pending,
+               sum(expense_count)::int as expense_count
+        from (
+          select g.proveedor_id as id, coalesce(p.nombre, 'Sin proveedor') as name,
+                 coalesce(sum(g.importe) filter (where g.estado = 'validado'), 0) as validated,
+                 coalesce(sum(g.importe) filter (where g.estado = 'pendiente'), 0) as pending,
+                 count(*) as expense_count
+          from public.gasto g
+          left join public.catalogo_proveedor p on p.id = g.proveedor_id
+          where g.obra_id = %(work)s and g.eliminado_en is null and g.fecha <= %(to)s
+            and g.estado in ('validado', 'pendiente')
+          group by 1, 2
+          union all
+          select s.proveedor_id, coalesce(p.nombre, s.subcontratista, 'Sin proveedor'),
+                 sum(e.importe_neto), 0, count(*)
+          from public.estimacion_subcontrato e
+          join public.subcontrato s on s.id = e.subcontrato_id
+          left join public.catalogo_proveedor p on p.id = s.proveedor_id
+          where s.obra_id = %(work)s and e.estado = 'pagado' and e.fecha <= %(to)s
+          group by 1, 2
+        ) spend
         group by 1, 2
         """,
-        (work_id, end_date),
+        {"work": work_id, "to": end_date},
     ).fetchall()
     catalog = connection.execute(
         "select id, nombre, orden from public.catalogo_categoria_gasto where activo"
@@ -1694,6 +2119,18 @@ def work_overview(
             {"work": work_id, "to": end_date},
         ).fetchone()
         assert totals is not None
+        # Subcontracts (Cambio 9): paid estimations are validated spend (net paid); each
+        # contract commits its full value until settled or cancelled.
+        subcontracts = connection.execute(
+            SUBCONTRACT_COMMITMENT, {"work": work_id, "to": end_date}
+        ).fetchone()
+        assert subcontracts is not None
+        totals["expense_validated"] = totals["validated"]
+        totals["subcontract_paid"] = subcontracts["paid"]
+        totals["subcontract_committed"] = subcontracts["committed"]
+        totals["subcontracted"] = subcontracts["contracted"]
+        totals["validated"] += subcontracts["paid"]
+        totals["committed"] += subcontracts["committed"]
         budget = totals["budget"]
         totals["available"] = budget - totals["validated"]
         totals["projected_available"] = budget - totals["committed"]

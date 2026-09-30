@@ -600,6 +600,334 @@
         "title": "CsfExtractionResponse",
         "type": "object"
       },
+      "EstimationCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "additions": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,14}|(?=[\\d.]{1,17}0*$)\\d{0,14}\\.\\d{0,2}0*$)",
+                "type": "string"
+              }
+            ],
+            "default": "0",
+            "title": "Additions"
+          },
+          "adjustment_notes": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Adjustment Notes"
+          },
+          "advance_amortization": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,14}|(?=[\\d.]{1,17}0*$)\\d{0,14}\\.\\d{0,2}0*$)",
+                "type": "string"
+              }
+            ],
+            "default": "0",
+            "title": "Advance Amortization"
+          },
+          "deductions": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,14}|(?=[\\d.]{1,17}0*$)\\d{0,14}\\.\\d{0,2}0*$)",
+                "type": "string"
+              }
+            ],
+            "default": "0",
+            "title": "Deductions"
+          },
+          "estimated_on": {
+            "format": "date",
+            "title": "Estimated On",
+            "type": "string"
+          },
+          "gross_amount": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,14}|(?=[\\d.]{1,17}0*$)\\d{0,14}\\.\\d{0,2}0*$)",
+                "type": "string"
+              }
+            ],
+            "title": "Gross Amount"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/EstimationKind"
+          }
+        },
+        "required": [
+          "estimated_on",
+          "kind",
+          "gross_amount"
+        ],
+        "title": "EstimationCreate",
+        "type": "object"
+      },
+      "EstimationKind": {
+        "enum": [
+          "anticipo",
+          "avance",
+          "finiquito"
+        ],
+        "title": "EstimationKind",
+        "type": "string"
+      },
+      "EstimationResponse": {
+        "properties": {
+          "additions": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Additions",
+            "type": "string"
+          },
+          "adjustment_notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Adjustment Notes"
+          },
+          "advance_amortization": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Advance Amortization",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "deductions": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Deductions",
+            "type": "string"
+          },
+          "estimated_on": {
+            "format": "date",
+            "title": "Estimated On",
+            "type": "string"
+          },
+          "folio": {
+            "title": "Folio",
+            "type": "string"
+          },
+          "gross_amount": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Gross Amount",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/EstimationKind"
+          },
+          "net_amount": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Net Amount",
+            "type": "string"
+          },
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "paid_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paid At"
+          },
+          "paid_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paid By"
+          },
+          "retention_amount": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Retention Amount",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/EstimationState"
+          },
+          "subcontract_id": {
+            "format": "uuid",
+            "title": "Subcontract Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "subcontract_id",
+          "number",
+          "folio",
+          "estimated_on",
+          "kind",
+          "gross_amount",
+          "advance_amortization",
+          "retention_amount",
+          "additions",
+          "deductions",
+          "net_amount",
+          "adjustment_notes",
+          "state",
+          "created_at"
+        ],
+        "title": "EstimationResponse",
+        "type": "object"
+      },
+      "EstimationState": {
+        "enum": [
+          "borrador",
+          "pagado"
+        ],
+        "title": "EstimationState",
+        "type": "string"
+      },
+      "EstimationStatusUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "state": {
+            "const": "pagado",
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "EstimationStatusUpdate",
+        "type": "object"
+      },
+      "EstimationUpdate": {
+        "additionalProperties": false,
+        "description": "Full replacement of a draft estimation (paid ones are immutable).",
+        "properties": {
+          "additions": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,14}|(?=[\\d.]{1,17}0*$)\\d{0,14}\\.\\d{0,2}0*$)",
+                "type": "string"
+              }
+            ],
+            "default": "0",
+            "title": "Additions"
+          },
+          "adjustment_notes": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Adjustment Notes"
+          },
+          "advance_amortization": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,14}|(?=[\\d.]{1,17}0*$)\\d{0,14}\\.\\d{0,2}0*$)",
+                "type": "string"
+              }
+            ],
+            "default": "0",
+            "title": "Advance Amortization"
+          },
+          "deductions": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,14}|(?=[\\d.]{1,17}0*$)\\d{0,14}\\.\\d{0,2}0*$)",
+                "type": "string"
+              }
+            ],
+            "default": "0",
+            "title": "Deductions"
+          },
+          "estimated_on": {
+            "format": "date",
+            "title": "Estimated On",
+            "type": "string"
+          },
+          "gross_amount": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,14}|(?=[\\d.]{1,17}0*$)\\d{0,14}\\.\\d{0,2}0*$)",
+                "type": "string"
+              }
+            ],
+            "title": "Gross Amount"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/EstimationKind"
+          }
+        },
+        "required": [
+          "estimated_on",
+          "kind",
+          "gross_amount"
+        ],
+        "title": "EstimationUpdate",
+        "type": "object"
+      },
       "ExpenseBatchReview": {
         "properties": {
           "expense_ids": {
@@ -2134,13 +2462,9 @@
         "type": "string"
       },
       "SubcontractCreate": {
+        "additionalProperties": false,
+        "description": "Piecework contract (labor/services only; the category is always MANO DE OBRA).",
         "properties": {
-          "concept": {
-            "maxLength": 500,
-            "minLength": 3,
-            "title": "Concept",
-            "type": "string"
-          },
           "contracted_amount": {
             "anyOf": [
               {
@@ -2148,61 +2472,127 @@
                 "type": "number"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d{0,4}0*$",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,14}|(?=[\\d.]{1,17}0*$)\\d{0,14}\\.\\d{0,2}0*$)",
                 "type": "string"
               }
             ],
             "title": "Contracted Amount"
           },
-          "scope": {
+          "description": {
+            "maxLength": 3000,
+            "minLength": 3,
+            "title": "Description",
+            "type": "string"
+          },
+          "expense_item_id": {
+            "format": "uuid",
+            "title": "Expense Item Id",
+            "type": "string"
+          },
+          "expense_subitem_id": {
+            "format": "uuid",
+            "title": "Expense Subitem Id",
+            "type": "string"
+          },
+          "retention_percent": {
             "anyOf": [
               {
-                "maxLength": 3000,
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,6}0*$)\\d{0,3}\\.\\d{0,2}0*$)",
+                "type": "string"
+              }
+            ],
+            "default": "0",
+            "title": "Retention Percent"
+          },
+          "supplier_id": {
+            "format": "uuid",
+            "title": "Supplier Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "supplier_id",
+          "expense_item_id",
+          "expense_subitem_id",
+          "description",
+          "contracted_amount"
+        ],
+        "title": "SubcontractCreate",
+        "type": "object"
+      },
+      "SubcontractResponse": {
+        "properties": {
+          "advance_pending_amortization": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Advance Pending Amortization",
+            "type": "string"
+          },
+          "advances_paid": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Advances Paid",
+            "type": "string"
+          },
+          "category": {
+            "anyOf": [
+              {
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Scope"
+            "title": "Category"
           },
-          "subcontractor": {
-            "maxLength": 250,
-            "minLength": 2,
-            "title": "Subcontractor",
+          "contracted_amount": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Contracted Amount",
             "type": "string"
           },
-          "work_id": {
-            "format": "uuid",
-            "title": "Work Id",
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
             "type": "string"
-          }
-        },
-        "required": [
-          "work_id",
-          "subcontractor",
-          "concept",
-          "contracted_amount"
-        ],
-        "title": "SubcontractCreate",
-        "type": "object"
-      },
-      "SubcontractPaymentCreate": {
-        "properties": {
-          "amount": {
+          },
+          "description": {
             "anyOf": [
               {
-                "exclusiveMinimum": 0.0,
-                "type": "number"
+                "type": "string"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d{0,4}0*$",
-                "type": "string"
+                "type": "null"
               }
             ],
-            "title": "Amount"
+            "title": "Description"
           },
-          "linked_expense_id": {
+          "estimated_gross": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Estimated Gross",
+            "type": "string"
+          },
+          "estimations": {
+            "items": {
+              "$ref": "#/components/schemas/EstimationResponse"
+            },
+            "title": "Estimations",
+            "type": "array"
+          },
+          "expense_item": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expense Item"
+          },
+          "expense_item_id": {
             "anyOf": [
               {
                 "format": "uuid",
@@ -2212,19 +2602,225 @@
                 "type": "null"
               }
             ],
-            "title": "Linked Expense Id"
+            "title": "Expense Item Id"
           },
-          "spent_on": {
-            "format": "date",
-            "title": "Spent On",
+          "expense_subitem": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expense Subitem"
+          },
+          "expense_subitem_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expense Subitem Id"
+          },
+          "folio": {
+            "title": "Folio",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "paid_net": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Paid Net",
+            "type": "string"
+          },
+          "remaining_to_estimate": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Remaining To Estimate",
+            "type": "string"
+          },
+          "retained": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Retained",
+            "type": "string"
+          },
+          "retention_percent": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Retention Percent",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/SubcontractState"
+          },
+          "supplier_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supplier Id"
+          },
+          "supplier_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supplier Name"
+          },
+          "work_id": {
+            "format": "uuid",
+            "title": "Work Id",
             "type": "string"
           }
         },
         "required": [
-          "spent_on",
-          "amount"
+          "id",
+          "work_id",
+          "folio",
+          "supplier_id",
+          "supplier_name",
+          "expense_item_id",
+          "expense_item",
+          "expense_subitem_id",
+          "expense_subitem",
+          "category",
+          "description",
+          "contracted_amount",
+          "retention_percent",
+          "state",
+          "created_at",
+          "estimated_gross",
+          "paid_net",
+          "retained",
+          "advances_paid",
+          "advance_pending_amortization",
+          "remaining_to_estimate"
         ],
-        "title": "SubcontractPaymentCreate",
+        "title": "SubcontractResponse",
+        "type": "object"
+      },
+      "SubcontractState": {
+        "enum": [
+          "activo",
+          "finiquitado",
+          "cancelado"
+        ],
+        "title": "SubcontractState",
+        "type": "string"
+      },
+      "SubcontractUpdate": {
+        "additionalProperties": false,
+        "description": "Partial edit. Supplier, classification and retention change only without estimations.",
+        "properties": {
+          "contracted_amount": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,14}|(?=[\\d.]{1,17}0*$)\\d{0,14}\\.\\d{0,2}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contracted Amount"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 3000,
+                "minLength": 3,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "expense_item_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expense Item Id"
+          },
+          "expense_subitem_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expense Subitem Id"
+          },
+          "retention_percent": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,3}|(?=[\\d.]{1,6}0*$)\\d{0,3}\\.\\d{0,2}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retention Percent"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubcontractState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "supplier_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supplier Id"
+          }
+        },
+        "title": "SubcontractUpdate",
         "type": "object"
       },
       "SupplierArchive": {
@@ -4927,17 +5523,17 @@
         ]
       }
     },
-    "/api/v1/subcontracts": {
+    "/api/v1/subcontracts/{subcontract_id}": {
       "get": {
-        "operationId": "get_subcontracts_api_v1_subcontracts_get",
+        "operationId": "get_subcontract_detail_api_v1_subcontracts__subcontract_id__get",
         "parameters": [
           {
-            "in": "query",
-            "name": "work_id",
+            "in": "path",
+            "name": "subcontract_id",
             "required": true,
             "schema": {
               "format": "uuid",
-              "title": "Work Id",
+              "title": "Subcontract Id",
               "type": "string"
             }
           },
@@ -4963,12 +5559,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "additionalProperties": true,
-                    "type": "object"
-                  },
-                  "title": "Response Get Subcontracts Api V1 Subcontracts Get",
-                  "type": "array"
+                  "$ref": "#/components/schemas/SubcontractResponse"
                 }
               }
             },
@@ -4985,74 +5576,14 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Get Subcontracts",
+        "summary": "Get Subcontract Detail",
         "tags": [
           "subcontracts"
         ]
       },
-      "post": {
-        "operationId": "post_subcontract_api_v1_subcontracts_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SubcontractCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Post Subcontract Api V1 Subcontracts Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Post Subcontract",
-        "tags": [
-          "subcontracts"
-        ]
-      }
-    },
-    "/api/v1/subcontracts/{subcontract_id}/payments": {
-      "post": {
-        "operationId": "post_subcontract_payment_api_v1_subcontracts__subcontract_id__payments_post",
+      "patch": {
+        "description": "Edit an active contract or cancel it; a paid finiquito settles it.",
+        "operationId": "patch_subcontract_api_v1_subcontracts__subcontract_id__patch",
         "parameters": [
           {
             "in": "path",
@@ -5085,20 +5616,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SubcontractPaymentCreate"
+                "$ref": "#/components/schemas/SubcontractUpdate"
               }
             }
           },
           "required": true
         },
         "responses": {
-          "201": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Post Subcontract Payment Api V1 Subcontracts  Subcontract Id  Payments Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/SubcontractResponse"
                 }
               }
             },
@@ -5115,7 +5644,358 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Post Subcontract Payment",
+        "summary": "Patch Subcontract",
+        "tags": [
+          "subcontracts"
+        ]
+      }
+    },
+    "/api/v1/subcontracts/{subcontract_id}/estimations": {
+      "get": {
+        "operationId": "get_subcontract_estimations_api_v1_subcontracts__subcontract_id__estimations_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "subcontract_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Subcontract Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/EstimationResponse"
+                  },
+                  "title": "Response Get Subcontract Estimations Api V1 Subcontracts  Subcontract Id  Estimations Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Subcontract Estimations",
+        "tags": [
+          "subcontracts"
+        ]
+      },
+      "post": {
+        "description": "Draft estimation; the server computes retention and net.",
+        "operationId": "post_subcontract_estimation_api_v1_subcontracts__subcontract_id__estimations_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "subcontract_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Subcontract Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EstimationCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EstimationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Subcontract Estimation",
+        "tags": [
+          "subcontracts"
+        ]
+      }
+    },
+    "/api/v1/subcontracts/{subcontract_id}/estimations/{estimation_id}": {
+      "delete": {
+        "operationId": "delete_subcontract_estimation_api_v1_subcontracts__subcontract_id__estimations__estimation_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "subcontract_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Subcontract Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "estimation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Estimation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Subcontract Estimation",
+        "tags": [
+          "subcontracts"
+        ]
+      },
+      "put": {
+        "description": "Replace a draft estimation; paid ones are immutable.",
+        "operationId": "put_subcontract_estimation_api_v1_subcontracts__subcontract_id__estimations__estimation_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "subcontract_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Subcontract Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "estimation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Estimation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EstimationUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EstimationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Subcontract Estimation",
+        "tags": [
+          "subcontracts"
+        ]
+      }
+    },
+    "/api/v1/subcontracts/{subcontract_id}/estimations/{estimation_id}/status": {
+      "patch": {
+        "description": "borrador → pagado (irreversible); paying the finiquito settles the contract.",
+        "operationId": "patch_subcontract_estimation_status_api_v1_subcontracts__subcontract_id__estimations__estimation_id__status_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "subcontract_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Subcontract Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "estimation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Estimation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EstimationStatusUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EstimationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Patch Subcontract Estimation Status",
         "tags": [
           "subcontracts"
         ]
@@ -7204,6 +8084,137 @@
         "summary": "Get Work Overview",
         "tags": [
           "dashboard"
+        ]
+      }
+    },
+    "/api/v1/works/{work_id}/subcontracts": {
+      "get": {
+        "operationId": "get_work_subcontracts_api_v1_works__work_id__subcontracts_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SubcontractResponse"
+                  },
+                  "title": "Response Get Work Subcontracts Api V1 Works  Work Id  Subcontracts Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Work Subcontracts",
+        "tags": [
+          "subcontracts"
+        ]
+      },
+      "post": {
+        "description": "Piecework contract (labor/services; the category is always MANO DE OBRA).",
+        "operationId": "post_work_subcontract_api_v1_works__work_id__subcontracts_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubcontractCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubcontractResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Work Subcontract",
+        "tags": [
+          "subcontracts"
         ]
       }
     },

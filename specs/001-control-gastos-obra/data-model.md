@@ -64,9 +64,13 @@ reabierto_por (nullable), reabierto_en (nullable), motivo_reapertura (nullable)`
 
 **`Ingreso`** — `id, obra_id, concepto, fecha_estimada, fecha_real, monto, estado [cobrado|por_cobrar], creado_por, creado_en`
 
-**`Subcontrato`** — `id, obra_id, subcontratista, concepto, alcance, monto_contratado, creado_en`
+**`Subcontrato`** (Cambio 9, destajos de mano de obra/servicios) — `id, obra_id, folio (SC-0001), proveedor_id, partida_gasto_id, subpartida_gasto_id, categoria_gasto_id (siempre MANO DE OBRA), descripcion, importe_contratado, fondo_garantia_pct (0–100, por defecto 0), estado [activo|finiquitado|cancelado], estimaciones_emitidas, creado_por, creado_en, actualizado_en`. Registros del esquema inicial conservan `subcontratista`, `concepto` y `alcance` en texto libre.
 
-**`SubcontratoPago`** — `id, subcontrato_id, fecha, monto, gasto_id_vinculado (nullable), creado_por, creado_en`
+**`EstimacionSubcontrato`** — `id, subcontrato_id, numero, folio (EST-01), fecha, tipo [anticipo|avance|finiquito], importe_bruto, amortizacion_anticipo, retencion_garantia, aditivas, deductivas, importe_neto, notas_ajustes, estado [borrador|pagado], pagado_por, pagado_en, creado_por, creado_en`
+- `importe_neto = importe_bruto + aditivas − deductivas − retencion_garantia − amortizacion_anticipo` (CHECK en base de datos).
+- Anticipo sin retención, amortización ni ajustes; aditivas/deductivas exigen `notas_ajustes`; un solo finiquito por subcontrato.
+
+**`SubcontratoPago`** (esquema inicial, sin uso desde el Cambio 9) — `id, subcontrato_id, fecha, monto, gasto_id_vinculado (nullable), creado_por, creado_en`
 
 ## 5. Bitácoras y sesión
 

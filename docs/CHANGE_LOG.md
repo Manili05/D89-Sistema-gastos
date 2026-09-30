@@ -145,6 +145,36 @@ alcance de monolito simple sin importación automática de Excel ni agente de IA
   - "Gasto por proveedor" reemplaza "Principales proveedores": todos los proveedores con
     movimientos, validado, pendiente, número de gastos y % del gasto validado de la obra.
 
+## Cambio 9 — Subcontratos a destajo con estimaciones (2026-10-01)
+- **Naturaleza:** cambio de alcance **funcional**, **acordado con el cliente (D89)**, que
+  definió las reglas de negocio. Los materiales los pone la constructora: los subcontratos
+  son sólo de mano de obra / servicios (categoría MANO DE OBRA).
+- **Qué cambia (backend, migración `202610010001`):**
+  - `subcontrato` evoluciona: folio `SC-0001`, proveedor del directorio, partida y
+    subpartida del catálogo, alcance, importe contratado, % de fondo de garantía y estado
+    (activo, finiquitado, cancelado). Los registros anteriores se conservan.
+  - Nueva `estimacion_subcontrato` (folio `EST-01` por subcontrato, nunca reutilizado):
+    anticipo, avance o finiquito, en borrador o pagado.
+  - PostgREST queda de sólo lectura para `subcontrato`, `estimacion_subcontrato` y
+    `subcontrato_pago`; toda mutación pasa por FastAPI (sólo administración).
+- **Reglas de cálculo:**
+  - `neto = bruto + aditivas − deductivas − retención − amortización` (también CHECK en
+    base de datos). La retención la calcula el servidor: % del contrato sobre el bruto,
+    redondeo HALF_UP a centavos.
+  - El anticipo se paga íntegro (sin retención, amortización ni ajustes).
+  - Sólo se amortizan anticipos **pagados**, sin exceder lo pendiente; el finiquito debe
+    amortizar todo lo pendiente, es único y al pagarse finiquita el subcontrato.
+  - El bruto de avances + finiquito no excede el importe contratado (los trabajos extra van
+    como aditivas); aditivas y deductivas exigen justificación.
+  - Una estimación pagada es inmutable; los borradores se editan o eliminan.
+- **Impacto financiero:** en el Resumen, las estimaciones pagadas suman su **neto pagado**
+  al Gasto Validado y al desglose por partida, categoría (MANO DE OBRA) y proveedor. El
+  Comprometido suma por subcontrato: activo → contrato + ajustes pagados; finiquitado →
+  valor real de los trabajos; cancelado → lo pagado (nunca menos de lo pagado).
+- Se retiran los endpoints del esquema inicial (`GET/POST /subcontracts?work_id`,
+  `POST /subcontracts/{id}/payments`), sin uso en la interfaz y sin datos en staging; los
+  reemplazan `/works/{id}/subcontracts` y `/subcontracts/{id}/estimations`.
+
 ---
 *Cualquier desviación nueva de alcance detectada durante el desarrollo debe agregarse aquí,
 siguiendo el mismo formato: naturaleza del cambio, si fue acordado con el cliente o es decisión

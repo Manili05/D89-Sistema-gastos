@@ -22,6 +22,10 @@ from app.core.security import AdminUser, CurrentUser, HermesSignature
 from app.models import (
     CfdiExtractionResponse,
     CsfExtractionResponse,
+    EstimationCreate,
+    EstimationResponse,
+    EstimationStatusUpdate,
+    EstimationUpdate,
     ExpenseBatchReview,
     ExpenseCancel,
     ExpenseCreate,
@@ -43,7 +47,8 @@ from app.models import (
     ReceiptExtractionResponse,
     ReceiptUpdate,
     SubcontractCreate,
-    SubcontractPaymentCreate,
+    SubcontractResponse,
+    SubcontractUpdate,
     SupplierArchive,
     SupplierCreate,
     SupplierEvaluationCreate,
@@ -70,16 +75,18 @@ from app.services.repository import (
     cancel_expense,
     close_week,
     confirm_import,
+    create_estimation,
     create_expense,
     create_income,
     create_legacy_income,
     create_subcontract,
-    create_subcontract_payment,
     create_work,
     dashboard,
+    delete_estimation,
     delete_work,
     get_expense,
     get_income,
+    get_subcontract,
     get_work,
     list_expenses,
     list_incomes,
@@ -88,15 +95,18 @@ from app.services.repository import (
     list_weekly_closes,
     list_work_expenses,
     list_works,
+    pay_estimation,
     reconcile_incomes_batch,
     reopen_week,
     report_expenses,
     review_expense,
     store_import_preview,
+    update_estimation,
     update_expense,
     update_import_preview,
     update_income,
     update_income_status,
+    update_subcontract,
     update_work,
     validate_expenses_batch,
     weekly_close_preview,
@@ -626,8 +636,12 @@ def post_income_receipt(
     return attach_income_receipt(settings, user, income_id, payload.path)
 
 
-@router.get("/subcontracts", tags=["subcontracts"])
-def get_subcontracts(
+@router.get(
+    "/works/{work_id}/subcontracts",
+    response_model=list[SubcontractResponse],
+    tags=["subcontracts"],
+)
+def get_work_subcontracts(
     work_id: UUID,
     user: CurrentUser,
     settings: Annotated[Settings, Depends(get_settings)],
@@ -635,27 +649,119 @@ def get_subcontracts(
     return list_subcontracts(settings, user, work_id)
 
 
-@router.post("/subcontracts", status_code=status.HTTP_201_CREATED, tags=["subcontracts"])
-def post_subcontract(
+@router.post(
+    "/works/{work_id}/subcontracts",
+    status_code=status.HTTP_201_CREATED,
+    response_model=SubcontractResponse,
+    tags=["subcontracts"],
+)
+def post_work_subcontract(
+    work_id: UUID,
     payload: SubcontractCreate,
     user: AdminUser,
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> dict[str, Any]:
-    return create_subcontract(settings, user, payload)
+    """Piecework contract (labor/services; the category is always MANO DE OBRA)."""
+    return create_subcontract(settings, user, work_id, payload)
 
 
-@router.post(
-    "/subcontracts/{subcontract_id}/payments",
-    status_code=status.HTTP_201_CREATED,
-    tags=["subcontracts"],
+@router.get(
+    "/subcontracts/{subcontract_id}", response_model=SubcontractResponse, tags=["subcontracts"]
 )
-def post_subcontract_payment(
+def get_subcontract_detail(
     subcontract_id: UUID,
-    payload: SubcontractPaymentCreate,
+    user: CurrentUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    return get_subcontract(settings, user, subcontract_id)
+
+
+@router.patch(
+    "/subcontracts/{subcontract_id}", response_model=SubcontractResponse, tags=["subcontracts"]
+)
+def patch_subcontract(
+    subcontract_id: UUID,
+    payload: SubcontractUpdate,
     user: AdminUser,
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> dict[str, Any]:
-    return create_subcontract_payment(settings, user, subcontract_id, payload)
+    """Edit an active contract or cancel it; a paid finiquito settles it."""
+    return update_subcontract(settings, user, subcontract_id, payload)
+
+
+@router.get(
+    "/subcontracts/{subcontract_id}/estimations",
+    response_model=list[EstimationResponse],
+    tags=["subcontracts"],
+)
+def get_subcontract_estimations(
+    subcontract_id: UUID,
+    user: CurrentUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> list[dict[str, Any]]:
+    return get_subcontract(settings, user, subcontract_id)["estimations"]
+
+
+@router.post(
+    "/subcontracts/{subcontract_id}/estimations",
+    status_code=status.HTTP_201_CREATED,
+    response_model=EstimationResponse,
+    tags=["subcontracts"],
+)
+def post_subcontract_estimation(
+    subcontract_id: UUID,
+    payload: EstimationCreate,
+    user: AdminUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    """Draft estimation; the server computes retention and net."""
+    return create_estimation(settings, user, subcontract_id, payload)
+
+
+@router.put(
+    "/subcontracts/{subcontract_id}/estimations/{estimation_id}",
+    response_model=EstimationResponse,
+    tags=["subcontracts"],
+)
+def put_subcontract_estimation(
+    subcontract_id: UUID,
+    estimation_id: UUID,
+    payload: EstimationUpdate,
+    user: AdminUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    """Replace a draft estimation; paid ones are immutable."""
+    return update_estimation(settings, user, subcontract_id, estimation_id, payload)
+
+
+@router.delete(
+    "/subcontracts/{subcontract_id}/estimations/{estimation_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    tags=["subcontracts"],
+)
+def delete_subcontract_estimation(
+    subcontract_id: UUID,
+    estimation_id: UUID,
+    user: AdminUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> None:
+    delete_estimation(settings, user, subcontract_id, estimation_id)
+
+
+@router.patch(
+    "/subcontracts/{subcontract_id}/estimations/{estimation_id}/status",
+    response_model=EstimationResponse,
+    tags=["subcontracts"],
+)
+def patch_subcontract_estimation_status(
+    subcontract_id: UUID,
+    estimation_id: UUID,
+    payload: EstimationStatusUpdate,
+    user: AdminUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    """borrador → pagado (irreversible); paying the finiquito settles the contract."""
+    return pay_estimation(settings, user, subcontract_id, estimation_id)
 
 
 REPORT_COLUMNS = (
