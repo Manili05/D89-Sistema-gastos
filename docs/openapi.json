@@ -1331,20 +1331,35 @@
         "title": "ImportPreviewUpdate",
         "type": "object"
       },
-      "IncomeCreate": {
+      "IncomeBatchReconcile": {
+        "additionalProperties": false,
         "properties": {
-          "actual_date": {
-            "anyOf": [
-              {
-                "format": "date",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Actual Date"
+          "income_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Income Ids",
+            "type": "array"
           },
+          "work_id": {
+            "format": "uuid",
+            "title": "Work Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "work_id",
+          "income_ids"
+        ],
+        "title": "IncomeBatchReconcile",
+        "type": "object"
+      },
+      "IncomeCreate": {
+        "additionalProperties": false,
+        "properties": {
           "amount": {
             "anyOf": [
               {
@@ -1352,7 +1367,7 @@
                 "type": "number"
               },
               {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d{0,4}0*$",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,14}|(?=[\\d.]{1,19}0*$)\\d{0,14}\\.\\d{0,4}0*$)",
                 "type": "string"
               }
             ],
@@ -1364,15 +1379,148 @@
             "title": "Concept",
             "type": "string"
           },
-          "estimated_date": {
+          "received_on": {
             "format": "date",
-            "title": "Estimated Date",
+            "title": "Received On",
             "type": "string"
           },
           "state": {
-            "pattern": "^(cobrado|por_cobrar)$",
-            "title": "State",
+            "$ref": "#/components/schemas/IncomeState",
+            "default": "pendiente"
+          }
+        },
+        "required": [
+          "received_on",
+          "concept",
+          "amount"
+        ],
+        "title": "IncomeCreate",
+        "type": "object"
+      },
+      "IncomeReceipt": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
             "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "path",
+          "kind",
+          "created_at"
+        ],
+        "title": "IncomeReceipt",
+        "type": "object"
+      },
+      "IncomeReceiptCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "maxLength": 500,
+            "minLength": 10,
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "IncomeReceiptCreate",
+        "type": "object"
+      },
+      "IncomeResponse": {
+        "properties": {
+          "amount": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Amount",
+            "type": "string"
+          },
+          "concept": {
+            "title": "Concept",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "format": "uuid",
+            "title": "Created By",
+            "type": "string"
+          },
+          "folio": {
+            "title": "Folio",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "receipts": {
+            "items": {
+              "$ref": "#/components/schemas/IncomeReceipt"
+            },
+            "title": "Receipts",
+            "type": "array"
+          },
+          "received_on": {
+            "format": "date",
+            "title": "Received On",
+            "type": "string"
+          },
+          "reconciled_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reconciled At"
+          },
+          "reconciled_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reconciled By"
+          },
+          "reversal_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reversal Reason"
+          },
+          "state": {
+            "$ref": "#/components/schemas/IncomeState"
           },
           "work_id": {
             "format": "uuid",
@@ -1381,13 +1529,99 @@
           }
         },
         "required": [
+          "id",
           "work_id",
+          "folio",
+          "received_on",
           "concept",
-          "estimated_date",
           "amount",
+          "state",
+          "created_by",
+          "created_at"
+        ],
+        "title": "IncomeResponse",
+        "type": "object"
+      },
+      "IncomeState": {
+        "enum": [
+          "pendiente",
+          "conciliado"
+        ],
+        "title": "IncomeState",
+        "type": "string"
+      },
+      "IncomeStatusUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "state": {
+            "$ref": "#/components/schemas/IncomeState"
+          }
+        },
+        "required": [
           "state"
         ],
-        "title": "IncomeCreate",
+        "title": "IncomeStatusUpdate",
+        "type": "object"
+      },
+      "IncomeUpdate": {
+        "additionalProperties": false,
+        "description": "Partial edit of an income's data; state changes go through /status.",
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,14}|(?=[\\d.]{1,19}0*$)\\d{0,14}\\.\\d{0,4}0*$)",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount"
+          },
+          "concept": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "minLength": 3,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Concept"
+          },
+          "received_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Received On"
+          }
+        },
+        "title": "IncomeUpdate",
         "type": "object"
       },
       "JevChatRequest": {
@@ -1442,6 +1676,65 @@
           "tool_call_log_id"
         ],
         "title": "JevChatResponse",
+        "type": "object"
+      },
+      "LegacyIncomeCreate": {
+        "properties": {
+          "actual_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actual Date"
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,14}|(?=[\\d.]{1,19}0*$)\\d{0,14}\\.\\d{0,4}0*$)",
+                "type": "string"
+              }
+            ],
+            "title": "Amount"
+          },
+          "concept": {
+            "maxLength": 500,
+            "minLength": 3,
+            "title": "Concept",
+            "type": "string"
+          },
+          "estimated_date": {
+            "format": "date",
+            "title": "Estimated Date",
+            "type": "string"
+          },
+          "state": {
+            "pattern": "^(cobrado|por_cobrar)$",
+            "title": "State",
+            "type": "string"
+          },
+          "work_id": {
+            "format": "uuid",
+            "title": "Work Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "work_id",
+          "concept",
+          "estimated_date",
+          "amount",
+          "state"
+        ],
+        "title": "LegacyIncomeCreate",
         "type": "object"
       },
       "PreviewItemCorrection": {
@@ -3942,7 +4235,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/IncomeCreate"
+                "$ref": "#/components/schemas/LegacyIncomeCreate"
               }
             }
           },
@@ -3973,6 +4266,333 @@
           }
         },
         "summary": "Post Income",
+        "tags": [
+          "cashflow"
+        ]
+      }
+    },
+    "/api/v1/incomes/reconcile-batch": {
+      "post": {
+        "operationId": "post_incomes_reconcile_batch_api_v1_incomes_reconcile_batch_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IncomeBatchReconcile"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Post Incomes Reconcile Batch Api V1 Incomes Reconcile Batch Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Incomes Reconcile Batch",
+        "tags": [
+          "cashflow"
+        ]
+      }
+    },
+    "/api/v1/incomes/{income_id}": {
+      "get": {
+        "operationId": "get_income_detail_api_v1_incomes__income_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "income_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Income Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncomeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Income Detail",
+        "tags": [
+          "cashflow"
+        ]
+      },
+      "patch": {
+        "description": "Edit date, concept or amount (admin). The state is changed only via /status.",
+        "operationId": "patch_income_api_v1_incomes__income_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "income_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Income Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IncomeUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncomeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Patch Income",
+        "tags": [
+          "cashflow"
+        ]
+      }
+    },
+    "/api/v1/incomes/{income_id}/receipts": {
+      "post": {
+        "operationId": "post_income_receipt_api_v1_incomes__income_id__receipts_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "income_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Income Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IncomeReceiptCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncomeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Income Receipt",
+        "tags": [
+          "cashflow"
+        ]
+      }
+    },
+    "/api/v1/incomes/{income_id}/status": {
+      "patch": {
+        "description": "Reconcile (needs a stored receipt) or revert to pending (needs a reason).",
+        "operationId": "patch_income_status_api_v1_incomes__income_id__status_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "income_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Income Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IncomeStatusUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncomeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Patch Income Status",
         "tags": [
           "cashflow"
         ]
@@ -6347,6 +6967,136 @@
         "summary": "Get Work Expenses",
         "tags": [
           "expenses"
+        ]
+      }
+    },
+    "/api/v1/works/{work_id}/incomes": {
+      "get": {
+        "operationId": "get_work_incomes_api_v1_works__work_id__incomes_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/IncomeResponse"
+                  },
+                  "title": "Response Get Work Incomes Api V1 Works  Work Id  Incomes Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Work Incomes",
+        "tags": [
+          "cashflow"
+        ]
+      },
+      "post": {
+        "operationId": "post_work_income_api_v1_works__work_id__incomes_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "work_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Work Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IncomeCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncomeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Work Income",
+        "tags": [
+          "cashflow"
         ]
       }
     },

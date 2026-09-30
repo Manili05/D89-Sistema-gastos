@@ -4,8 +4,9 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { StatusPill } from '@/components/status-pill';
 import type { components } from '@/lib/api.generated';
-import { apiJson, getSupabaseBrowserClient } from '@/lib/auth';
+import { apiJson } from '@/lib/auth';
 import { displayCents, toUnits, trimDecimal } from '@/lib/money';
+import { openSignedReceipt, receiptFileName } from '@/lib/receipts';
 
 type ExpenseDetail = components['schemas']['ExpenseResponse'];
 type Receipt = ExpenseDetail['receipts'][number];
@@ -26,10 +27,7 @@ function stateTone(state: string): 'green' | 'amber' | 'red' | 'navy' {
   return 'amber';
 }
 
-function fileName(path: string): string {
-  // Stored as {obra}/{gasto}/{timestamp}-{id}-{name}: show the original name.
-  return path.split('/').pop()!.replace(/^\d+-(receipt-\d+-)?/, '');
-}
+const fileName = receiptFileName;
 
 /**
  * Read-only expense detail (header, concepts, totals, receipts). It has no form
@@ -64,19 +62,10 @@ export function ExpenseDetailView({ expenseId, onClose }: { expenseId: string; o
 
   async function openReceipt(receipt: Receipt, download: boolean) {
     setReceiptError('');
-    const { data, error: storageError } = await getSupabaseBrowserClient().storage.from('comprobantes')
-      .createSignedUrl(receipt.path, 300, download ? { download: fileName(receipt.path) } : undefined);
-    if (storageError || !data) {
-      setReceiptError(storageError?.message || 'No fue posible abrir el comprobante.');
-      return;
-    }
-    if (download) {
-      const link = document.createElement('a');
-      link.href = data.signedUrl;
-      link.rel = 'noopener';
-      link.click();
-    } else {
-      window.open(data.signedUrl, '_blank', 'noopener,noreferrer');
+    try {
+      await openSignedReceipt(receipt.path, download);
+    } catch (reason) {
+      setReceiptError(reason instanceof Error ? reason.message : 'No fue posible abrir el comprobante.');
     }
   }
 

@@ -274,6 +274,81 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/incomes/reconcile-batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Post Incomes Reconcile Batch */
+        post: operations["post_incomes_reconcile_batch_api_v1_incomes_reconcile_batch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/incomes/{income_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Income Detail */
+        get: operations["get_income_detail_api_v1_incomes__income_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Patch Income
+         * @description Edit date, concept or amount (admin). The state is changed only via /status.
+         */
+        patch: operations["patch_income_api_v1_incomes__income_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/incomes/{income_id}/receipts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Post Income Receipt */
+        post: operations["post_income_receipt_api_v1_incomes__income_id__receipts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/incomes/{income_id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Patch Income Status
+         * @description Reconcile (needs a stored receipt) or revert to pending (needs a reason).
+         */
+        patch: operations["patch_income_status_api_v1_incomes__income_id__status_patch"];
+        trace?: never;
+    };
     "/api/v1/neodata/imports/{import_id}/confirm": {
         parameters: {
             query?: never;
@@ -672,6 +747,24 @@ export interface paths {
         get: operations["get_work_expenses_api_v1_works__work_id__expenses_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/works/{work_id}/incomes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Work Incomes */
+        get: operations["get_work_incomes_api_v1_works__work_id__incomes_get"];
+        put?: never;
+        /** Post Work Income */
+        post: operations["post_work_income_api_v1_works__work_id__incomes_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1184,26 +1277,117 @@ export interface components {
             /** Items */
             items: components["schemas"]["PreviewItemCorrection"][];
         };
-        /** IncomeCreate */
-        IncomeCreate: {
-            /** Actual Date */
-            actual_date?: string | null;
-            /** Amount */
-            amount: number | string;
-            /** Concept */
-            concept: string;
-            /**
-             * Estimated Date
-             * Format: date
-             */
-            estimated_date: string;
-            /** State */
-            state: string;
+        /** IncomeBatchReconcile */
+        IncomeBatchReconcile: {
+            /** Income Ids */
+            income_ids: string[];
             /**
              * Work Id
              * Format: uuid
              */
             work_id: string;
+        };
+        /** IncomeCreate */
+        IncomeCreate: {
+            /** Amount */
+            amount: number | string;
+            /** Concept */
+            concept: string;
+            /**
+             * Received On
+             * Format: date
+             */
+            received_on: string;
+            /** @default pendiente */
+            state: components["schemas"]["IncomeState"];
+        };
+        /** IncomeReceipt */
+        IncomeReceipt: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Kind */
+            kind: string;
+            /** Path */
+            path: string;
+        };
+        /** IncomeReceiptCreate */
+        IncomeReceiptCreate: {
+            /** Path */
+            path: string;
+        };
+        /** IncomeResponse */
+        IncomeResponse: {
+            /** Amount */
+            amount: string;
+            /** Concept */
+            concept: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Created By
+             * Format: uuid
+             */
+            created_by: string;
+            /** Folio */
+            folio: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Receipts */
+            receipts?: components["schemas"]["IncomeReceipt"][];
+            /**
+             * Received On
+             * Format: date
+             */
+            received_on: string;
+            /** Reconciled At */
+            reconciled_at?: string | null;
+            /** Reconciled By */
+            reconciled_by?: string | null;
+            /** Reversal Reason */
+            reversal_reason?: string | null;
+            state: components["schemas"]["IncomeState"];
+            /**
+             * Work Id
+             * Format: uuid
+             */
+            work_id: string;
+        };
+        /**
+         * IncomeState
+         * @enum {string}
+         */
+        IncomeState: "pendiente" | "conciliado";
+        /** IncomeStatusUpdate */
+        IncomeStatusUpdate: {
+            /** Reason */
+            reason?: string | null;
+            state: components["schemas"]["IncomeState"];
+        };
+        /**
+         * IncomeUpdate
+         * @description Partial edit of an income's data; state changes go through /status.
+         */
+        IncomeUpdate: {
+            /** Amount */
+            amount?: number | string | null;
+            /** Concept */
+            concept?: string | null;
+            /** Received On */
+            received_on?: string | null;
         };
         /** JevChatRequest */
         JevChatRequest: {
@@ -1223,6 +1407,27 @@ export interface components {
              * Format: uuid
              */
             tool_call_log_id: string;
+        };
+        /** LegacyIncomeCreate */
+        LegacyIncomeCreate: {
+            /** Actual Date */
+            actual_date?: string | null;
+            /** Amount */
+            amount: number | string;
+            /** Concept */
+            concept: string;
+            /**
+             * Estimated Date
+             * Format: date
+             */
+            estimated_date: string;
+            /** State */
+            state: string;
+            /**
+             * Work Id
+             * Format: uuid
+             */
+            work_id: string;
         };
         /** PreviewItemCorrection */
         PreviewItemCorrection: {
@@ -2183,7 +2388,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["IncomeCreate"];
+                "application/json": components["schemas"]["LegacyIncomeCreate"];
             };
         };
         responses: {
@@ -2196,6 +2401,187 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_incomes_reconcile_batch_api_v1_incomes_reconcile_batch_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IncomeBatchReconcile"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_income_detail_api_v1_incomes__income_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                income_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IncomeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_income_api_v1_incomes__income_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                income_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IncomeUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IncomeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_income_receipt_api_v1_incomes__income_id__receipts_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                income_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IncomeReceiptCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IncomeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_income_status_api_v1_incomes__income_id__status_patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                income_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IncomeStatusUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IncomeResponse"];
                 };
             };
             /** @description Validation Error */
@@ -3427,6 +3813,76 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_work_incomes_api_v1_works__work_id__incomes_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                work_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IncomeResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_work_income_api_v1_works__work_id__incomes_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                work_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IncomeCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IncomeResponse"];
                 };
             };
             /** @description Validation Error */

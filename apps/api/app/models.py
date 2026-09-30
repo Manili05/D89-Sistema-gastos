@@ -321,13 +321,96 @@ class ReceiptUpdate(BaseModel):
     path: str = Field(min_length=10, max_length=500)
 
 
-class IncomeCreate(BaseModel):
+class LegacyIncomeCreate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     work_id: UUID
     concept: str = Field(min_length=3, max_length=500)
     estimated_date: date
     actual_date: date | None = None
-    amount: Decimal = Field(gt=0, decimal_places=4)
+    amount: Decimal = Field(gt=0, max_digits=18, decimal_places=4)
     state: str = Field(pattern="^(cobrado|por_cobrar)$")
+
+
+class IncomeState(StrEnum):
+    PENDIENTE = "pendiente"
+    CONCILIADO = "conciliado"
+
+
+class IncomeCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    received_on: date
+    concept: str = Field(min_length=3, max_length=500)
+    amount: Decimal = Field(gt=0, max_digits=18, decimal_places=4)
+    state: IncomeState = IncomeState.PENDIENTE
+
+
+class IncomeUpdate(BaseModel):
+    """Partial edit of an income's data; state changes go through /status."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    received_on: date | None = None
+    concept: str | None = Field(default=None, min_length=3, max_length=500)
+    amount: Decimal | None = Field(default=None, gt=0, max_digits=18, decimal_places=4)
+
+    @model_validator(mode="after")
+    def at_least_one_field(self) -> "IncomeUpdate":
+        if not self.model_fields_set or all(
+            getattr(self, name) is None for name in self.model_fields_set
+        ):
+            raise ValueError("Indica al menos un campo a modificar")
+        return self
+
+
+class IncomeReceiptCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    path: str = Field(min_length=10, max_length=500)
+
+
+class IncomeReceipt(BaseModel):
+    id: UUID
+    path: str
+    kind: str
+    created_at: datetime
+
+
+class IncomeResponse(BaseModel):
+    id: UUID
+    work_id: UUID
+    folio: str
+    received_on: date
+    concept: str
+    amount: Decimal
+    state: IncomeState
+    created_by: UUID
+    created_at: datetime
+    receipts: list[IncomeReceipt] = Field(default_factory=list)
+    reconciled_at: datetime | None = None
+    reconciled_by: str | None = None
+    reversal_reason: str | None = None
+
+
+class IncomeStatusUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    state: IncomeState
+    reason: str | None = Field(default=None, max_length=500)
+
+    @model_validator(mode="after")
+    def reversal_needs_reason(self) -> "IncomeStatusUpdate":
+        if self.state is IncomeState.PENDIENTE and (not self.reason or len(self.reason) < 5):
+            raise ValueError("Revertir una conciliación requiere un motivo (mínimo 5 caracteres)")
+        return self
+
+
+class IncomeBatchReconcile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    work_id: UUID
+    income_ids: list[UUID] = Field(min_length=1, max_length=100)
 
 
 class SubcontractCreate(BaseModel):

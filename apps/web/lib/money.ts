@@ -127,3 +127,11 @@ export function newLine(overrides: Partial<LineDraft> = {}): LineDraft {
     discount: '', taxable: true, ...overrides,
   };
 }
+
+/** API decimal (up to 4 places, e.g. "1250.0050") → cents, rounded HALF_UP like the backend. */
+export function centsFromDecimal(value: string | number | null | undefined): bigint | null {
+  if (value === null || value === undefined) return null;
+  const units = toUnits(trimDecimal(value).replace(/,/g, ''));
+  if (units === null) return null;
+  return (units + 50n) / 100n; // 10^-4 → 10^-2, half up for non-negative amounts
+}

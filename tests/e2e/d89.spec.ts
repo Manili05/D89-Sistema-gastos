@@ -107,6 +107,7 @@ test.beforeEach(async ({ page }) => {
       areas: [{ id: areaId, parent_id: null, nombre: 'Oficina', ruta: ['OFICINA'], nivel: 0, seleccionable: true, budget: '2624832.88', validated: '18450', committed: '22600', available: '2606382.88', execution_percent: '0.70' }],
       weekly: [{ week: '2026-08-24', validated: '18450', pending: '4150' }],
       suppliers: [{ name: 'Concretos Toluca', amount: '18450' }], categories: [{ name: 'MATERIAL', amount: '18450' }],
+      incomes: { total: '170000.0050', reconciled: '120000.0050', pending: '50000.0000', count: 2 },
     } });
   });
   await page.route(`**/api/v1/works/${workId}/expenses**`, async (route) => {
@@ -1410,4 +1411,534 @@ test('administrador adjunta un comprobante faltante desde validación', async ({
   await expect(page.getByRole('status')).toContainText('ya puede validarse');
   await expect(page.getByRole('button', { name: 'Ver archivo' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Validar', exact: true })).toBeEnabled();
+});
+
+// --- Ingresos ------------------------------------------------------------------------
+
+const incomeRows = [
+  {
+    id: '71717171-7171-4171-8171-717171717171', work_id: workId, folio: 'I-00002', received_on: '2026-09-20',
+    concept: 'Estimación 1', amount: '120000.0050', state: 'conciliado', created_by: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    created_at: '2026-09-20T12:00:00Z', reconciled_at: '2026-09-21T15:30:00Z', reconciled_by: 'Sergio Gómez', reversal_reason: null,
+    receipts: [{ id: '72727272-7272-4272-8272-727272727272', path: `${workId}/71717171-7171-4171-8171-717171717171/1759000000000-income-receipt-1-transferencia.pdf`, kind: 'pdf', created_at: '2026-09-20T12:01:00Z' }],
+  },
+  {
+    id: '73737373-7373-4373-8373-737373737373', work_id: workId, folio: 'I-00001', received_on: '2026-09-01',
+    concept: 'Anticipo', amount: '50000.0000', state: 'pendiente', created_by: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    created_at: '2026-09-01T12:00:00Z', receipts: [],
+  },
+];
+
+test('Ingresos: pestaña con listado, totales y comprobantes para ver o descargar', async ({ page }) => {
+  const mutations: string[] = [];
+  page.on('request', (request) => {
+    if (request.url().includes('/api/v1/') && request.method() !== 'GET') mutations.push(`${request.method()} ${request.url()}`);
+  });
+  await page.route(`**/api/v1/works/${workId}/incomes`, async (route) => {
+    await route.fulfill({ json: incomeRows });
+  });
+  const signed: string[] = [];
+  await page.route('**/storage/v1/object/sign/comprobantes/**', async (route) => {
+    signed.push(decodeURIComponent(new URL(route.request().url()).pathname));
+    await route.fulfill({ json: { signedURL: '/object/sign/comprobantes/firmado.pdf?token=ingreso' } });
+  });
+  await page.route('**/storage/v1/object/sign/comprobantes/firmado.pdf**', async (route) => {
+    await route.fulfill({ body: '%PDF-1.4', contentType: 'application/pdf' });
+  });
+  await login(page);
+  await page.goto(`/obras/${workId}/gastos`);
+  await page.getByRole('navigation', { name: 'Secciones de la obra' }).getByRole('link', { name: 'Ingresos', exact: true }).click();
+  // First visit compiles the new route in `next dev`; production has no such delay.
+  await expect(page).toHaveURL(new RegExp(`/obras/${workId}/ingresos$`), { timeout: 30_000 });
+  const table = page.getByRole('table', { name: 'Ingresos de la obra' });
+  await expect(table.getByRole('row')).toHaveCount(3);
+  // The period filter does not apply to incomes, so it is not offered here.
+  await expect(page.getByLabel('Periodo')).toHaveCount(0);
+  const reconciled = table.getByRole('row').filter({ hasText: 'I-00002' });
+  // 120000.0050 rounds HALF_UP to $120,000.01 (no truncation).
+  await expect(reconciled).toContainText('$120,000.01');
+  await expect(reconciled).toContainText('Conciliado');
+  await expect(reconciled).toContainText('transferencia.pdf');
+  await expect(table.getByRole('row').filter({ hasText: 'I-00001' })).toContainText('Pendiente');
+  await expect(table.getByRole('row').filter({ hasText: 'I-00001' })).toContainText('Sin comprobantes');
+  await expect(page.getByTestId('income-total')).toHaveText('$170,000.01');
+  await expect(page.getByTestId('income-pending')).toHaveText('$50,000.00');
+  await expect(page.getByTestId('income-reconciled')).toHaveText('$120,000.01');
+  const popup = page.waitForEvent('popup');
+  await table.getByRole('button', { name: 'Ver transferencia.pdf del ingreso I-00002' }).click();
+  expect((await popup).url()).toContain('token=ingreso');
+  const download = page.waitForEvent('download');
+  await table.getByRole('button', { name: 'Descargar transferencia.pdf del ingreso I-00002' }).click();
+  await download;
+  expect(signed).toHaveLength(2);
+  expect(signed[0]).toContain(`/${workId}/71717171-7171-4171-8171-717171717171/`);
+  expect(mutations).toEqual([]);
+});
+
+test('Ingresos: registrar con arrastrar y soltar varios comprobantes; el reintento no duplica el ingreso', async ({ page }) => {
+  const incomeId = '74747474-7474-4474-8474-747474747474';
+  const created: Record<string, unknown>[] = [];
+  const uploads: { path: string; type: string | undefined }[] = [];
+  const linked: string[] = [];
+  let listed = [incomeRows[1]];
+  await page.route(`**/api/v1/works/${workId}/incomes`, async (route) => {
+    if (route.request().method() === 'POST') {
+      created.push(route.request().postDataJSON());
+      await route.fulfill({ status: 201, json: { ...incomeRows[1], id: incomeId, folio: 'I-00003', concept: 'Estimación 2', amount: '85000.5000', received_on: '2026-09-28', receipts: [] } });
+    } else {
+      await route.fulfill({ json: listed });
+    }
+  });
+  await page.route('**/storage/v1/object/comprobantes/**', async (route) => {
+    uploads.push({ path: decodeURIComponent(new URL(route.request().url()).pathname), type: uploadedPartType(route.request().postDataBuffer()) });
+    if (uploads.length === 1) await route.fulfill({ status: 500, json: { message: 'Fallo simulado de subida' } });
+    else await route.fulfill({ json: { Key: 'ok' } });
+  });
+  await page.route(`**/api/v1/incomes/${incomeId}/receipts`, async (route) => {
+    linked.push(route.request().postDataJSON().path);
+    await route.fulfill({ json: { ...incomeRows[1], id: incomeId, folio: 'I-00003', receipts: [] } });
+  });
+  await login(page);
+  await page.goto(`/obras/${workId}/ingresos`);
+  await page.getByRole('button', { name: 'Nuevo ingreso' }).click();
+  const form = page.getByRole('form', { name: 'Nuevo ingreso' });
+  await form.getByLabel('Fecha').fill('2026-09-28');
+  await form.getByLabel('Concepto').fill('Estimación 2');
+  await form.getByLabel('Importe').fill('85000.50');
+  await expect(form.getByText('$85,000.50')).toBeVisible();
+  // Real drag & drop of two files onto the drop zone.
+  const files = await page.evaluateHandle(() => {
+    const transfer = new DataTransfer();
+    transfer.items.add(new File(['%PDF-1.4'], 'transferencia.pdf', { type: 'application/pdf' }));
+    transfer.items.add(new File(['jpg'], 'factura.jpg', { type: 'image/jpeg' }));
+    return transfer;
+  });
+  const dropzone = form.locator('.dropzone');
+  await dropzone.dispatchEvent('dragover', { dataTransfer: files });
+  await expect(dropzone).toHaveClass(/dragging/);
+  await dropzone.dispatchEvent('drop', { dataTransfer: files });
+  await expect(form.locator('.receipt-list li')).toHaveCount(2);
+  // A non PDF/image file is refused without being added.
+  await form.getByLabel('Comprobantes del ingreso').setInputFiles({ name: 'datos.xml', mimeType: 'application/xml', buffer: Buffer.from('<x/>') });
+  await expect(form.getByRole('alert')).toContainText('datos.xml: sólo PDF o imagen');
+  await expect(form.locator('.receipt-list li')).toHaveCount(2);
+
+  await form.getByRole('button', { name: 'Registrar ingreso' }).click();
+  await expect(form.getByRole('alert')).toContainText('El ingreso I-00003 ya está guardado');
+  await expect(form.getByLabel('Importe')).toBeDisabled();
+  listed = [{ ...incomeRows[1], id: incomeId, folio: 'I-00003', concept: 'Estimación 2', amount: '85000.5000', received_on: '2026-09-28', receipts: [] }, incomeRows[1]];
+  await form.getByRole('button', { name: 'Reintentar comprobantes (1)' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Ingreso I-00003 registrado.' })).toBeVisible();
+  await expect(form).toHaveCount(0);
+  await expect(page.getByRole('table', { name: 'Ingresos de la obra' }).getByRole('row').filter({ hasText: 'I-00003' })).toContainText('$85,000.50');
+  expect(created).toEqual([{ received_on: '2026-09-28', concept: 'Estimación 2', amount: '85000.50', state: 'pendiente' }]);
+  // PDF failed once and was retried alone; the image uploaded; both linked once.
+  expect(uploads.map((upload) => upload.type)).toEqual(['application/pdf', 'image/jpeg', 'application/pdf']);
+  expect(uploads.every((upload) => upload.path.includes(`/${workId}/${incomeId}/`))).toBe(true);
+  expect(linked).toHaveLength(2);
+  expect(new Set(linked).size).toBe(2);
+});
+
+test('Ingresos: operativo consulta pero no registra', async ({ page }) => {
+  await page.route(new RegExp(`/api/v1/works/${workId}$`), async (route) => {
+    await route.fulfill({ json: { id: workId, nombre: 'Infra Toluca', ubicacion: 'Toluca', fecha_inicio: '2026-01-01', fecha_fin: null, estado: 'activa', areas: 1, partidas: 1, permissions: { can_manage: false, can_validate: false } } });
+  });
+  await page.route(`**/api/v1/works/${workId}/incomes`, async (route) => { await route.fulfill({ json: incomeRows }); });
+  await login(page);
+  await page.goto(`/obras/${workId}/ingresos`);
+  await expect(page.getByRole('table', { name: 'Ingresos de la obra' }).getByRole('row')).toHaveCount(3);
+  await expect(page.getByRole('button', { name: 'Nuevo ingreso' })).toHaveCount(0);
+});
+
+test('Ingresos: el estado vacío no ofrece registrar a operativo', async ({ page }) => {
+  await page.route(new RegExp(`/api/v1/works/${workId}$`), async (route) => {
+    await route.fulfill({ json: { id: workId, nombre: 'Infra Toluca', ubicacion: 'Toluca', fecha_inicio: '2026-01-01', fecha_fin: null, estado: 'activa', areas: 1, partidas: 1, permissions: { can_manage: false, can_validate: false } } });
+  });
+  await page.route(`**/api/v1/works/${workId}/incomes`, async (route) => { await route.fulfill({ json: [] }); });
+  await login(page);
+  await page.goto(`/obras/${workId}/ingresos`);
+  await expect(page.getByRole('heading', { name: 'Aún no hay ingresos registrados en esta obra' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Registrar el primer ingreso' })).toHaveCount(0);
+});
+
+test('Resumen: tarjetas de ingresos, gráfica de flujo con tooltip y Control por área colapsable', async ({ page }) => {
+  await login(page);
+  await page.goto(`/obras/${workId}`);
+  await expect(page.getByTestId('overview-income-total')).toHaveText('$170,000.01');
+  await expect(page.getByTestId('overview-income-reconciled')).toHaveText('$120,000.01');
+  await expect(page.getByTestId('overview-income-pending')).toHaveText('$50,000.00');
+  // Net flow = reconciled − validated, with sign and words (not only color).
+  await expect(page.getByTestId('overview-net-flow')).toHaveText('+$101,550.01');
+  await expect(page.getByText('Superávit: conciliado menos gasto validado')).toBeVisible();
+
+  // Common axis ending at a round $200,000: widths are proportional to the amounts.
+  const expense = page.getByTestId('cashflow-bar-validated');
+  const income = page.getByTestId('cashflow-bar-reconciled');
+  await expect(expense.locator('.cashflow-bar')).toHaveAttribute('data-width', '9.22');
+  await expect(income.locator('.cashflow-bar')).toHaveAttribute('data-width', '60.00');
+  await expect(expense).toContainText('$18,450.00');
+  await expect(income).toContainText('$120,000.01');
+  await expect(page.getByRole('list', { name: 'Leyenda' })).toContainText('Ingreso conciliado');
+  await expect(page.getByTestId('cashflow-health')).toContainText('cubre 650.4 % del gasto validado');
+  await expect(page.getByTestId('cashflow-health')).toContainText('Gasto cubierto');
+  // Tooltip on hover and on keyboard focus (desktop; phones rely on the direct labels).
+  await expect(page.getByRole('tooltip')).toHaveCount(0);
+  if (test.info().project.name === 'mobile-chromium') {
+    await income.click();
+    await expect(page.getByRole('tooltip')).toBeHidden();
+  } else {
+    await income.hover();
+    await expect(page.getByRole('tooltip')).toContainText('Ingreso conciliado');
+    await expect(page.getByRole('tooltip')).toContainText('Gasto validado: $18,450.00');
+    await page.mouse.move(0, 0);
+    await expect(page.getByRole('tooltip')).toHaveCount(0);
+    await expense.focus();
+    await expect(page.getByRole('tooltip')).toContainText('$18,450.00');
+    await expect(expense).toHaveAttribute('aria-describedby', /.+/);
+  }
+  // Screen-reader table carries the same numbers.
+  const table = page.getByRole('table', { name: 'Gasto validado contra ingreso conciliado' });
+  await expect(table.getByRole('row', { name: /Ingreso conciliado/ })).toContainText('$120,000.01');
+
+  // "Control por área" starts closed and toggles with aria-expanded.
+  const toggle = page.getByRole('button', { name: /Control por área/ });
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.locator('#area-control-body')).toBeHidden();
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.locator('#area-control-body')).toContainText('Oficina');
+  await expect(page.locator('#area-control-body')).toContainText('0.7%');
+  await toggle.press('Enter');
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.locator('#area-control-body')).toBeHidden();
+});
+
+test('Resumen: déficit cuando el gasto validado supera al ingreso conciliado', async ({ page }) => {
+  await page.route(`**/api/v1/works/${workId}/overview**`, async (route) => {
+    await route.fulfill({ json: {
+      totals: { budget: '100000', validated: '40000', committed: '40000', available: '60000', projected_available: '60000', execution_percent: '40', pending: '0', pending_count: 0, rejected_count: 0, missing_receipts: 0 },
+      period: { validated: '40000', pending: '0' }, areas: [], weekly: [], suppliers: [], categories: [],
+      incomes: { total: '10000', reconciled: '10000', pending: '0', count: 1 },
+    } });
+  });
+  await login(page);
+  await page.goto(`/obras/${workId}`);
+  await expect(page.getByTestId('overview-net-flow')).toHaveText('−$30,000.00');
+  await expect(page.getByText('Déficit: conciliado menos gasto validado')).toBeVisible();
+  await expect(page.getByTestId('cashflow-health')).toContainText('Cobertura parcial');
+  await expect(page.getByTestId('cashflow-health')).toContainText('cubre 25.0 %');
+});
+
+const pendingWithReceipt = (id: string, folio: string, amount: string) => ({
+  ...incomeRows[1], id, folio, amount, concept: `Estimación ${folio}`, reconciled_at: null, reconciled_by: null, reversal_reason: null,
+  receipts: [{ id: `${id.slice(0, 8)}-0000-4000-8000-000000000001`, path: `${workId}/${id}/1759000000000-income-receipt-1-deposito.pdf`, kind: 'pdf', created_at: '2026-09-22T12:00:00Z' }],
+});
+
+test('Validación: conciliar ingresos por renglón y por lote; sin comprobante no se puede', async ({ page }) => {
+  const a = pendingWithReceipt('75757575-7575-4575-8575-757575757575', 'I-00004', '30000.0000');
+  const b = pendingWithReceipt('76767676-7676-4676-8676-767676767676', 'I-00005', '15000.0000');
+  const c = pendingWithReceipt('77777777-7777-4777-8777-777777777777', 'I-00006', '5000.0000');
+  let rows: Record<string, unknown>[] = [incomeRows[0], incomeRows[1], a, b, c];
+  const patches: { id: string; body: unknown }[] = [];
+  const batches: unknown[] = [];
+  const reconcile = (ids: string[]) => {
+    rows = rows.map((row) => ids.includes(row.id as string) ? { ...row, state: 'conciliado', reconciled_by: 'Administrador D89', reconciled_at: '2026-09-29T10:00:00Z' } : row);
+  };
+  await page.route(`**/api/v1/works/${workId}/incomes`, async (route) => { await route.fulfill({ json: rows }); });
+  await page.route('**/api/v1/incomes/*/status', async (route) => {
+    const id = new URL(route.request().url()).pathname.split('/').at(-2)!;
+    expect(route.request().method()).toBe('PATCH');
+    patches.push({ id, body: route.request().postDataJSON() });
+    reconcile([id]);
+    await route.fulfill({ json: rows.find((row) => row.id === id) });
+  });
+  await page.route('**/api/v1/incomes/reconcile-batch', async (route) => {
+    const body = route.request().postDataJSON();
+    batches.push(body);
+    reconcile(body.income_ids);
+    await route.fulfill({ json: { reconciled: body.income_ids.length, income_ids: body.income_ids } });
+  });
+  await login(page);
+  await page.goto(`/obras/${workId}/validacion`);
+  // Expenses stay the default view; the selector switches to incomes.
+  await expect(page.getByRole('heading', { name: 'Gastos pendientes de validar' })).toBeVisible();
+  const selector = page.getByRole('radiogroup', { name: 'Qué validar' });
+  await selector.getByRole('radio', { name: 'Conciliar ingresos' }).click();
+  await expect(page.getByRole('heading', { name: 'Ingresos pendientes de conciliar' })).toBeVisible();
+  await expect(page.getByLabel('Periodo')).toHaveCount(0);
+  const pendingTable = page.getByRole('table', { name: 'Ingresos pendientes de conciliar' });
+  await expect(pendingTable.getByRole('row')).toHaveCount(5);
+
+  // No receipt: checkbox and action disabled, with the hint.
+  const bare = pendingTable.getByRole('row').filter({ hasText: 'I-00001' });
+  await expect(bare).toContainText('Adjunta un comprobante en Ingresos');
+  await expect(bare.getByRole('checkbox')).toBeDisabled();
+  await expect(bare.getByRole('button', { name: 'Conciliar ingreso I-00001' })).toBeDisabled();
+
+  // Per row.
+  await pendingTable.getByRole('button', { name: 'Conciliar ingreso I-00004' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Ingreso I-00004 conciliado.' })).toBeVisible();
+  expect(patches).toEqual([{ id: a.id, body: { state: 'conciliado' } }]);
+  await expect(pendingTable.getByRole('row')).toHaveCount(4);
+
+  // Batch.
+  const batchButton = page.getByRole('button', { name: /Conciliar seleccionados/ });
+  await expect(batchButton).toBeDisabled();
+  await pendingTable.getByRole('checkbox', { name: 'Seleccionar ingreso I-00005' }).check();
+  await pendingTable.getByRole('checkbox', { name: 'Seleccionar ingreso I-00006' }).check();
+  await expect(batchButton).toHaveText('Conciliar seleccionados (2)');
+  await batchButton.click();
+  await expect(page.getByRole('status').filter({ hasText: '2 ingresos conciliados.' })).toBeVisible();
+  expect(batches).toEqual([{ work_id: workId, income_ids: [b.id, c.id] }]);
+  await expect(pendingTable.getByRole('row')).toHaveCount(2);
+  const reconciledTable = page.getByRole('table', { name: 'Ingresos conciliados' });
+  await expect(reconciledTable.getByRole('row')).toHaveCount(5);
+  await expect(reconciledTable.getByRole('row').filter({ hasText: 'I-00004' })).toContainText('Administrador D89');
+  await expect(batchButton).toHaveText('Conciliar seleccionados (0)');
+});
+
+test('Validación: revertir una conciliación exige motivo y se puede cancelar', async ({ page }) => {
+  let rows: Record<string, unknown>[] = [incomeRows[0]];
+  const patches: unknown[] = [];
+  await page.route(`**/api/v1/works/${workId}/incomes`, async (route) => { await route.fulfill({ json: rows }); });
+  await page.route(`**/api/v1/incomes/${incomeRows[0].id}/status`, async (route) => {
+    const body = route.request().postDataJSON();
+    patches.push(body);
+    rows = [{ ...incomeRows[0], state: 'pendiente', reconciled_at: null, reconciled_by: null, reversal_reason: body.reason }];
+    await route.fulfill({ json: rows[0] });
+  });
+  await login(page);
+  await page.goto(`/obras/${workId}/validacion`);
+  await page.getByRole('radiogroup', { name: 'Qué validar' }).getByRole('radio', { name: 'Conciliar ingresos' }).click();
+  const reconciledTable = page.getByRole('table', { name: 'Ingresos conciliados' });
+  await expect(reconciledTable).toContainText('Sergio Gómez');
+  await reconciledTable.getByRole('button', { name: 'Revertir conciliación del ingreso I-00002' }).click();
+  await reconciledTable.getByRole('button', { name: 'Cancelar' }).click();
+  await expect(reconciledTable.getByLabel('Motivo de la reversión')).toHaveCount(0);
+  await reconciledTable.getByRole('button', { name: 'Revertir conciliación del ingreso I-00002' }).click();
+  const confirm = reconciledTable.getByRole('button', { name: 'Confirmar reversión' });
+  await expect(confirm).toBeDisabled();
+  await reconciledTable.getByLabel('Motivo de la reversión').fill('abc');
+  await expect(confirm).toBeDisabled();
+  await reconciledTable.getByLabel('Motivo de la reversión').fill('Depósito duplicado');
+  await confirm.click();
+  await expect(page.getByRole('status').filter({ hasText: 'Conciliación del ingreso I-00002 revertida.' })).toBeVisible();
+  expect(patches).toEqual([{ state: 'pendiente', reason: 'Depósito duplicado' }]);
+  const pendingTable = page.getByRole('table', { name: 'Ingresos pendientes de conciliar' });
+  await expect(pendingTable.getByRole('row').filter({ hasText: 'I-00002' })).toContainText('Revertido: Depósito duplicado');
+  await expect(page.getByRole('table', { name: 'Ingresos conciliados' })).toHaveCount(0);
+});
+
+test('Validación: un error de la API al conciliar se muestra y no cambia la lista', async ({ page }) => {
+  const a = pendingWithReceipt('75757575-7575-4575-8575-757575757575', 'I-00004', '30000.0000');
+  await page.route(`**/api/v1/works/${workId}/incomes`, async (route) => { await route.fulfill({ json: [a] }); });
+  await page.route('**/api/v1/incomes/*/status', async (route) => {
+    await route.fulfill({ status: 422, json: { detail: 'Adjunta al menos un comprobante antes de conciliar' } });
+  });
+  await login(page);
+  await page.goto(`/obras/${workId}/validacion`);
+  await page.getByRole('radiogroup', { name: 'Qué validar' }).getByRole('radio', { name: 'Conciliar ingresos' }).click();
+  await page.getByRole('button', { name: 'Conciliar ingreso I-00004' }).click();
+  await expect(page.locator('.notice.error')).toContainText('Adjunta al menos un comprobante');
+  await expect(page.getByRole('table', { name: 'Ingresos pendientes de conciliar' }).getByRole('row')).toHaveCount(2);
+});
+
+test('Ingresos: tarjetas homologadas, quién concilió y estado vacío con acción para administración', async ({ page }) => {
+  let rows: Record<string, unknown>[] = incomeRows;
+  await page.route(`**/api/v1/works/${workId}/incomes`, async (route) => { await route.fulfill({ json: rows }); });
+  await login(page);
+  await page.goto(`/obras/${workId}/ingresos`);
+  const cards = page.getByRole('region', { name: 'Resumen de ingresos' });
+  await expect(cards.locator('.metric-card')).toHaveCount(3);
+  const reconciled = page.getByRole('table', { name: 'Ingresos de la obra' }).getByRole('row').filter({ hasText: 'I-00002' });
+  await expect(reconciled).toContainText('Sergio Gómez');
+  rows = [];
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Aún no hay ingresos registrados en esta obra' })).toBeVisible();
+  await page.getByRole('button', { name: 'Registrar el primer ingreso' }).click();
+  await expect(page.getByRole('form', { name: 'Nuevo ingreso' })).toBeVisible();
+});
+
+// --- Ingresos: consulta y edición ------------------------------------------------------
+
+test('Ingresos: Ver abre la consulta de sólo lectura con comprobantes; operativo no ve Editar', async ({ page }) => {
+  const mutations: string[] = [];
+  page.on('request', (request) => {
+    if (request.url().includes('/api/v1/') && request.method() !== 'GET') mutations.push(`${request.method()} ${request.url()}`);
+  });
+  await page.route(new RegExp(`/api/v1/works/${workId}$`), async (route) => {
+    await route.fulfill({ json: { id: workId, nombre: 'Infra Toluca', ubicacion: 'Toluca', fecha_inicio: '2026-01-01', fecha_fin: null, estado: 'activa', areas: 1, partidas: 1, permissions: { can_manage: false, can_validate: false } } });
+  });
+  await page.route(`**/api/v1/works/${workId}/incomes`, async (route) => { await route.fulfill({ json: incomeRows }); });
+  await page.route(`**/api/v1/incomes/${incomeRows[0].id}`, async (route) => { await route.fulfill({ json: incomeRows[0] }); });
+  const signed: string[] = [];
+  await page.route('**/storage/v1/object/sign/comprobantes/**', async (route) => {
+    signed.push(decodeURIComponent(new URL(route.request().url()).pathname));
+    await route.fulfill({ json: { signedURL: '/object/sign/comprobantes/firmado.pdf?token=ingreso' } });
+  });
+  await page.route('**/storage/v1/object/sign/comprobantes/firmado.pdf**', async (route) => {
+    await route.fulfill({ body: '%PDF-1.4', contentType: 'application/pdf' });
+  });
+  await login(page);
+  await page.goto(`/obras/${workId}/ingresos`);
+  const table = page.getByRole('table', { name: 'Ingresos de la obra' });
+  await expect(table.getByRole('columnheader', { name: 'Acciones' })).toBeVisible();
+  await expect(table.getByRole('button', { name: /^Editar ingreso/ })).toHaveCount(0);
+  const viewButton = table.getByRole('button', { name: 'Ver ingreso I-00002' });
+  await viewButton.click();
+  const dialog = page.getByRole('dialog', { name: 'Ingreso I-00002' });
+  await expect(dialog).toContainText('Consulta de ingreso · sólo lectura');
+  await expect(dialog.getByTestId('income-detail-amount')).toHaveText('$120,000.01');
+  await expect(dialog).toContainText('Estimación 1');
+  await expect(dialog).toContainText('2026-09-20');
+  await expect(dialog).toContainText('Conciliado');
+  await expect(dialog).toContainText('Sergio Gómez');
+  await expect(dialog.getByRole('textbox')).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: 'Editar' })).toHaveCount(0);
+  const popup = page.waitForEvent('popup');
+  await dialog.getByRole('button', { name: 'Ver transferencia.pdf' }).click();
+  expect((await popup).url()).toContain('token=ingreso');
+  const download = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: 'Descargar transferencia.pdf' }).click();
+  await download;
+  expect(signed).toHaveLength(2);
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(viewButton).toBeFocused();
+  expect(mutations).toEqual([]);
+});
+
+test('Ingresos: Editar prellena, envía sólo lo modificado, conserva y anexa comprobantes', async ({ page }) => {
+  const income = incomeRows[0];
+  let rows: Record<string, unknown>[] = [...incomeRows];
+  const patches: unknown[] = [];
+  const uploads: string[] = [];
+  const linked: string[] = [];
+  await page.route(`**/api/v1/works/${workId}/incomes`, async (route) => { await route.fulfill({ json: rows }); });
+  await page.route(`**/api/v1/incomes/${income.id}`, async (route) => {
+    if (route.request().method() === 'PATCH') {
+      const body = route.request().postDataJSON();
+      patches.push(body);
+      const updated = { ...income, ...body, amount: body.amount ?? income.amount };
+      rows = [updated, incomeRows[1]];
+      await route.fulfill({ json: updated });
+    } else {
+      await route.fulfill({ json: rows[0] });
+    }
+  });
+  await page.route('**/storage/v1/object/comprobantes/**', async (route) => {
+    uploads.push(decodeURIComponent(new URL(route.request().url()).pathname));
+    await route.fulfill({ status: uploads.length === 1 ? 500 : 200, json: uploads.length === 1 ? { message: 'Fallo simulado de subida' } : { Key: 'ok' } });
+  });
+  await page.route(`**/api/v1/incomes/${income.id}/receipts`, async (route) => {
+    const path = route.request().postDataJSON().path;
+    linked.push(path);
+    const current = rows[0] as typeof income;
+    const withReceipt = { ...current, receipts: [...current.receipts, { id: '79797979-7979-4979-8979-797979797979', path, kind: 'pdf', created_at: '2026-09-29T12:00:00Z' }] };
+    rows = [withReceipt, incomeRows[1]];
+    await route.fulfill({ json: withReceipt });
+  });
+  await login(page);
+  await page.goto(`/obras/${workId}/ingresos`);
+  // Editing also starts from the read-only detail.
+  await page.getByRole('button', { name: 'Ver ingreso I-00002' }).click();
+  await page.getByRole('dialog', { name: 'Ingreso I-00002' }).getByRole('button', { name: 'Editar' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  const form = page.getByRole('form', { name: 'Editar ingreso' });
+  await expect(form.getByRole('heading', { name: 'Editar ingreso I-00002' })).toBeVisible();
+  await expect(form.getByRole('note')).toContainText('ya está conciliado');
+  await expect(form.getByLabel('Fecha')).toHaveValue('2026-09-20');
+  await expect(form.getByLabel('Concepto')).toHaveValue('Estimación 1');
+  await expect(form.getByLabel('Importe')).toHaveValue('120000.005');
+  await expect(form).toContainText('Comprobantes actuales (se conservan)');
+  await expect(form).toContainText('transferencia.pdf');
+  const save = form.getByRole('button', { name: 'Guardar cambios' });
+  await expect(save).toBeDisabled();
+  await form.getByLabel('Concepto').fill('Estimación 1 corregida');
+  await form.getByLabel('Importe').fill('121500.50');
+  await form.getByLabel('Comprobantes del ingreso').setInputFiles({ name: 'complemento.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4') });
+  await save.click();
+  // The edit was applied; the failed file is retried alone without repeating the PATCH.
+  await expect(form.getByRole('alert')).toContainText('Los datos del ingreso I-00002 ya se guardaron');
+  await save.click();
+  await expect(page.getByRole('status').filter({ hasText: 'Ingreso I-00002 actualizado.' })).toBeVisible();
+  await expect(form).toHaveCount(0);
+  expect(patches).toEqual([{ concept: 'Estimación 1 corregida', amount: '121500.50' }]);
+  expect(uploads).toHaveLength(2);
+  expect(uploads.every((path) => path.includes(`/${workId}/${income.id}/`))).toBe(true);
+  expect(linked).toHaveLength(1);
+  const row = page.getByRole('table', { name: 'Ingresos de la obra' }).getByRole('row').filter({ hasText: 'I-00002' });
+  await expect(row).toContainText('Estimación 1 corregida');
+  await expect(row).toContainText('$121,500.50');
+  await expect(row).toContainText('transferencia.pdf');
+  await expect(row).toContainText('complemento.pdf');
+});
+
+test('Ingresos: Editar sin cambios no envía nada y Cancelar cierra el formulario', async ({ page }) => {
+  const requests: string[] = [];
+  page.on('request', (request) => { if (request.method() === 'PATCH') requests.push(request.url()); });
+  await page.route(`**/api/v1/works/${workId}/incomes`, async (route) => { await route.fulfill({ json: incomeRows }); });
+  await login(page);
+  await page.goto(`/obras/${workId}/ingresos`);
+  await page.getByRole('button', { name: 'Editar ingreso I-00001' }).click();
+  const form = page.getByRole('form', { name: 'Editar ingreso' });
+  await expect(form.getByRole('note')).toHaveCount(0);
+  await form.getByLabel('Concepto').fill('Anticipo');
+  await expect(form.getByRole('button', { name: 'Guardar cambios' })).toBeDisabled();
+  await form.getByLabel('Importe').fill('0');
+  await form.getByLabel('Concepto').fill('Anticipo 2');
+  await expect(form.getByRole('button', { name: 'Guardar cambios' })).toBeDisabled();
+  await form.getByRole('button', { name: 'Cancelar' }).click();
+  await expect(form).toHaveCount(0);
+  expect(requests).toEqual([]);
+});
+
+test('Validación: Ver y Editar junto a Conciliar; al guardar la lista refleja el cambio', async ({ page }) => {
+  const a = pendingWithReceipt('75757575-7575-4575-8575-757575757575', 'I-00004', '30000.0000');
+  let rows: Record<string, unknown>[] = [a, incomeRows[0]];
+  const patches: unknown[] = [];
+  await page.route(`**/api/v1/works/${workId}/incomes`, async (route) => { await route.fulfill({ json: rows }); });
+  await page.route(`**/api/v1/incomes/${a.id}`, async (route) => {
+    if (route.request().method() === 'PATCH') {
+      const body = route.request().postDataJSON();
+      patches.push(body);
+      const updated = { ...a, ...body };
+      rows = [updated, incomeRows[0]];
+      await route.fulfill({ json: updated });
+    } else {
+      await route.fulfill({ json: rows[0] });
+    }
+  });
+  await login(page);
+  await page.goto(`/obras/${workId}/validacion`);
+  await page.getByRole('radiogroup', { name: 'Qué validar' }).getByRole('radio', { name: 'Conciliar ingresos' }).click();
+  const pendingTable = page.getByRole('table', { name: 'Ingresos pendientes de conciliar' });
+  const row = pendingTable.getByRole('row').filter({ hasText: 'I-00004' });
+  await expect(row.getByRole('button', { name: 'Ver ingreso I-00004' })).toBeVisible();
+  await expect(row.getByRole('button', { name: 'Editar ingreso I-00004' })).toBeVisible();
+  await expect(row.getByRole('button', { name: 'Conciliar ingreso I-00004' })).toBeVisible();
+  const reconciledTable = page.getByRole('table', { name: 'Ingresos conciliados' });
+  await expect(reconciledTable.getByRole('button', { name: 'Ver ingreso I-00002' })).toBeVisible();
+  await expect(reconciledTable.getByRole('button', { name: 'Editar ingreso I-00002' })).toBeVisible();
+  await expect(reconciledTable.getByRole('button', { name: 'Revertir conciliación del ingreso I-00002' })).toBeVisible();
+
+  await row.getByRole('button', { name: 'Ver ingreso I-00004' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Ingreso I-00004' });
+  await expect(dialog.getByTestId('income-detail-amount')).toHaveText('$30,000.00');
+  await dialog.getByRole('button', { name: 'Cerrar' }).click();
+
+  await row.getByRole('button', { name: 'Editar ingreso I-00004' }).click();
+  const form = page.getByRole('form', { name: 'Editar ingreso' });
+  await expect(form.getByLabel('Concepto')).toHaveValue('Estimación I-00004');
+  await form.getByLabel('Concepto').fill('Estimación 3 revisada');
+  await form.getByLabel('Importe').fill('32000');
+  await form.getByLabel('Fecha').fill('2026-09-10');
+  await form.getByRole('button', { name: 'Guardar cambios' }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Ingreso I-00004 actualizado.' })).toBeVisible();
+  await expect(form).toHaveCount(0);
+  expect(patches).toEqual([{ received_on: '2026-09-10', concept: 'Estimación 3 revisada', amount: '32000' }]);
+  const refreshed = pendingTable.getByRole('row').filter({ hasText: 'I-00004' });
+  await expect(refreshed).toContainText('Estimación 3 revisada');
+  await expect(refreshed).toContainText('$32,000.00');
+  await expect(refreshed).toContainText('2026-09-10');
 });

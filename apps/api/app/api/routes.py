@@ -31,9 +31,15 @@ from app.models import (
     HealthResponse,
     ImportConfirm,
     ImportPreviewUpdate,
+    IncomeBatchReconcile,
     IncomeCreate,
+    IncomeReceiptCreate,
+    IncomeResponse,
+    IncomeStatusUpdate,
+    IncomeUpdate,
     JevChatRequest,
     JevChatResponse,
+    LegacyIncomeCreate,
     ReceiptExtractionResponse,
     ReceiptUpdate,
     SubcontractCreate,
@@ -59,31 +65,38 @@ from app.services.cfdi import extract_cfdi
 from app.services.neodata import NeodataError, parse_neodata_workbook
 from app.services.reports import build_excel_report, build_pdf_report
 from app.services.repository import (
+    attach_income_receipt,
     attach_receipt,
     cancel_expense,
     close_week,
     confirm_import,
     create_expense,
     create_income,
+    create_legacy_income,
     create_subcontract,
     create_subcontract_payment,
     create_work,
     dashboard,
     delete_work,
     get_expense,
+    get_income,
     get_work,
     list_expenses,
     list_incomes,
+    list_legacy_incomes,
     list_subcontracts,
     list_weekly_closes,
     list_work_expenses,
     list_works,
+    reconcile_incomes_batch,
     reopen_week,
     report_expenses,
     review_expense,
     store_import_preview,
     update_expense,
     update_import_preview,
+    update_income,
+    update_income_status,
     update_work,
     validate_expenses_batch,
     weekly_close_preview,
@@ -529,16 +542,88 @@ def get_incomes(
     user: CurrentUser,
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> list[dict[str, Any]]:
-    return list_incomes(settings, user, work_id)
+    return list_legacy_incomes(settings, user, work_id)
 
 
 @router.post("/incomes", status_code=status.HTTP_201_CREATED, tags=["cashflow"])
 def post_income(
+    payload: LegacyIncomeCreate,
+    user: AdminUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    return create_legacy_income(settings, user, payload)
+
+
+@router.get("/works/{work_id}/incomes", response_model=list[IncomeResponse], tags=["cashflow"])
+def get_work_incomes(
+    work_id: UUID,
+    user: CurrentUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> list[dict[str, Any]]:
+    return list_incomes(settings, user, work_id)
+
+
+@router.post(
+    "/works/{work_id}/incomes", response_model=IncomeResponse,
+    status_code=status.HTTP_201_CREATED, tags=["cashflow"],
+)
+def post_work_income(
+    work_id: UUID,
     payload: IncomeCreate,
     user: AdminUser,
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> dict[str, Any]:
-    return create_income(settings, user, payload)
+    return create_income(settings, user, work_id, payload)
+
+
+@router.get("/incomes/{income_id}", response_model=IncomeResponse, tags=["cashflow"])
+def get_income_detail(
+    income_id: UUID,
+    user: CurrentUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    return get_income(settings, user, income_id)
+
+
+@router.patch("/incomes/{income_id}", response_model=IncomeResponse, tags=["cashflow"])
+def patch_income(
+    income_id: UUID,
+    payload: IncomeUpdate,
+    user: AdminUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    """Edit date, concept or amount (admin). The state is changed only via /status."""
+    return update_income(settings, user, income_id, payload)
+
+
+@router.patch("/incomes/{income_id}/status", response_model=IncomeResponse, tags=["cashflow"])
+def patch_income_status(
+    income_id: UUID,
+    payload: IncomeStatusUpdate,
+    user: AdminUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    """Reconcile (needs a stored receipt) or revert to pending (needs a reason)."""
+    return update_income_status(settings, user, income_id, payload)
+
+
+@router.post("/incomes/reconcile-batch", tags=["cashflow"])
+def post_incomes_reconcile_batch(
+    payload: IncomeBatchReconcile,
+    user: AdminUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    return reconcile_incomes_batch(settings, user, payload)
+
+
+@router.post("/incomes/{income_id}/receipts", response_model=IncomeResponse, tags=["cashflow"])
+def post_income_receipt(
+    income_id: UUID,
+    payload: IncomeReceiptCreate,
+    user: AdminUser,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> dict[str, Any]:
+    return attach_income_receipt(settings, user, income_id, payload.path)
 
 
 @router.get("/subcontracts", tags=["subcontracts"])
