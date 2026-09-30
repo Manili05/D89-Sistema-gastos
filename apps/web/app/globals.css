@@ -649,3 +649,58 @@ button { cursor: pointer; }
   .subitem-panel:not([hidden]) { margin-left: 6px; padding-left: 8px; }
   .provider-spend { padding: 12px 14px 16px; }
 }
+
+/* Subcontratos (Cambio 9): detail, estimation form with live net and inline confirms. */
+.subcontract-detail { margin-bottom: 20px; }
+.subcontract-detail .panel-header h2 { margin-top: 4px; }
+.subcontract-detail .header-actions { flex-wrap: wrap; align-items: center; }
+.subcontract-metrics { margin: 16px 20px; }
+.subcontract-metrics .metric-card { min-height: 112px; box-shadow: none; }
+.estimation-form-wrap { margin: 0 20px 16px; padding: 16px; border: 1px solid var(--line); background: #fdfcfa; }
+.estimation-form { display: grid; gap: 12px; }
+.estimation-grid { margin: 0; padding: 0; border: 0; min-width: 0; display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(260px, 1fr); gap: 20px; align-items: start; }
+.estimation-inputs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 14px; }
+.estimation-inputs .full { grid-column: 1 / -1; }
+.estimation-inputs textarea { min-height: 64px; }
+.estimation-preview { margin: 0; padding: 14px 16px; display: grid; gap: 2px; border: 1px solid var(--line); background: var(--surface); font-variant-numeric: tabular-nums; }
+.estimation-preview div { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px solid #eee9e1; font-size: 12px; }
+.estimation-preview dt { color: var(--muted); }
+.estimation-preview dd { margin: 0; color: var(--ink); font-weight: 650; }
+.estimation-preview .net { margin-top: 4px; padding-top: 10px; border-top: 2px solid var(--navy); border-bottom: 0; font-size: 15px; }
+.estimation-preview .net dt, .estimation-preview .net dd { color: var(--navy); font-weight: 800; }
+.estimation-errors { margin: 0; padding-left: 30px; }
+.estimation-table { min-width: 1120px; }
+.estimation-table td { white-space: nowrap; }
+.estimation-table td small { white-space: normal; }
+.inline-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; max-width: 360px; font-size: 12px; white-space: normal; }
+.inline-confirm .btn { min-height: 34px; }
+.subcontract-danger { padding: 12px 20px 18px; border-top: 1px solid var(--line); }
+@media (max-width: 900px) {
+  .estimation-grid { grid-template-columns: 1fr; }
+  .subcontract-metrics { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 760px) {
+  .estimation-inputs { grid-template-columns: 1fr; }
+  .estimation-form-wrap { margin: 0 12px 12px; padding: 12px; }
+  .subcontract-metrics { margin: 12px; }
+  .estimation-table td { white-space: normal; }
+}
+.expense-table.subcontract-table { min-width: 0; }
+.subcontract-table td[data-label="Partida / subpartida"] { min-width: 180px; }
+@media (max-width: 760px) {
+  .subcontract-detail > .panel-header { flex-direction: column; align-items: flex-start; }
+  .subcontract-detail > .panel-header .header-actions { width: 100%; }
+}
+.payroll-actions { flex-wrap: wrap; justify-content: flex-end; align-items: end; }
+.payroll-range { margin: 0; padding: 0; border: 0; display: flex; gap: 8px; }
+.payroll-range label { display: grid; gap: 4px; color: var(--muted); font-size: 10px; font-weight: 750; text-transform: uppercase; letter-spacing: .06em; }
+.payroll-range input { min-height: 38px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 3px; color: var(--ink); background: white; }
+.subcontracts-header { flex-wrap: wrap; }
+@media (max-width: 760px) {
+  .subcontracts-header { flex-direction: column; align-items: stretch; }
+  .payroll-actions { width: 100%; justify-content: flex-start; }
+  .payroll-actions .btn { flex: 1 1 auto; }
+  .payroll-range { width: 100%; }
+  .payroll-range label { flex: 1; }
+  .payroll-range input { width: 100%; }
+}

@@ -9,6 +9,7 @@ import { PlusIcon } from '@/components/icons';
 import { PageHeader } from '@/components/page-header';
 import { type CategorySpend, type ItemSpend, type ProviderSpend, ProviderSpendChart, SpendBreakdown } from '@/components/spend-breakdown';
 import { StatusPill } from '@/components/status-pill';
+import { SubcontractPanel } from '@/components/subcontract-panel';
 import { CASHFLOW_COLORS, CashflowChart } from '@/components/cashflow-chart';
 import { ExpenseDetailView } from '@/components/expense-detail-view';
 import { IncomePanel } from '@/components/income-panel';
@@ -18,7 +19,7 @@ import { EditableExpense, WorkCatalog, WorkExpenseForm } from '@/components/work
 import { apiFetch, apiJson, getSupabaseBrowserClient } from '@/lib/auth';
 import { centsFromDecimal, displayCents } from '@/lib/money';
 
-type Tab = 'resumen' | 'gastos' | 'ingresos' | 'validacion' | 'presupuesto' | 'cierres' | 'configuracion';
+type Tab = 'resumen' | 'gastos' | 'ingresos' | 'subcontratos' | 'validacion' | 'presupuesto' | 'cierres' | 'configuracion';
 type Amount = string | number;
 type Work = {
   id: string; nombre: string; ubicacion: string | null; fecha_inicio: string | null;
@@ -67,7 +68,7 @@ const money = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN
 const currency = (value?: Amount) => value === undefined ? '—' : money.format(Number(value));
 
 const tabs: { id: Tab; label: string }[] = [
-  { id: 'resumen', label: 'Resumen' }, { id: 'gastos', label: 'Gastos' }, { id: 'ingresos', label: 'Ingresos' },
+  { id: 'resumen', label: 'Resumen' }, { id: 'gastos', label: 'Gastos' }, { id: 'ingresos', label: 'Ingresos' }, { id: 'subcontratos', label: 'Subcontratos' },
   { id: 'validacion', label: 'Validación' }, { id: 'presupuesto', label: 'Presupuesto' },
   { id: 'cierres', label: 'Cierres' }, { id: 'configuracion', label: 'Configuración' },
 ];
@@ -280,7 +281,7 @@ export function WorkWorkspace({ workId, tab }: { workId: string; tab: Tab }) {
     <PageHeader eyebrow="Gestión específica de obra" title={work?.nombre || 'Cargando obra…'} description={`${work?.ubicacion || 'Ubicación no registrada'} · ${work?.areas ?? '…'} áreas finales · ${work?.partidas ?? '…'} partidas`} actions={<><button className="btn secondary" onClick={() => void download('xlsx')}>Excel</button><button className="btn secondary" onClick={() => void download('pdf')}>PDF</button>{tab === 'gastos' && <button className="btn" onClick={() => { setEditing(undefined); setShowForm(true); }}><PlusIcon />Nuevo gasto</button>}</>} />
     <nav className="work-tabs" aria-label="Secciones de la obra">{visibleTabs.map((item) => <Link key={item.id} href={tabHref(workId, item.id)} className={tab === item.id ? 'active' : ''}>{item.label}</Link>)}</nav>
     {/* The period filter drives summary and expenses; income lists are shown in full. */}
-    {tab !== 'ingresos' && !(tab === 'validacion' && validationMode === 'ingresos') && <div className="period-toolbar"><label>Periodo<select value={period} onChange={(event) => setPeriod(event.target.value)}><option value="semana">Semana actual</option><option value="mes">Mes actual</option><option value="acumulado">Acumulado</option><option value="personalizado">Personalizado</option></select></label>{period === 'personalizado' && <><label>Desde<input type="date" value={customFrom} onChange={(event) => setCustomFrom(event.target.value)} /></label><label>Hasta<input type="date" value={customTo} onChange={(event) => setCustomTo(event.target.value)} /></label></>}</div>}
+    {tab !== 'ingresos' && tab !== 'subcontratos' && !(tab === 'validacion' && validationMode === 'ingresos') && <div className="period-toolbar"><label>Periodo<select value={period} onChange={(event) => setPeriod(event.target.value)}><option value="semana">Semana actual</option><option value="mes">Mes actual</option><option value="acumulado">Acumulado</option><option value="personalizado">Personalizado</option></select></label>{period === 'personalizado' && <><label>Desde<input type="date" value={customFrom} onChange={(event) => setCustomFrom(event.target.value)} /></label><label>Hasta<input type="date" value={customTo} onChange={(event) => setCustomTo(event.target.value)} /></label></>}</div>}
     {error && <p className="notice error" role="alert">{error}</p>}{message && <p className="notice success" role="status">{message}</p>}
 
     {tab === 'resumen' && <>
@@ -323,6 +324,7 @@ export function WorkWorkspace({ workId, tab }: { workId: string; tab: Tab }) {
     {tab === 'presupuesto' && <section className="panel"><div className="panel-header"><div><h2>Árbol presupuestal NEODATA</h2><p>Los niveles padre acumulan automáticamente sus descendientes</p></div></div><div className="budget-tree">{overview?.areas.map((area) => <div className={`budget-node level-${Math.min(area.nivel, 5)}`} key={area.id}><div><strong>{area.nombre}</strong><small>{area.seleccionable ? 'Nivel con conceptos' : 'Capítulo acumulador'}</small></div><span>{currency(area.budget)}</span><span>{currency(area.validated)}</span><span>{currency(area.committed)}</span><StatusPill tone={Number(area.execution_percent) > 100 ? 'red' : Number(area.execution_percent) >= 85 ? 'amber' : 'green'}>{Number(area.execution_percent).toFixed(1)}%</StatusPill></div>)}</div></section>}
 
     {tab === 'ingresos' && <IncomePanel workId={workId} canManage={Boolean(work?.permissions.can_manage)} />}
+    {tab === 'subcontratos' && <SubcontractPanel workId={workId} canManage={Boolean(work?.permissions.can_manage)} />}
     {tab === 'cierres' && <WeeklyClosePanel workId={workId} onChanged={() => void refresh()} />}
 
     {tab === 'configuracion' && work && <div className="work-config-grid"><section className="panel form-panel"><div className="panel-header"><div><h2>Datos generales</h2><p>Nombre, ubicación, calendario y estado</p></div></div>{work.permissions.can_manage ? <form onSubmit={saveWork}><div className="form-section"><div className="form-grid"><label className="field">Nombre<input name="name" defaultValue={work.nombre} required /></label><label className="field">Ubicación<input name="location" defaultValue={work.ubicacion || ''} /></label><label className="field">Fecha inicial<input name="start_date" type="date" defaultValue={work.fecha_inicio || ''} /></label><label className="field">Fecha final<input name="end_date" type="date" defaultValue={work.fecha_fin || ''} /></label><label className="field">Estado<select name="state" defaultValue={work.estado}><option value="activa">Activa</option><option value="pausada">Pausada</option><option value="cerrada">Cerrada</option></select></label></div></div><div className="form-section"><button className="btn" disabled={busy}>Guardar cambios</button></div></form> : <p className="empty-state">Sólo administración puede modificar estos datos.</p>}</section><section className="panel"><div className="panel-header"><div><h2>Proveedores de la obra</h2><p>{catalog?.suppliers.length || 0} disponibles para registrar gastos</p></div><Link className="btn secondary" href="/proveedores">Administrar</Link></div><div className="work-supplier-list">{catalog?.suppliers.map((supplier) => <Link key={supplier.id} href={`/proveedores/${supplier.id}` as Route}><span>{supplier.nombre}</span><span>Ver ficha →</span></Link>)}{!catalog?.suppliers.length ? <p className="empty-state">No hay proveedores asignados. Agrégalos desde el directorio.</p> : null}</div></section></div>}

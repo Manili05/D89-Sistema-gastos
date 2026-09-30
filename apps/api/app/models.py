@@ -1,6 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 from enum import StrEnum
+from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -422,18 +423,162 @@ class IncomeBatchReconcile(BaseModel):
     income_ids: list[UUID] = Field(min_length=1, max_length=100)
 
 
+Money = Annotated[Decimal, Field(ge=0, max_digits=16, decimal_places=2)]
+
+
+class SubcontractState(StrEnum):
+    ACTIVO = "activo"
+    FINIQUITADO = "finiquitado"
+    CANCELADO = "cancelado"
+
+
+class EstimationKind(StrEnum):
+    ANTICIPO = "anticipo"
+    AVANCE = "avance"
+    FINIQUITO = "finiquito"
+    # Returns retention (fondo de garantía) already withheld: net = gross, no adjustments.
+    DEVOLUCION_FONDO = "devolucion_fondo"
+
+
+class EstimationState(StrEnum):
+    BORRADOR = "borrador"
+    PAGADO = "pagado"
+
+
 class SubcontractCreate(BaseModel):
+    """Piecework contract (labor/services only; the category is always MANO DE OBRA)."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    supplier_id: UUID
+    expense_item_id: UUID
+    expense_subitem_id: UUID
+    description: str = Field(min_length=3, max_length=3000)
+    contracted_amount: Decimal = Field(gt=0, max_digits=16, decimal_places=2)
+    retention_percent: Decimal = Field(default=Decimal("0"), ge=0, le=100, max_digits=5,
+                                       decimal_places=2)
+
+
+class SubcontractUpdate(BaseModel):
+    """Partial edit. Supplier, classification and retention change only without estimations."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    supplier_id: UUID | None = None
+    expense_item_id: UUID | None = None
+    expense_subitem_id: UUID | None = None
+    description: str | None = Field(default=None, min_length=3, max_length=3000)
+    contracted_amount: Decimal | None = Field(default=None, gt=0, max_digits=16, decimal_places=2)
+    retention_percent: Decimal | None = Field(default=None, ge=0, le=100, max_digits=5,
+                                              decimal_places=2)
+    # Only "cancelado" can be set by hand; "finiquitado" follows a paid finiquito.
+    state: SubcontractState | None = None
+
+    @model_validator(mode="after")
+    def valid_change(self) -> "SubcontractUpdate":
+        if not any(getattr(self, name) is not None for name in self.model_fields_set):
+            raise ValueError("Indica al menos un campo a modificar")
+        if (self.expense_item_id is None) != (self.expense_subitem_id is None):
+            raise ValueError("Partida y subpartida se cambian juntas")
+        if self.state not in (None, SubcontractState.CANCELADO):
+            raise ValueError("Sólo se puede cancelar; el finiquito se registra con una estimación")
+        return self
+
+
+class EstimationInput(BaseModel):
+    """Amounts of one estimation. The retention is computed by the server from the
+    contract percentage; the net is always bruto + aditivas − deductivas − retención −
+    amortización."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    estimated_on: date
+    kind: EstimationKind
+    gross_amount: Decimal = Field(gt=0, max_digits=16, decimal_places=2)
+    advance_amortization: Money = Decimal("0")
+    additions: Money = Decimal("0")
+    deductions: Money = Decimal("0")
+    adjustment_notes: str | None = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def consistent(self) -> "EstimationInput":
+        if self.kind in (EstimationKind.ANTICIPO, EstimationKind.DEVOLUCION_FONDO) and any(
+            (self.advance_amortization, self.additions, self.deductions)
+        ):
+            raise ValueError(
+                "Un anticipo o una devolución de fondo no lleva amortización, aditivas ni "
+                "deductivas"
+            )
+        if (self.additions or self.deductions) and len(self.adjustment_notes or "") < 5:
+            raise ValueError("Justifica las aditivas o deductivas en notas (mínimo 5 caracteres)")
+        return self
+
+
+class EstimationCreate(EstimationInput):
+    pass
+
+
+class EstimationUpdate(EstimationInput):
+    """Full replacement of a draft estimation (paid ones are immutable)."""
+
+
+class EstimationStatusUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    state: Literal[EstimationState.PAGADO]
+
+
+class EstimationResponse(BaseModel):
+    id: UUID
+    subcontract_id: UUID
+    number: int
+    folio: str
+    estimated_on: date
+    kind: EstimationKind
+    gross_amount: Decimal
+    advance_amortization: Decimal
+    retention_amount: Decimal
+    additions: Decimal
+    deductions: Decimal
+    net_amount: Decimal
+    adjustment_notes: str | None
+    state: EstimationState
+    paid_at: datetime | None = None
+    paid_by: str | None = None
+    created_at: datetime
+    # Validated expense generated when the estimation was paid (financial bridge).
+    expense_id: UUID | None = None
+    expense_folio: str | None = None
+
+
+class SubcontractResponse(BaseModel):
+    id: UUID
     work_id: UUID
-    subcontractor: str = Field(min_length=2, max_length=250)
-    concept: str = Field(min_length=3, max_length=500)
-    scope: str | None = Field(default=None, max_length=3000)
-    contracted_amount: Decimal = Field(gt=0, decimal_places=4)
-
-
-class SubcontractPaymentCreate(BaseModel):
-    spent_on: date
-    amount: Decimal = Field(gt=0, decimal_places=4)
-    linked_expense_id: UUID | None = None
+    folio: str
+    supplier_id: UUID | None
+    supplier_name: str | None
+    expense_item_id: UUID | None
+    expense_item: str | None
+    expense_subitem_id: UUID | None
+    expense_subitem: str | None
+    category: str | None
+    description: str | None
+    contracted_amount: Decimal
+    retention_percent: Decimal
+    state: SubcontractState
+    created_at: datetime
+    # Running totals (paid estimations unless stated otherwise).
+    # Gross of avances and finiquito, drafts included (what counts against the contract).
+    estimated_gross: Decimal
+    paid_net: Decimal
+    retained: Decimal
+    # Retention returned (paid refunds) and still available to return (drafts count).
+    retention_returned: Decimal
+    retention_available: Decimal
+    advances_paid: Decimal
+    advance_pending_amortization: Decimal
+    remaining_to_estimate: Decimal
+    estimations: list[EstimationResponse] = Field(default_factory=list)
 
 
 class ApiMessage(BaseModel):

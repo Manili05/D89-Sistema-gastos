@@ -434,25 +434,90 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/subcontracts": {
+    "/api/v1/subcontracts/{subcontract_id}": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Get Subcontracts */
-        get: operations["get_subcontracts_api_v1_subcontracts_get"];
+        /** Get Subcontract Detail */
+        get: operations["get_subcontract_detail_api_v1_subcontracts__subcontract_id__get"];
         put?: never;
-        /** Post Subcontract */
-        post: operations["post_subcontract_api_v1_subcontracts_post"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Patch Subcontract
+         * @description Edit an active contract or cancel it; a paid finiquito settles it.
+         */
+        patch: operations["patch_subcontract_api_v1_subcontracts__subcontract_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/subcontracts/{subcontract_id}/estimations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Subcontract Estimations */
+        get: operations["get_subcontract_estimations_api_v1_subcontracts__subcontract_id__estimations_get"];
+        put?: never;
+        /**
+         * Post Subcontract Estimation
+         * @description Draft estimation; the server computes retention and net.
+         */
+        post: operations["post_subcontract_estimation_api_v1_subcontracts__subcontract_id__estimations_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/subcontracts/{subcontract_id}/payments": {
+    "/api/v1/subcontracts/{subcontract_id}/estimations/{estimation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Put Subcontract Estimation
+         * @description Replace a draft estimation; paid ones are immutable.
+         */
+        put: operations["put_subcontract_estimation_api_v1_subcontracts__subcontract_id__estimations__estimation_id__put"];
+        post?: never;
+        /** Delete Subcontract Estimation */
+        delete: operations["delete_subcontract_estimation_api_v1_subcontracts__subcontract_id__estimations__estimation_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/subcontracts/{subcontract_id}/estimations/{estimation_id}/receipt.pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Estimation Receipt
+         * @description Payment receipt (PDF) with the breakdown and a signature space for the worker.
+         */
+        get: operations["get_estimation_receipt_api_v1_subcontracts__subcontract_id__estimations__estimation_id__receipt_pdf_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/subcontracts/{subcontract_id}/estimations/{estimation_id}/status": {
         parameters: {
             query?: never;
             header?: never;
@@ -461,12 +526,15 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Post Subcontract Payment */
-        post: operations["post_subcontract_payment_api_v1_subcontracts__subcontract_id__payments_post"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Patch Subcontract Estimation Status
+         * @description borrador → pagado (irreversible); paying the finiquito settles the contract.
+         */
+        patch: operations["patch_subcontract_estimation_status_api_v1_subcontracts__subcontract_id__estimations__estimation_id__status_patch"];
         trace?: never;
     };
     "/api/v1/supplier-specialties": {
@@ -788,6 +856,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/works/{work_id}/subcontracts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Work Subcontracts */
+        get: operations["get_work_subcontracts_api_v1_works__work_id__subcontracts_get"];
+        put?: never;
+        /**
+         * Post Work Subcontract
+         * @description Piecework contract (labor/services; the category is always MANO DE OBRA).
+         */
+        post: operations["post_work_subcontract_api_v1_works__work_id__subcontracts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/works/{work_id}/subcontracts/payroll-export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export Subcontract Payroll
+         * @description Paid estimations by payment day (Mexico) as the weekly payroll Excel.
+         *
+         *     Without dates: the current week, Monday to Sunday.
+         */
+        get: operations["export_subcontract_payroll_api_v1_works__work_id__subcontracts_payroll_export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/works/{work_id}/weekly-closes": {
         parameters: {
             query?: never;
@@ -999,6 +1110,134 @@ export interface components {
              * Format: uuid
              */
             tool_call_log_id: string;
+        };
+        /** EstimationCreate */
+        EstimationCreate: {
+            /**
+             * Additions
+             * @default 0
+             */
+            additions: number | string;
+            /** Adjustment Notes */
+            adjustment_notes?: string | null;
+            /**
+             * Advance Amortization
+             * @default 0
+             */
+            advance_amortization: number | string;
+            /**
+             * Deductions
+             * @default 0
+             */
+            deductions: number | string;
+            /**
+             * Estimated On
+             * Format: date
+             */
+            estimated_on: string;
+            /** Gross Amount */
+            gross_amount: number | string;
+            kind: components["schemas"]["EstimationKind"];
+        };
+        /**
+         * EstimationKind
+         * @enum {string}
+         */
+        EstimationKind: "anticipo" | "avance" | "finiquito" | "devolucion_fondo";
+        /** EstimationResponse */
+        EstimationResponse: {
+            /** Additions */
+            additions: string;
+            /** Adjustment Notes */
+            adjustment_notes: string | null;
+            /** Advance Amortization */
+            advance_amortization: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Deductions */
+            deductions: string;
+            /**
+             * Estimated On
+             * Format: date
+             */
+            estimated_on: string;
+            /** Expense Folio */
+            expense_folio?: string | null;
+            /** Expense Id */
+            expense_id?: string | null;
+            /** Folio */
+            folio: string;
+            /** Gross Amount */
+            gross_amount: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            kind: components["schemas"]["EstimationKind"];
+            /** Net Amount */
+            net_amount: string;
+            /** Number */
+            number: number;
+            /** Paid At */
+            paid_at?: string | null;
+            /** Paid By */
+            paid_by?: string | null;
+            /** Retention Amount */
+            retention_amount: string;
+            state: components["schemas"]["EstimationState"];
+            /**
+             * Subcontract Id
+             * Format: uuid
+             */
+            subcontract_id: string;
+        };
+        /**
+         * EstimationState
+         * @enum {string}
+         */
+        EstimationState: "borrador" | "pagado";
+        /** EstimationStatusUpdate */
+        EstimationStatusUpdate: {
+            /**
+             * State
+             * @constant
+             */
+            state: "pagado";
+        };
+        /**
+         * EstimationUpdate
+         * @description Full replacement of a draft estimation (paid ones are immutable).
+         */
+        EstimationUpdate: {
+            /**
+             * Additions
+             * @default 0
+             */
+            additions: number | string;
+            /** Adjustment Notes */
+            adjustment_notes?: string | null;
+            /**
+             * Advance Amortization
+             * @default 0
+             */
+            advance_amortization: number | string;
+            /**
+             * Deductions
+             * @default 0
+             */
+            deductions: number | string;
+            /**
+             * Estimated On
+             * Format: date
+             */
+            estimated_on: string;
+            /** Gross Amount */
+            gross_amount: number | string;
+            kind: components["schemas"]["EstimationKind"];
         };
         /** ExpenseBatchReview */
         ExpenseBatchReview: {
@@ -1515,33 +1754,118 @@ export interface components {
          * @enum {string}
          */
         Role: "admin" | "operativo";
-        /** SubcontractCreate */
+        /**
+         * SubcontractCreate
+         * @description Piecework contract (labor/services only; the category is always MANO DE OBRA).
+         */
         SubcontractCreate: {
-            /** Concept */
-            concept: string;
             /** Contracted Amount */
             contracted_amount: number | string;
-            /** Scope */
-            scope?: string | null;
-            /** Subcontractor */
-            subcontractor: string;
+            /** Description */
+            description: string;
+            /**
+             * Expense Item Id
+             * Format: uuid
+             */
+            expense_item_id: string;
+            /**
+             * Expense Subitem Id
+             * Format: uuid
+             */
+            expense_subitem_id: string;
+            /**
+             * Retention Percent
+             * @default 0
+             */
+            retention_percent: number | string;
+            /**
+             * Supplier Id
+             * Format: uuid
+             */
+            supplier_id: string;
+        };
+        /** SubcontractResponse */
+        SubcontractResponse: {
+            /** Advance Pending Amortization */
+            advance_pending_amortization: string;
+            /** Advances Paid */
+            advances_paid: string;
+            /** Category */
+            category: string | null;
+            /** Contracted Amount */
+            contracted_amount: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Description */
+            description: string | null;
+            /** Estimated Gross */
+            estimated_gross: string;
+            /** Estimations */
+            estimations?: components["schemas"]["EstimationResponse"][];
+            /** Expense Item */
+            expense_item: string | null;
+            /** Expense Item Id */
+            expense_item_id: string | null;
+            /** Expense Subitem */
+            expense_subitem: string | null;
+            /** Expense Subitem Id */
+            expense_subitem_id: string | null;
+            /** Folio */
+            folio: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Paid Net */
+            paid_net: string;
+            /** Remaining To Estimate */
+            remaining_to_estimate: string;
+            /** Retained */
+            retained: string;
+            /** Retention Available */
+            retention_available: string;
+            /** Retention Percent */
+            retention_percent: string;
+            /** Retention Returned */
+            retention_returned: string;
+            state: components["schemas"]["SubcontractState"];
+            /** Supplier Id */
+            supplier_id: string | null;
+            /** Supplier Name */
+            supplier_name: string | null;
             /**
              * Work Id
              * Format: uuid
              */
             work_id: string;
         };
-        /** SubcontractPaymentCreate */
-        SubcontractPaymentCreate: {
-            /** Amount */
-            amount: number | string;
-            /** Linked Expense Id */
-            linked_expense_id?: string | null;
-            /**
-             * Spent On
-             * Format: date
-             */
-            spent_on: string;
+        /**
+         * SubcontractState
+         * @enum {string}
+         */
+        SubcontractState: "activo" | "finiquitado" | "cancelado";
+        /**
+         * SubcontractUpdate
+         * @description Partial edit. Supplier, classification and retention change only without estimations.
+         */
+        SubcontractUpdate: {
+            /** Contracted Amount */
+            contracted_amount?: number | string | null;
+            /** Description */
+            description?: string | null;
+            /** Expense Item Id */
+            expense_item_id?: string | null;
+            /** Expense Subitem Id */
+            expense_subitem_id?: string | null;
+            /** Retention Percent */
+            retention_percent?: number | string | null;
+            state?: components["schemas"]["SubcontractState"] | null;
+            /** Supplier Id */
+            supplier_id?: string | null;
         };
         /** SupplierArchive */
         SupplierArchive: {
@@ -2770,15 +3094,15 @@ export interface operations {
             };
         };
     };
-    get_subcontracts_api_v1_subcontracts_get: {
+    get_subcontract_detail_api_v1_subcontracts__subcontract_id__get: {
         parameters: {
-            query: {
-                work_id: string;
-            };
+            query?: never;
             header?: {
                 authorization?: string | null;
             };
-            path?: never;
+            path: {
+                subcontract_id: string;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -2789,9 +3113,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["SubcontractResponse"];
                 };
             };
             /** @description Validation Error */
@@ -2805,44 +3127,7 @@ export interface operations {
             };
         };
     };
-    post_subcontract_api_v1_subcontracts_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SubcontractCreate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    post_subcontract_payment_api_v1_subcontracts__subcontract_id__payments_post: {
+    patch_subcontract_api_v1_subcontracts__subcontract_id__patch: {
         parameters: {
             query?: never;
             header?: {
@@ -2855,7 +3140,77 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["SubcontractPaymentCreate"];
+                "application/json": components["schemas"]["SubcontractUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubcontractResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_subcontract_estimations_api_v1_subcontracts__subcontract_id__estimations_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                subcontract_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EstimationResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_subcontract_estimation_api_v1_subcontracts__subcontract_id__estimations_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                subcontract_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EstimationCreate"];
             };
         };
         responses: {
@@ -2865,9 +3220,149 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["EstimationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_subcontract_estimation_api_v1_subcontracts__subcontract_id__estimations__estimation_id__put: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                subcontract_id: string;
+                estimation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EstimationUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EstimationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_subcontract_estimation_api_v1_subcontracts__subcontract_id__estimations__estimation_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                subcontract_id: string;
+                estimation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_estimation_receipt_api_v1_subcontracts__subcontract_id__estimations__estimation_id__receipt_pdf_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                subcontract_id: string;
+                estimation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_subcontract_estimation_status_api_v1_subcontracts__subcontract_id__estimations__estimation_id__status_patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                subcontract_id: string;
+                estimation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EstimationStatusUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EstimationResponse"];
                 };
             };
             /** @description Validation Error */
@@ -3915,6 +4410,112 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_work_subcontracts_api_v1_works__work_id__subcontracts_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                work_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubcontractResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_work_subcontract_api_v1_works__work_id__subcontracts_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                work_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SubcontractCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubcontractResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_subcontract_payroll_api_v1_works__work_id__subcontracts_payroll_export_get: {
+        parameters: {
+            query?: {
+                from?: string | null;
+                to?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                work_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
